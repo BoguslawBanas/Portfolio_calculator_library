@@ -64,6 +64,7 @@ def get_data_from_dataframe(dataframe: pd.DataFrame) -> list:
 def fixed_rate_bond(amount_of_bonds: int, price_of_unit: float, coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
     dataframe=pd.DataFrame({
         'Money_invested': amount_of_bonds*price_of_unit,
+        'Profit_without_dividends': 0.0,
         'Profit': 0.0,
     }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
 
@@ -71,6 +72,7 @@ def fixed_rate_bond(amount_of_bonds: int, price_of_unit: float, coupon: float, s
     dataframe['Years_from_beginning']=np.floor(dataframe['Days_from_beginning']/365)
     dataframe['Profit']=(amount_of_bonds*price_of_unit*(1+coupon/100)**(1+dataframe['Years_from_beginning'])-amount_of_bonds*100*(1+coupon/100)**(dataframe['Years_from_beginning']))/365.0*(1-tax/100)
     dataframe['Profit']=round(dataframe['Profit'].cumsum(), 2)
+    dataframe['Profit_without_dividends']=dataframe['Profit']
 
     dataframe.drop(columns=['Days_from_beginning', 'Years_from_beginning'], inplace=True)
     return dataframe
@@ -78,13 +80,15 @@ def fixed_rate_bond(amount_of_bonds: int, price_of_unit: float, coupon: float, s
 def variable_rate_bond(amount_of_bonds: int, price_of_unit: float, interest_rate_df: pd.DataFrame, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
     dataframe=pd.DataFrame({
         'Money_invested': amount_of_bonds*price_of_unit,
-        'Profit': 0.0,
+        'Profit_without_dividends': 0.0,
+        'Profit': 0.0
     }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
 
     dataframe=dataframe.join(interest_rate_df)
 
     dataframe['Profit']=(amount_of_bonds*price_of_unit*(1+(dataframe['rate']+additional_coupon)/100)-(amount_of_bonds*price_of_unit))/365.0*(1-tax/100)
     dataframe['Profit']=round(dataframe['Profit'].cumsum(), 2)
+    dataframe['Profit_without_dividends']=dataframe['Profit']
 
     dataframe.drop(columns=['rate'], inplace=True)
 
@@ -95,6 +99,7 @@ def variable_rate_bond(amount_of_bonds: int, price_of_unit: float, interest_rate
 def inflationary_rate_bond(amount_of_bonds: int, price_of_unit: float, inflation_df: pd.DataFrame, initial_coupon: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
     dataframe=pd.DataFrame({
         'Money_invested': amount_of_bonds*price_of_unit,
+        'Profit_without_dividends': 0.0,
         'Profit': 0.0,
         'Daily_interest': 0.0
     }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
@@ -113,6 +118,7 @@ def inflationary_rate_bond(amount_of_bonds: int, price_of_unit: float, inflation
             
     dataframe.drop(columns=['Rate', 'Daily_interest'], inplace=True)
     dataframe['Profit']=round(dataframe['Profit']*(1-tax/100), 2)
+    dataframe['Profit_without_dividends']=dataframe['Profit']
 
     if is_swapped:
         dataframe.loc[dataframe.index.max(), 'Profit']+=amount_of_bonds*0.1

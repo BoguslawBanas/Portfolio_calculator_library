@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np
 import numpy_financial as npf
+from joblib import Parallel, delayed
 
 def create_dataframe_and_get_data(dataframe_file: str, isin_column_name: str) -> list:
     df=pd.read_csv(dataframe_file)
@@ -41,7 +43,20 @@ def calculate_irr(dataframe: pd.DataFrame, money_invested_column_name: str, reve
 
     dataframe['Irr']=0.0
     for i, _ in dataframe.iterrows():
+        print(i)
         dataframe.loc[i, 'Irr']=npf.irr(dataframe['Cashflow'][:i].to_list() + [dataframe['Total_money'][i]])
+
+    # irr=np.empty(len(dataframe['Cashflow'])+1)
+    # irr_cashflow_arr=np.empty(2)
+    # irr=np.empty(len(dataframe['Cashflow']))
+
+    # for i in range(len(dataframe['Cashflow'])):
+    #     print(i)
+    #     irr_cashflow_arr=np.resize(irr_cashflow_arr, i+2)
+    #     irr_cashflow_arr[i]=dataframe['Cashflow'].iloc[i]
+    #     irr_cashflow_arr[i+1]=dataframe['Total_money'].iloc[i]
+    #     irr[i]=npf.irr(irr_cashflow_arr)
+    # dataframe['Irr']=irr
 
     dataframe['Irr']=dataframe['Irr']+1.0
     dataframe['Irr']=[round((v**i-1)*100, 2) for i, v in enumerate(dataframe['Irr'])]
@@ -50,16 +65,23 @@ def calculate_irr(dataframe: pd.DataFrame, money_invested_column_name: str, reve
     return dataframe
 
 def resample_dataframe(dataframe: pd.DataFrame, resample_rule: str) -> pd.DataFrame:
+    timedelta_to_subtract: pd.DateOffset
     if resample_rule[0]=='D':
-        pass
+        timedelta_to_subtract=pd.DateOffset(days=1)
     elif resample_rule[0]=='W':
-        pass
+        timedelta_to_subtract=pd.DateOffset(weeks=1)
     elif resample_rule[0]=='M':
-        pass
+        timedelta_to_subtract=pd.DateOffset(months=1)
     elif resample_rule[0]=='Q':
-        pass
+        timedelta_to_subtract=pd.DateOffset(months=3)
     elif resample_rule[0]=='Y':
-        pass
+        timedelta_to_subtract=pd.DateOffset(years=1)
+
+    new_row=pd.DataFrame(
+        [{col: 0.0 for col in dataframe.columns}],
+        index=[pd.to_datetime(dataframe.index[0]-timedelta_to_subtract, format='%Y-%m-%d')]
+    )
+    dataframe=pd.concat([dataframe, new_row]).sort_index()
     return dataframe.resample(resample_rule).ffill()
 
 def merge_dataframes(dataframes: list) -> pd.DataFrame:
@@ -84,8 +106,8 @@ def calculate_money_earned_between_dates(dataframe: pd.DataFrame, start_date: da
 
     return end_date_profit-start_date_profit
 
-def calculate_money_earned_between_dates_column(dataframe: pd.DataFrame, days_between: int) -> pd.DataFrame:
+def calculate_money_earned_between_dates_column(dataframe: pd.DataFrame, days_between: int, offset: int=0) -> pd.DataFrame:
     dataframe['Daily_return']=0.0
     for idx, _ in dataframe.iterrows():
-        dataframe.loc[idx, 'Daily_return']=round(calculate_money_earned_between_dates(dataframe, idx-timedelta(days=days_between), idx)/days_between, 2)
+        dataframe.loc[idx, 'Daily_return']=round(calculate_money_earned_between_dates(dataframe, idx-pd.DateOffset(days=days_between+offset), idx-pd.DateOffset(days=offset))/days_between, 2)
     return dataframe

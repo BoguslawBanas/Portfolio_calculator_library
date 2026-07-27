@@ -21,8 +21,9 @@ def get_currency_exchange_rate_data(currency_from: str, cuurency_to: str, start_
 def tranform_dataframe_to_dataframe_with_isin(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
     with open(path_to_json_file, 'r') as f:
         j=json.load(f)
-        for i,row in dataframe.iterrows():
-            dataframe.loc[i, isin_column_name]=j[row[isin_column_name]]["ticker"]
+        for idx, row in dataframe.iterrows():
+            row[isin_column_name]=j[row[isin_column_name]]["ticker"]
+            # dataframe.loc[idx, isin_column_name]=j[row[isin_column_name]]["ticker"]
     return dataframe
 
 def get_data_from_isin(df: pd.DataFrame, currency_from: str, currency_to: str) -> pd.DataFrame:
@@ -33,7 +34,7 @@ def get_data_from_isin(df: pd.DataFrame, currency_from: str, currency_to: str) -
     return get_data_from_isin_with_currency_data(df, currency_data)
 
 def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.DataFrame) -> pd.DataFrame:
-    start_date=df.index[0]
+    start_date=pd.to_datetime(df.index[0], format='%Y-%m-%d')
     end_date=datetime.today().strftime('%Y-%m-%d')
 
     data=yf.download(df['isin'].iloc[0], start=start_date, end=end_date)
@@ -41,7 +42,7 @@ def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.Da
     data.drop(columns=['High', 'Low', 'Open', 'Volume'], inplace=True)
 
     all_days=pd.DataFrame(
-        index=pd.date_range(start=data.index.min(), end=datetime.today(), freq='D')
+        index=pd.date_range(start=start_date, end=end_date, freq='D')
     )
     data=all_days.join(data).ffill()
 
@@ -68,7 +69,8 @@ def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.Da
     data['Dividend']=data['Dividend'].cumsum()
 
     #check later if that is correct
-    data['Profit']=round((data['Close']-data['Avg_price'])/data['Avg_price']*data['Money_invested']-data['Money_invested']+data['Money_invested_after_penalty']+data['Dividend'], 2)
+    data['Profit_without_dividends']=round((data['Close']-data['Avg_price'])/data['Avg_price']*data['Money_invested']-data['Money_invested']+data['Money_invested_after_penalty'], 2)
+    data['Profit']=round(data['Profit_without_dividends']+data['Dividend'], 2)
     # data=data[:-1]
     data.drop(columns=['Close', 'Money_invested_after_penalty', 'Avg_price'], inplace=True)
     return data
