@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from portfolio_calculator_library import merge_dataframes
+from .portfolio_calculator_library import merge_dataframes
 
 def create_dataframe_and_get_data(dataframe_file: str) -> list:
     df=pd.read_csv(dataframe_file)
@@ -123,5 +123,3 @@ def inflationary_rate_bond(amount_of_bonds: int, price_of_unit: float, inflation
     if is_swapped:
         dataframe.loc[dataframe.index.max(), 'Profit']+=amount_of_bonds*0.1
     return dataframe
-
-# 619.06
