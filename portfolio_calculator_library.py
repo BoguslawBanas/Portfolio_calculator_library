@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import numpy_financial as npf
-from joblib import Parallel, delayed
 
 def create_dataframe_and_get_data(dataframe_file: str, isin_column_name: str) -> list:
     df=pd.read_csv(dataframe_file)
@@ -36,33 +35,43 @@ def get_data_from_dataframe(dataframe: pd.DataFrame, isin_column_name: str) -> l
 
     return list_of_dataframes
 
+def irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):
+    cashflows=np.asarray(cashflows, dtype=np.float64)
+    r=guess
+
+    for _ in range(max_iter):
+        t=np.arange(len(cashflows))
+        denom=(1+r)**t
+        f=np.sum(cashflows/denom)
+        fp=np.sum(-t*cashflows/((1+r)**(t+1)))
+
+        if abs(fp)<1e-15:
+            return np.nan
+        r_new=r-f/fp
+
+        if abs(r_new-r)<tol:
+            return r_new
+        r=r_new
+        
+    return r
+
 def calculate_irr(dataframe: pd.DataFrame, money_invested_column_name: str, revenue_column_name: str) -> pd.DataFrame:
     dataframe['Prev_money_inv']=dataframe[money_invested_column_name].shift(1).fillna(0.0)
     dataframe['Total_money']=round(dataframe[money_invested_column_name]+dataframe[revenue_column_name], 2) #test
     dataframe['Cashflow']=round(dataframe['Prev_money_inv']-dataframe[money_invested_column_name], 2)
 
-    dataframe['Irr']=0.0
-    for i, _ in dataframe.iterrows():
-        print(i)
-        dataframe.loc[i, 'Irr']=npf.irr(dataframe['Cashflow'][:i].to_list() + [dataframe['Total_money'][i]])
+    irr=np.full(len(dataframe['Cashflow']), np.nan)
+    guess=0.1
+    irr[0]=0.0
 
-    # irr=np.empty(len(dataframe['Cashflow'])+1)
-    # irr_cashflow_arr=np.empty(2)
-    # irr=np.empty(len(dataframe['Cashflow']))
+    for i in range(len(dataframe['Cashflow'])):
+        guess=irr_newton(dataframe['Cashflow'].iloc[:i+1].to_list() + [dataframe['Total_money'].iloc[i]], guess=guess)
+        irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
+        if np.isnan(guess):
+            guess=0.1
 
-    # for i in range(len(dataframe['Cashflow'])):
-    #     print(i)
-    #     irr_cashflow_arr=np.resize(irr_cashflow_arr, i+2)
-    #     irr_cashflow_arr[i]=dataframe['Cashflow'].iloc[i]
-    #     irr_cashflow_arr[i+1]=dataframe['Total_money'].iloc[i]
-    #     irr[i]=npf.irr(irr_cashflow_arr)
-    # dataframe['Irr']=irr
-
-    dataframe['Irr']=dataframe['Irr']+1.0
-    dataframe['Irr']=[round((v**i-1)*100, 2) for i, v in enumerate(dataframe['Irr'])]
-
-    dataframe.drop(columns=['Prev_money_inv', 'Cashflow'], inplace=True)
-    return dataframe
+    dataframe['Irr']=irr
+    return dataframe.drop(columns=['Prev_money_inv', 'Cashflow'])
 
 def resample_dataframe(dataframe: pd.DataFrame, resample_rule: str) -> pd.DataFrame:
     timedelta_to_subtract: pd.DateOffset
@@ -106,8 +115,10 @@ def calculate_money_earned_between_dates(dataframe: pd.DataFrame, start_date: da
 
     return end_date_profit-start_date_profit
 
-def calculate_money_earned_between_dates_column(dataframe: pd.DataFrame, days_between: int, offset: int=0) -> pd.DataFrame:
+def calculate_money_earned_between_dates_column(dataframe: pd.DataFrame, days_between: int=0, offset: int=0) -> pd.DataFrame:
     dataframe['Daily_return']=0.0
+    if days_between==0:
+        days_between=(dataframe.index[-1]-dataframe.index[0]).days
     for idx, _ in dataframe.iterrows():
         dataframe.loc[idx, 'Daily_return']=round(calculate_money_earned_between_dates(dataframe, idx-pd.DateOffset(days=days_between+offset), idx-pd.DateOffset(days=offset))/days_between, 2)
     return dataframe

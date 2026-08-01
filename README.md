@@ -69,7 +69,6 @@ portfolio_library/
 ├── bonds_library.py
 ├── stock_library.py
 ├── portfolio_library.py
-└── examples/
 ```
 
 ## Instalacja
