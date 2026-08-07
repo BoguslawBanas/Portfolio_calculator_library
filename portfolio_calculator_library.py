@@ -1,7 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import numpy as np
-import numpy_financial as npf
 
 def create_dataframe_and_get_data(dataframe_file: str, isin_column_name: str) -> list:
     df=pd.read_csv(dataframe_file)
@@ -92,6 +91,9 @@ def resample_dataframe(dataframe: pd.DataFrame, resample_rule: str) -> pd.DataFr
     )
     dataframe=pd.concat([dataframe, new_row]).sort_index()
     return dataframe.resample(resample_rule).ffill()
+
+def recalculate_dataframe_to_different_currency() -> pd.DataFrame:
+    pass
 
 def merge_dataframes(dataframes: list) -> pd.DataFrame:
     return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()

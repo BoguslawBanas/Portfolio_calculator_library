@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from .portfolio_calculator_library import merge_dataframes
+from portfolio_calculator_library import merge_dataframes
 
 def create_dataframe_and_get_data(dataframe_file: str) -> list:
     df=pd.read_csv(dataframe_file)

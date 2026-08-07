@@ -1,23 +1,15 @@
 import yfinance as yf
-import pandas as pd 
-import json
+import pandas as pd
 from datetime import datetime
 from currency_calculator_library import get_currency_exchange_rate_data
 
-def tranform_dataframe_to_dataframe_with_isin(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
-    with open(path_to_json_file, 'r') as f:
-        j=json.load(f)
-        for _, row in dataframe.iterrows():
-            row[isin_column_name]=j[row[isin_column_name]]["ticker"]
-    return dataframe
-
-def get_data_from_isin(df: pd.DataFrame, currency_from: str, currency_to: str, ticker_column_name: str) -> pd.DataFrame:
+def get_data_from_ticker(df: pd.DataFrame, currency_from: str, currency_to: str, ticker_column_name: str) -> pd.DataFrame:
     start_date=df.index[0]
     currency_data=get_currency_exchange_rate_data(currency_from, currency_to, start_date)
 
-    return get_data_from_isin_with_currency_data(df, currency_data, ticker_column_name)
+    return get_data_from_ticker_with_currency_data(df, currency_data, ticker_column_name)
 
-def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.DataFrame, ticker_column_name: str) -> pd.DataFrame:
+def get_data_from_ticker_with_currency_data(df: pd.DataFrame, currency_data: pd.DataFrame, ticker_column_name: str) -> pd.DataFrame:
     start_date=df.index[0]
 
     data=yf.download(df[ticker_column_name].iloc[0], start=start_date, end=datetime.today()+pd.DateOffset(days=1))
@@ -34,7 +26,7 @@ def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.Da
     data['Money_invested_after_penalty']=0.0
     data['Avg_price']=0.0
     data['Dividend']=0.0
-    
+
     for idx, rows in df.iterrows():
         if rows['state']=='buy':
             data.loc[idx, 'Money_invested']=round(rows['money_invested'], 2)
@@ -58,10 +50,3 @@ def get_data_from_isin_with_currency_data(df: pd.DataFrame, currency_data: pd.Da
     data['Profit']=round(data['Profit_without_dividends']+data['Dividend'], 2)
     data.drop(columns=['Close', 'Money_invested_after_penalty', 'Avg_price'], inplace=True)
     return data
-
-#only works if all rows has the same ticker
-def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
-    with open(path_to_json_file, "r") as f:
-        j=json.load(f)
-        currency=j[dataframe[isin_column_name].iloc[0]]['currency']
-    return currency
