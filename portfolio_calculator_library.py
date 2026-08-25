@@ -1,36 +1,39 @@
+from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import numpy as np
 
-def create_dataframe_and_get_data(dataframe_file: str, isin_column_name: str) -> list:
-    df=pd.read_csv(dataframe_file)
+def create_dataframe_and_get_data_dir(dataframe_directories: list) -> list:
+    known_filenames=['buy.csv', 'sell.csv', 'swap.csv', 'swap_tax.csv', 'sell_tax.csv', 'dividend.csv', 'dividend_tax.csv']
 
-    dataframes=dict()
-    for _, row in df.iterrows():
-        if dataframes.get(row[isin_column_name]) is None:
-            dataframes[row[isin_column_name]]=pd.DataFrame()
-        dataframes[row[isin_column_name]]=pd.concat([dataframes[row[isin_column_name]], row], axis=1)
+    combined_dataframes=list()
+    for directory in dataframe_directories:
+        dataframes=list()
+        for filename in known_filenames:
+            file_path=Path(directory)/filename
+            if not file_path.is_file():
+                continue
+            df=pd.read_csv(file_path)
+            df['state']=file_path.stem
+            dataframes.append(df)
+        non_empty = [df for df in dataframes if not df.empty and not df.isna().all(axis=None)]
+        combined_dataframes.append(pd.concat(non_empty, ignore_index=True))
 
-    list_of_dataframes=list(dataframes.values())
-    for i in range(len(list_of_dataframes)):
-        list_of_dataframes[i]=list_of_dataframes[i].transpose()
-        list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i]['date'], format='%Y-%m-%d') #test
-        list_of_dataframes[i].drop(columns=['date'], inplace=True)
+    return combined_dataframes
 
-    return list_of_dataframes
+def create_dataframe_and_get_data(dataframes: list) -> list:
+    dataframes_dict=dict()
+    for df in dataframes:
+        for _, row in df.iterrows():
+            if dataframes_dict.get(row['isin']) is None:
+                dataframes_dict[row['isin']]=pd.DataFrame()
+            dataframes_dict[row['isin']]=pd.concat([dataframes_dict[row['isin']], row], axis=1)
 
-def get_data_from_dataframe(dataframe: pd.DataFrame, isin_column_name: str) -> list:
-    dataframes=dict()
-    for _, row in dataframe.iterrows():
-        if dataframes.get(row[isin_column_name]) is None:
-            dataframes[row[isin_column_name]]=pd.DataFrame()
-        dataframes[row[isin_column_name]]=pd.concat([dataframes[row[isin_column_name]], row], axis=1)
-
-    list_of_dataframes=list(dataframes.values())
-    for i in range(len(list_of_dataframes)):
-        list_of_dataframes[i]=list_of_dataframes[i].transpose()
-        list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i]['date'], format='%Y-%m-%d') #test
-        list_of_dataframes[i].drop(columns=['date'], inplace=True)
+        list_of_dataframes=list(dataframes_dict.values())
+        for i in range(len(list_of_dataframes)):
+            list_of_dataframes[i]=list_of_dataframes[i].transpose()
+            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i]['date'], format='%Y-%m-%d') #test
+            list_of_dataframes[i].drop(columns=['date'], inplace=True)
 
     return list_of_dataframes
 
