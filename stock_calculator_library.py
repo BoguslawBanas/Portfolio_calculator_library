@@ -21,7 +21,12 @@ class Stock:
     # The column that holds the yfinance-recognizable ticker symbol. Named 'isin' to match
     # Portfolio.ISIN_COLUMN in test.py: that class's _replace_isin_with_ticker overwrites the
     # isin column in place with the ticker, rather than adding a separate column.
+    MONEY_INVESTED_COLUMN='Money_invested'
+    PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
+    PROFIT_COLUMN='Profit'
+    DIVIDEND_COLUMN='Dividend'
     TICKER_COLUMN='isin'
+    SOURCE_TYPE_COLUMN='type'
 
     def __init__(self, dataframe: pd.DataFrame, stock_data: str, currency_to: str):
         """dataframe: one per-instrument transactions dataframe (e.g. one entry of
@@ -79,6 +84,8 @@ class Stock:
         data=all_days.join(data).ffill()
         data['Close']=data['Close']*self.currency.data['Close']
 
+        print(data)
+
         data['Money_invested']=0.0
         data['Avg_price']=0.0
         data['Dividend']=0.0
@@ -86,9 +93,9 @@ class Stock:
 
         for idx, rows in self.dataframe.iterrows():
             if rows['state']=='buy':
-                data.loc[idx, 'Money_invested']=round(rows['money_invested'], 2)
+                data.loc[idx, 'Money_invested']=round(rows['Money_invested'], 2)
                 data.loc[idx, 'Units']=round(rows['amount_of_units'], 4)
-                data.loc[idx, 'Avg_price']=rows['money_invested']*rows['price_of_unit']*self.currency.data.loc[idx, 'Close']*(1+rows['penalty'])
+                data.loc[idx, 'Avg_price']=rows['Money_invested']*rows['price_of_unit']*self.currency.data.loc[idx, 'Close']*(1+rows['penalty'])
             elif rows['state'] in ('sell', 'sell_tax', 'swap', 'swap_tax'):
                 pass
             elif rows['state']=='dividend':
