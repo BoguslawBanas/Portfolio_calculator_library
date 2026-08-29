@@ -13,6 +13,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 from .stock_calculator_library import Stock
+from .bonds_calculator_library import Bonds
 
 
 class Portfolio:
@@ -60,6 +61,8 @@ class Portfolio:
         for df in self.dataframes:
             if df['type'].iloc[0]=='stock':
                 dataframes_tmp.append(Stock(df, tickers_json, 'PLN'))
+            elif df['type'].iloc[0]=='bonds':
+                dataframes_tmp.append(Bonds(df))
 
         self.data=self.merge(dataframes_tmp)
 
