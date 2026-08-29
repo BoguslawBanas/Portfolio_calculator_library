@@ -10,6 +10,7 @@ Uses a plain (non-relative) import of currency_calculator_library, same assumpti
 makes: run as a standalone script from the repo root rather than as part of a package.
 """
 
+import os
 import json
 from datetime import datetime
 import pandas as pd
@@ -18,28 +19,34 @@ from .currency_calculator_library import Currency
 
 
 class Stock:
-    # The column that holds the yfinance-recognizable ticker symbol. Named 'isin' to match
-    # Portfolio.ISIN_COLUMN in test.py: that class's _replace_isin_with_ticker overwrites the
-    # isin column in place with the ticker, rather than adding a separate column.
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
     TICKER_COLUMN='isin'
-    SOURCE_TYPE_COLUMN='type'
+    SOURCE_TYPE_COLUMN='state'
 
-    def __init__(self, dataframe: pd.DataFrame, stock_data: str, currency_to: str):
-        """dataframe: one per-instrument transactions dataframe (e.g. one entry of
-        Portfolio.dataframes from test.py) whose TICKER_COLUMN already holds a
-        yfinance-recognizable ticker symbol — see transform_dataframe_to_dataframe_with_ticker.
-        currency_to: the base currency to convert Money_invested/Profit into (the instrument's
-        own currency is looked up from stock_data, and both feed a Currency instance)."""
-        self.dataframe=dataframe
-        print(self.dataframe)
+    def __init__(self, directory_path: str, stock_data: str, currency_to: str):
+        self.total_money_invested=0.0
+        self.distribution_by_ticker=dict()
+        self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
-        currency_from=self.tickers.get(self.dataframe[self.TICKER_COLUMN].iloc[0])['currency']
-        self.currency=Currency(currency_from, currency_to, self.dataframe.index[0])
-        self._replace_isin_with_ticker()
+
+        for idx, row in self.dataframe.iterrows():
+            if row['state']=='buy':
+                self.total_money_invested+=row[self.MONEY_INVESTED_COLUMN]
+
+        dataframes=self._split_by_isin(self.dataframe)
+        dataframes_2=list()
+
+        for df in dataframes:
+            self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]=0.0
+            for idx, row in df.iterrows():
+                if row['state']=='buy':
+                    self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]+=(row[self.MONEY_INVESTED_COLUMN]/self.total_money_invested)*100.0
+            dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to))
+
+        self.dataframe=self.merge(dataframes_2)
 
     @staticmethod
     def transform_dataframe_to_dataframe_with_ticker(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
@@ -68,41 +75,76 @@ class Stock:
         return money_inv
 
     @staticmethod
+    def merge(dataframes: list) -> pd.DataFrame:
+        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
+        Equivalent of merge_dataframes(dataframes)."""
+        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
+
+    @staticmethod
     def _load_tickers_json(tickers_json: str) -> dict:
         with open(tickers_json, 'r') as f:
             return json.load(f)
 
-    def _replace_isin_with_ticker(self):
+    @classmethod
+    def _split_by_isin(cls, dataframe: pd.DataFrame) -> list:
+        dataframes=dict()
+        for _, row in dataframe.iterrows():
+            if dataframes.get(row[cls.TICKER_COLUMN]) is None:
+                dataframes[row[cls.TICKER_COLUMN]]=pd.DataFrame()
+            dataframes[row[cls.TICKER_COLUMN]]=pd.concat([dataframes[row[cls.TICKER_COLUMN]], row], axis=1)
+
+        list_of_dataframes=list(dataframes.values())
+        for i in range(len(list_of_dataframes)):
+            list_of_dataframes[i]=list_of_dataframes[i].transpose()
+            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i]['date'], format='%Y-%m-%d')
+            list_of_dataframes[i].drop(columns=['date'], inplace=True)
+
+        return list_of_dataframes
+
+    def _load_sources(self, directory: str) -> pd.DataFrame:
+        dataframes=list()
+        for filename in sorted(os.listdir(directory)):
+            if not filename.endswith('.csv'):
+                continue
+            state_value=os.path.splitext(filename)[0]
+            df=pd.read_csv(os.path.join(directory, filename))
+            df['state']=state_value
+            dataframes.append(df)
+        return pd.concat(dataframes)
+
+    def _replace_isin_with_ticker(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Swaps ISIN_COLUMN's values for the yfinance ticker symbol from self.tickers, in place on
         every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
-        self.dataframe[self.TICKER_COLUMN]=self.dataframe[self.TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
+        dataframe[self.TICKER_COLUMN]=dataframe[self.TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
+        return dataframe
 
-    def _compute_data(self) -> pd.DataFrame:
-        start_date=self.dataframe.index[0]
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str) -> pd.DataFrame:
+        start_date=dataframe.index[0]
+        ticker_name=self.tickers.get(dataframe[self.TICKER_COLUMN].iloc[0])['ticker']
 
-        ticker=yf.Ticker(self.dataframe[self.TICKER_COLUMN].iloc[0])
-        data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
-        data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
-        data.index=data.index.tz_localize(None).normalize()
+        currency=Currency(currency_from, currency_to, start_date)
+
+        ticker=yf.Ticker(ticker_name)
+        ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
+        ticker_data.index=ticker_data.index.tz_localize(None).normalize()
 
         all_days=pd.DataFrame(
             index=pd.date_range(start=start_date, end=datetime.today(), freq='D').tz_localize(None).normalize()
         )
-        data=all_days.join(data).ffill()
-        data['Close']=data['Close']*self.currency.data['Close']
-
-        print(data)
+        data=all_days.join(ticker_data).ffill()
+        data['Close']=data['Close']*currency.data['Close']
 
         data['Money_invested']=0.0
         data['Avg_price']=0.0
         data['Dividend']=0.0
         data['Units']=0.0
 
-        for idx, rows in self.dataframe.iterrows():
+        for idx, rows in dataframe.iterrows():
             if rows['state']=='buy':
                 data.loc[idx, 'Money_invested']=round(rows['Money_invested'], 2)
                 data.loc[idx, 'Units']=round(rows['amount_of_units'], 4)
-                data.loc[idx, 'Avg_price']=rows['Money_invested']*rows['price_of_unit']*self.currency.data.loc[idx, 'Close']*(1+rows['penalty'])
+                data.loc[idx, 'Avg_price']=rows['Money_invested']*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
             elif rows['state'] in ('sell', 'sell_tax', 'swap', 'swap_tax'):
                 pass
             elif rows['state']=='dividend':
