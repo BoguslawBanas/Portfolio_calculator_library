@@ -17,8 +17,6 @@ from .bonds_calculator_library import Bonds
 
 
 class Portfolio:
-    # Per the shared DataFrame contract every asset-type calculator normalizes to
-    # (see CLAUDE.md): Money_invested, Profit_without_dividends, Profit.
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
@@ -26,7 +24,7 @@ class Portfolio:
     ISIN_COLUMN='isin'
     SOURCE_TYPE_COLUMN='type'
 
-    def __init__(self, sources: dict, tickers_json: str=None):
+    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD'):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
         'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
@@ -43,17 +41,29 @@ class Portfolio:
         When given, get_currency()/get_dataframe_currency() become available."""
         self.distribution_by_directory=dict()
         self.distribution_by_ticker=dict()
+        self.total_invested_money=0.0
         portfolio_list=list()
 
         for dir, type in sources.items():
             if type=='stock':
-                portfolio_list.append(Stock())
+                stock=Stock(dir, tickers_json, currency)
+                self.distribution_by_directory[dir]=stock.total_money_invested
+                self.total_invested_money+=stock.total_money_invested
+                for key, value in stock.distribution_by_ticker.items():
+                    self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
+                portfolio_list.append(stock)
             elif type=='bonds':
-                portfolio_list.append(Bonds())
+                portfolio_list.append(Bonds(dir))
             elif type=='crypto':
                 pass
             elif type=='commodities':
                 pass
+
+        for key, value in self.distribution_by_directory.items():
+            self.distribution_by_directory[key]=100.0*value/self.total_invested_money
+
+        for key, value in self.distribution_by_ticker.items():
+            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money
 
         # self.dataframes=self._load_sources(sources)
         # self.total_money_invested=0.0
@@ -80,19 +90,6 @@ class Portfolio:
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
         return cls({dataframe_file: source_type}, tickers_json)
-
-    def _calculate_distribution_by_directory(self, source_directories: dict):
-        money_invested=0.0
-        for dir, type in source_directories.items():
-            # df=pd.read_csv(dir+'buy.csv')
-            if type=='stocks':
-                pass
-            elif type=='bonds':
-                pass
-            elif type=='crypto':
-                pass
-            elif type=='commodities':
-                pass
 
     def _replace_isin_with_ticker(self):
         """Swaps ISIN_COLUMN's values for the yfinance ticker symbol from self.tickers, in place on
