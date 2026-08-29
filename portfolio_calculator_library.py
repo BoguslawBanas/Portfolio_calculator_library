@@ -13,6 +13,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 from .stock_calculator_library import Stock
+from .bonds_calculator_library import Bonds
 
 
 class Portfolio:
@@ -41,27 +42,39 @@ class Portfolio:
         mapping each ISIN to {"ticker": <yfinance symbol>, "currency": <instrument currency>}.
         When given, get_currency()/get_dataframe_currency() become available."""
         self.distribution_by_directory=dict()
-        self.dataframes=self._load_sources(sources)
         self.distribution_by_ticker=dict()
-        self.total_money_invested=0.0
-        for dataframe in self.dataframes:
-            ticker=dataframe[self.ISIN_COLUMN].iloc[0]
-            self.distribution_by_ticker[ticker]=dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]
-            self.total_money_invested+=self.distribution_by_ticker[ticker]
+        portfolio_list=list()
 
-        for dataframe in self.dataframes:
-            ticker=dataframe[self.ISIN_COLUMN].iloc[0]
-            self.distribution_by_ticker[ticker]=round(100.0*dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]/self.total_money_invested, 2)
+        for dir, type in sources.items():
+            if type=='stock':
+                portfolio_list.append(Stock())
+            elif type=='bonds':
+                portfolio_list.append(Bonds())
+            elif type=='crypto':
+                pass
+            elif type=='commodities':
+                pass
 
-        for x in self.distribution_by_directory:
-            self.distribution_by_directory[x]=round(100.0*self.distribution_by_directory[x]/self.total_money_invested, 2)
+        # self.dataframes=self._load_sources(sources)
+        # self.total_money_invested=0.0
+        # for dataframe in self.dataframes:
+        #     ticker=dataframe[self.ISIN_COLUMN].iloc[0]
+        #     self.distribution_by_ticker[ticker]=dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]
+        #     self.total_money_invested+=self.distribution_by_ticker[ticker]
 
-        dataframes_tmp=list()
-        for df in self.dataframes:
-            if df['type'].iloc[0]=='stock':
-                dataframes_tmp.append(Stock(df, tickers_json, 'PLN'))
+        # for dataframe in self.dataframes:
+        #     ticker=dataframe[self.ISIN_COLUMN].iloc[0]
+        #     self.distribution_by_ticker[ticker]=round(100.0*dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]/self.total_money_invested, 2)
 
-        self.data=self.merge(dataframes_tmp)
+        # for x in self.distribution_by_directory:
+        #     self.distribution_by_directory[x]=round(100.0*self.distribution_by_directory[x]/self.total_money_invested, 2)
+
+        # dataframes_tmp=list()
+        # for df in self.dataframes:
+        #     if df['type'].iloc[0]=='stock':
+        #         dataframes_tmp.append(Stock(df, tickers_json, 'PLN'))
+
+        # self.data=self.merge(dataframes_tmp)
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None) -> 'Portfolio':

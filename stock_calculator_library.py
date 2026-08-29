@@ -35,6 +35,7 @@ class Stock:
         currency_to: the base currency to convert Money_invested/Profit into (the instrument's
         own currency is looked up from stock_data, and both feed a Currency instance)."""
         self.dataframe=dataframe
+        print(self.dataframe)
         self.tickers=self._load_tickers_json(stock_data)
         currency_from=self.tickers.get(self.dataframe[self.TICKER_COLUMN].iloc[0])['currency']
         self.currency=Currency(currency_from, currency_to, self.dataframe.index[0])
