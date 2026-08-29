@@ -81,6 +81,19 @@ class Portfolio:
         """Convenience alias — the constructor already accepts a single prepared CSV."""
         return cls({dataframe_file: source_type}, tickers_json)
 
+    def _calculate_distribution_by_directory(self, source_directories: dict):
+        money_invested=0.0
+        for dir, type in source_directories.items():
+            # df=pd.read_csv(dir+'buy.csv')
+            if type=='stocks':
+                pass
+            elif type=='bonds':
+                pass
+            elif type=='crypto':
+                pass
+            elif type=='commodities':
+                pass
+
     def _replace_isin_with_ticker(self):
         """Swaps ISIN_COLUMN's values for the yfinance ticker symbol from self.tickers, in place on
         every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
@@ -136,9 +149,10 @@ class Portfolio:
             state_value=os.path.splitext(filename)[0]
             df=pd.read_csv(os.path.join(directory, filename))
             df['state']=state_value
-            if state_value=='buy':
-                money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
-                self.distribution_by_directory[directory]=money_invested
+            # print(df) #remove
+            # if state_value=='buy':
+            #     money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
+            #     self.distribution_by_directory[directory]=money_invested
             dataframes.append(df)
         return dataframes
 
