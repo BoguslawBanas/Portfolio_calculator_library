@@ -39,7 +39,6 @@ class Stock:
         currency_from=self.tickers.get(self.dataframe[self.TICKER_COLUMN].iloc[0])['currency']
         self.currency=Currency(currency_from, currency_to, self.dataframe.index[0])
         self._replace_isin_with_ticker()
-        self.data=self._compute_data()
 
     @staticmethod
     def transform_dataframe_to_dataframe_with_ticker(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
@@ -59,6 +58,13 @@ class Stock:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']
         return currency
+
+    def calculate_total_money_invested(self) -> float:
+        money_inv=0.0
+        for idx, row in self.dataframe.iterrows():
+            if row['state']=='buy':
+                money_inv+=row[self.MONEY_INVESTED_COLUMN]
+        return money_inv
 
     @staticmethod
     def _load_tickers_json(tickers_json: str) -> dict:
