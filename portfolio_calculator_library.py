@@ -42,6 +42,7 @@ class Portfolio:
         mapping each ISIN to {"ticker": <yfinance symbol>, "currency": <instrument currency>}.
         When given, get_currency()/get_dataframe_currency() become available."""
         self.distribution_by_directory=dict()
+        self._calculate_distribution_by_directory(sources)
         self.dataframes=self._load_sources(sources)
         self.distribution_by_ticker=dict()
         self.total_money_invested=0.0
@@ -70,6 +71,19 @@ class Portfolio:
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
         return cls({dataframe_file: source_type}, tickers_json)
+
+    def _calculate_distribution_by_directory(self, source_directories: dict):
+        money_invested=0.0
+        for dir, type in source_directories.items():
+            # df=pd.read_csv(dir+'buy.csv')
+            if type=='stocks':
+                pass
+            elif type=='bonds':
+                pass
+            elif type=='crypto':
+                pass
+            elif type=='commodities':
+                pass
 
     def _replace_isin_with_ticker(self):
         """Swaps ISIN_COLUMN's values for the yfinance ticker symbol from self.tickers, in place on
@@ -126,9 +140,10 @@ class Portfolio:
             state_value=os.path.splitext(filename)[0]
             df=pd.read_csv(os.path.join(directory, filename))
             df['state']=state_value
-            if state_value=='buy':
-                money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
-                self.distribution_by_directory[directory]=money_invested
+            # print(df) #remove
+            # if state_value=='buy':
+            #     money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
+            #     self.distribution_by_directory[directory]=money_invested
             dataframes.append(df)
         return dataframes
 

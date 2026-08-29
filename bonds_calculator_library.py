@@ -14,6 +14,12 @@ from datetime import datetime
 
 class Bonds:
     # Per the shared DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md).
+    TICKER_COLUMN='ticker'
+    INITIAL_COUPON_COLUMN='initial_coupon'
+    ADDITIONAL_COUPON_COLUMN='additional_coupon'
+    AMOUNT_OF_UNITS_COLUMN='amount_of_units'
+    IS_SWAPPED_COLUMN='is_swapped'
+
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
@@ -25,7 +31,7 @@ class Bonds:
         (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
         inflation_rate_file: CSVs expected in the working directory, used respectively by
         variable-rate and inflation-indexed bonds."""
-        self.dataframe=self._prepare_dataframe(dataframe)
+        self.dataframe=dataframe
         self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y')
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
         self.data=self._compute_data()
@@ -35,11 +41,12 @@ class Bonds:
     #     """Convenience alias — the constructor already accepts an already-loaded dataframe."""
     #     return cls(pd.read_csv(dataframe_file), **kwargs)
 
-    @staticmethod
-    def _prepare_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
-        dataframe=dataframe.copy()
-        dataframe['date']=pd.to_datetime(dataframe['date'], format='%Y-%m-%d')
-        return dataframe.set_index('date')
+    # @staticmethod
+    # def _prepare_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    #     # dataframe=dataframe.copy()
+    #     print(dataframe.to_string()) #remove
+    #     dataframe['date']=pd.to_datetime(dataframe['date'], format='%Y-%m-%d')
+    #     return dataframe.set_index('date')
 
     @staticmethod
     def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
@@ -52,15 +59,15 @@ class Bonds:
     def _compute_data(self) -> pd.DataFrame:
         bonds=list()
         for idx, row in self.dataframe.iterrows():
-            code=row['code'][0]
+            code=row['isin'][0]
             if code=='R':
-                bonds.append(self._variable_rate_bond(row['amount_of_units'], 100.0, row['additional_coupon'], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, row['is_swapped']))
+                bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='D':
-                bonds.append(self._variable_rate_bond(row['amount_of_units'], 100.0, row['additional_coupon'], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, row['is_swapped']))
+                bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='T':
-                bonds.append(self._fixed_rate_bond(row['amount_of_units'], 100.0, row['initial_coupon'], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, row['is_swapped']))
+                bonds.append(self._fixed_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='E':
-                bonds.append(self._inflationary_rate_bond(row['amount_of_units'], 100.0, row['initial_coupon'], row['additional_coupon'], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row['is_swapped']))
+                bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
 
         return self._merge(bonds)
 
