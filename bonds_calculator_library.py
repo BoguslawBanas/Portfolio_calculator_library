@@ -24,29 +24,20 @@ class Bonds:
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
 
-    def __init__(self, dataframe: pd.DataFrame, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv'):
+    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv'):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
         date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
         letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
         (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
         inflation_rate_file: CSVs expected in the working directory, used respectively by
         variable-rate and inflation-indexed bonds."""
-        self.dataframe=dataframe
+        self.dataframe=pd.read_csv(dataframe+"/buy.csv")
+        self.dataframe.index=pd.to_datetime(self.dataframe['date'], format='%Y-%m-%d')
+        self.dataframe.drop(['date'], axis=1, inplace=True)
+        print(self.dataframe)
         self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y')
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
         self.data=self._compute_data()
-
-    # @classmethod
-    # def from_csv(cls, dataframe_file: str, **kwargs) -> 'Bonds':
-    #     """Convenience alias — the constructor already accepts an already-loaded dataframe."""
-    #     return cls(pd.read_csv(dataframe_file), **kwargs)
-
-    # @staticmethod
-    # def _prepare_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
-    #     # dataframe=dataframe.copy()
-    #     print(dataframe.to_string()) #remove
-    #     dataframe['date']=pd.to_datetime(dataframe['date'], format='%Y-%m-%d')
-    #     return dataframe.set_index('date')
 
     @staticmethod
     def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
@@ -60,6 +51,7 @@ class Bonds:
         bonds=list()
         for idx, row in self.dataframe.iterrows():
             code=row['isin'][0]
+            print(row)
             if code=='R':
                 bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='D':
@@ -69,6 +61,7 @@ class Bonds:
             elif code=='E':
                 bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
 
+        print(bonds) #remove
         return self._merge(bonds)
 
     @staticmethod
