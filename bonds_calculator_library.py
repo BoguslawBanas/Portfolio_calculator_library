@@ -34,10 +34,10 @@ class Bonds:
         self.dataframe=pd.read_csv(dataframe+"/buy.csv")
         self.dataframe.index=pd.to_datetime(self.dataframe['date'], format='%Y-%m-%d')
         self.dataframe.drop(['date'], axis=1, inplace=True)
-        print(self.dataframe)
         self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y')
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
         self.data=self._compute_data()
+        self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
 
     @staticmethod
     def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
@@ -51,7 +51,6 @@ class Bonds:
         bonds=list()
         for idx, row in self.dataframe.iterrows():
             code=row['isin'][0]
-            print(row)
             if code=='R':
                 bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='D':
@@ -61,7 +60,6 @@ class Bonds:
             elif code=='E':
                 bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
 
-        print(bonds) #remove
         return self._merge(bonds)
 
     @staticmethod
