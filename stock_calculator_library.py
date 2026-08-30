@@ -150,8 +150,9 @@ class Stock:
         for idx, rows in dataframe.sort_index(kind='stable').iterrows():
             if rows['state']=='buy':
                 units=round(rows['amount_of_units'], 4)
-                money_invested=round(rows['Money_invested'], 2)
-                weight=rows['Money_invested']*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
+                raw_money_invested=rows['amount_of_units']*rows['price_of_unit']*currency.data.loc[idx, 'Close']
+                money_invested=round((rows['penalty']+1.0)*raw_money_invested, 2)
+                weight=raw_money_invested*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
 
                 data.loc[idx, 'Money_invested']+=money_invested
                 data.loc[idx, 'Units']+=units
