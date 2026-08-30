@@ -119,7 +119,7 @@ class Stock:
         return dataframe
 
     def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str) -> pd.DataFrame:
-        start_date=dataframe.index[0]
+        start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.TICKER_COLUMN].iloc[0])['ticker']
 
         currency=Currency(currency_from, currency_to, start_date)
@@ -139,28 +139,74 @@ class Stock:
         data['Avg_price']=0.0
         data['Dividend']=0.0
         data['Units']=0.0
+        data['Realized_profit']=0.0
 
-        for idx, rows in dataframe.iterrows():
+        # Transactions must be walked in date order (not CSV/file order) since a sell needs
+        # the running average cost basis built up by every buy that precedes it in time.
+        running_units=0.0
+        running_money_invested=0.0
+        running_weight=0.0
+
+        for idx, rows in dataframe.sort_index(kind='stable').iterrows():
             if rows['state']=='buy':
-                data.loc[idx, 'Money_invested']=round(rows['Money_invested'], 2)
-                data.loc[idx, 'Units']=round(rows['amount_of_units'], 4)
-                data.loc[idx, 'Avg_price']=rows['Money_invested']*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
-            elif rows['state'] in ('sell', 'sell_tax', 'swap', 'swap_tax'):
+                units=round(rows['amount_of_units'], 4)
+                money_invested=round(rows['Money_invested'], 2)
+                weight=rows['Money_invested']*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
+
+                data.loc[idx, 'Money_invested']+=money_invested
+                data.loc[idx, 'Units']+=units
+                data.loc[idx, 'Avg_price']+=weight
+
+                running_units+=units
+                running_money_invested+=money_invested
+                running_weight+=weight
+            elif rows['state']=='sell':
+                units_sold=round(rows['amount_of_units'], 4)
+                if units_sold>running_units+1e-9:
+                    raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {idx.date()}: only {running_units} units held.")
+
+                # Remove cost basis/weight in proportion to the units sold so the average price
+                # of the remaining position is unchanged by a partial sell.
+                fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
+                money_invested_removed=round(running_money_invested*fraction_sold, 2)
+                weight_removed=running_weight*fraction_sold
+
+                data.loc[idx, 'Units']-=units_sold
+                data.loc[idx, 'Money_invested']-=money_invested_removed
+                data.loc[idx, 'Avg_price']-=weight_removed
+                data.loc[idx, 'Realized_profit']+=round(rows['Money_invested']-money_invested_removed, 2)
+
+                running_units-=units_sold
+                running_money_invested-=money_invested_removed
+                running_weight-=weight_removed
+            elif rows['state']=='sell_tax':
+                data.loc[idx, 'Realized_profit']-=round(rows['sell_tax'], 2)
+            elif rows['state'] in ('swap', 'swap_tax'):
                 pass
             elif rows['state']=='dividend':
                 data.loc[idx, 'Dividend']+=round(rows['dividend'], 2)
             elif rows['state']=='dividend_tax':
                 data.loc[idx, 'Dividend']-=round(rows['dividend_tax'], 2)
 
-        data['Money_invested']=data['Money_invested'].cumsum()
+        money_invested_cumsum=data['Money_invested'].cumsum()
+        weight_cumsum=data['Avg_price'].cumsum()
+
+        data['Money_invested']=money_invested_cumsum
         data['Units']=data['Units'].cumsum()
-        data['Avg_price']=data['Avg_price'].cumsum()/data['Money_invested']
+        # A fully closed-out position drives both sides of the ratio to ~0; treat that as
+        # Avg_price==0 rather than propagating a 0/0 division.
+        data['Avg_price']=(weight_cumsum/money_invested_cumsum.mask(money_invested_cumsum.abs()<1e-9)).fillna(0.0)
         data['Dividend']=data['Dividend'].cumsum()
+        data['Realized_profit']=data['Realized_profit'].cumsum()
         data['Money_invested_after_penalty']=data['Avg_price']*data['Units']
 
+        avg_price_for_division=data['Avg_price'].mask(data['Avg_price'].abs()<1e-9)
         data['Profit_without_dividends']=round(
-            (data['Close']-data['Avg_price'])/data['Avg_price']*data['Money_invested']-data['Money_invested']+data['Money_invested_after_penalty'], 2
+            (
+                (data['Close']-avg_price_for_division)/avg_price_for_division*data['Money_invested']
+                -data['Money_invested']+data['Money_invested_after_penalty']
+            ).fillna(0.0), 2
         )
-        data['Profit']=round(data['Profit_without_dividends']+data['Dividend'], 2)
+        data['Profit']=round(data['Profit_without_dividends']+data['Dividend']+data['Realized_profit'], 2)
         data.drop(columns=['Close', 'Money_invested_after_penalty', 'Avg_price', 'Units'], inplace=True)
         return data
