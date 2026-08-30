@@ -65,26 +65,7 @@ class Portfolio:
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*value/self.total_invested_money
 
-        # self.dataframes=self._load_sources(sources)
-        # self.total_money_invested=0.0
-        # for dataframe in self.dataframes:
-        #     ticker=dataframe[self.ISIN_COLUMN].iloc[0]
-        #     self.distribution_by_ticker[ticker]=dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]
-        #     self.total_money_invested+=self.distribution_by_ticker[ticker]
-
-        # for dataframe in self.dataframes:
-        #     ticker=dataframe[self.ISIN_COLUMN].iloc[0]
-        #     self.distribution_by_ticker[ticker]=round(100.0*dataframe.sort_index()[self.MONEY_INVESTED_COLUMN].cumsum().ffill()[-1]/self.total_money_invested, 2)
-
-        # for x in self.distribution_by_directory:
-        #     self.distribution_by_directory[x]=round(100.0*self.distribution_by_directory[x]/self.total_money_invested, 2)
-
-        # dataframes_tmp=list()
-        # for df in self.dataframes:
-        #     if df['type'].iloc[0]=='stock':
-        #         dataframes_tmp.append(Stock(df, tickers_json, 'PLN'))
-
-        # self.data=self.merge(dataframes_tmp)
+        self.data=self.merge(portfolio_list)
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None) -> 'Portfolio':
