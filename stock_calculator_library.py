@@ -46,7 +46,7 @@ class Stock:
                     self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]+=(row[self.MONEY_INVESTED_COLUMN]/self.total_money_invested)*100.0
             dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to))
 
-        self.dataframe=self.merge(dataframes_2)
+        self.data=self.merge(dataframes_2)
 
     @staticmethod
     def transform_dataframe_to_dataframe_with_ticker(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
