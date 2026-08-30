@@ -38,7 +38,7 @@ class Bonds:
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
         self.data=self._compute_data()
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
-        self.distribution_by_ticker={'Polish bonds': 1.0}
+        self.distribution_by_ticker={'Polish bonds': 100.0}
 
     @staticmethod
     def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
