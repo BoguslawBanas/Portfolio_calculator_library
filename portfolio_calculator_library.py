@@ -53,7 +53,12 @@ class Portfolio:
                     self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
                 portfolio_list.append(stock)
             elif type=='bonds':
-                portfolio_list.append(Bonds(dir))
+                bonds=Bonds(dir)
+                self.distribution_by_directory[dir]=bonds.total_money_invested
+                self.total_invested_money+=bonds.total_money_invested
+                for key, value in bonds.distribution_by_ticker.items():
+                    self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
+                portfolio_list.append(bonds)
             elif type=='crypto':
                 pass
             elif type=='commodities':
