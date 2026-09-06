@@ -206,8 +206,7 @@ class Portfolio:
                 guess=0.1
 
         dataframe['Irr']=irr
-        self.portfolio=dataframe.drop(columns=['Prev_money_inv', 'Cashflow'])
-        self.portfolio=dataframe
+        self.portfolio=dataframe.drop(columns=['Prev_money_inv', 'Cashflow'], inplace=True)
 
     def get_earliest_date(self) -> datetime:
         earliest_date=datetime.today()
