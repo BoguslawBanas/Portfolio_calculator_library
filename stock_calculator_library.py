@@ -167,18 +167,20 @@ class Stock:
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 
+                proceeds=rows['Money_invested']*currency.data.loc[idx, 'Close']
+
                 data.loc[idx, 'Units']-=units_sold
                 data.loc[idx, 'Money_invested']-=money_invested_removed
-                data.loc[idx, 'Realized_profit']+=round(rows['Money_invested']-money_invested_removed, 2)
+                data.loc[idx, 'Realized_profit']+=round(proceeds-money_invested_removed, 2)
 
                 running_units-=units_sold
                 running_money_invested-=money_invested_removed
             elif rows['state']=='sell_tax':
-                data.loc[idx, 'Realized_profit']-=round(rows['sell_tax'], 2)
+                data.loc[idx, 'Realized_profit']-=round(rows['sell_tax']*currency.data.loc[idx, 'Close'], 2)
             elif rows['state']=='dividend':
-                data.loc[idx, 'Dividend']+=round(rows['dividend'], 2)
+                data.loc[idx, 'Dividend']+=round(rows['dividend']*currency.data.loc[idx, 'Close'], 2)
             elif rows['state']=='dividend_tax':
-                data.loc[idx, 'Dividend']-=round(rows['dividend_tax'], 2)
+                data.loc[idx, 'Dividend']-=round(rows['dividend_tax']*currency.data.loc[idx, 'Close'], 2)
 
         data['Money_invested']=data['Money_invested'].cumsum()
         data['Units']=data['Units'].cumsum()
