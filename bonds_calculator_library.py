@@ -7,6 +7,7 @@ plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
 computes one DataFrame per bond row, and merges them into self.data right away.
 """
 
+import os
 from typing import Callable
 import numpy as np
 import pandas as pd
@@ -34,12 +35,13 @@ class Bonds:
         variable-rate and inflation-indexed bonds. progress_callback: optional zero-arg callback
         invoked once, after all bond rows have been computed, for a caller (e.g. Portfolio)
         tracking overall progress."""
-        self.dataframe=pd.read_csv(dataframe+"/buy.csv")
+        today=datetime.today()
+        self.dataframe=pd.read_csv(os.path.join(dataframe, "buy.csv"))
         self.dataframe.index=pd.to_datetime(self.dataframe['date'], format='%Y-%m-%d')
         self.dataframe.drop(['date'], axis=1, inplace=True)
-        self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y')
-        self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
-        self.data=self._compute_data(progress_callback)
+        self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y', today)
+        self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y', today)
+        self.data=self._compute_data(today, progress_callback)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.distribution_by_ticker={'Polish bonds': 100.0}
 
@@ -47,28 +49,31 @@ class Bonds:
     def count_bonds(directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
         size a progress bar before construction."""
-        return len(pd.read_csv(directory_path+"/buy.csv"))
+        return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
 
     @staticmethod
-    def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
+    def _load_rate_file(path: str, date_format: str, today: datetime) -> pd.DataFrame:
         rate_df=pd.read_csv(path)
         rate_df['date']=pd.to_datetime(rate_df['date'], format=date_format)
         rate_df=rate_df.set_index('date')
-        all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=datetime.today(), freq='D'))
+        all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=today, freq='D'))
         return all_days.join(rate_df).ffill()
 
-    def _compute_data(self, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
+    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
         bonds=list()
-        for idx, row in self.dataframe.iterrows():
-            code=row['isin'][0]
+        for row in self.dataframe.itertuples():
+            idx=row.Index
+            code=row.isin[0]
+            amount_of_units=getattr(row, self.AMOUNT_OF_UNITS_COLUMN)
+            is_swapped=getattr(row, self.IS_SWAPPED_COLUMN)
             if code=='R':
-                bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='D':
-                bonds.append(self._variable_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, row[self.IS_SWAPPED_COLUMN]))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='T':
-                bonds.append(self._fixed_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
+                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, getattr(row, self.INITIAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
             elif code=='E':
-                bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
+                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, getattr(row, self.INITIAL_COUPON_COLUMN), getattr(row, self.ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
 
         if progress_callback is not None:
             progress_callback()
@@ -81,12 +86,12 @@ class Bonds:
         Equivalent of the old portfolio_calculator_library.merge_dataframes(dataframes)."""
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
-    def _fixed_rate_bond(self, amount_of_bonds: int, price_of_unit: float, coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
+    def _fixed_rate_bond(self, amount_of_bonds: int, price_of_unit: float, coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
         dataframe=pd.DataFrame({
             self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
             self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
             self.PROFIT_COLUMN: 0.0,
-        }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
+        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
 
         dataframe['Days_from_beginning']=(dataframe.index-start_date).days
         dataframe['Years_from_beginning']=np.floor(dataframe['Days_from_beginning']/365)
@@ -97,12 +102,12 @@ class Bonds:
         dataframe.drop(columns=['Days_from_beginning', 'Years_from_beginning'], inplace=True)
         return dataframe
 
-    def _variable_rate_bond(self, amount_of_bonds: int, price_of_unit: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
+    def _variable_rate_bond(self, amount_of_bonds: int, price_of_unit: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
         dataframe=pd.DataFrame({
             self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
             self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
             self.PROFIT_COLUMN: 0.0
-        }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
+        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
 
         dataframe=dataframe.join(self.interest_rate_data)
 
@@ -116,13 +121,13 @@ class Bonds:
             dataframe.loc[dataframe.index.max(), self.PROFIT_COLUMN]+=amount_of_bonds*0.1
         return dataframe
 
-    def _inflationary_rate_bond(self, amount_of_bonds: int, price_of_unit: float, initial_coupon: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, is_swapped: bool=False) -> pd.DataFrame:
+    def _inflationary_rate_bond(self, amount_of_bonds: int, price_of_unit: float, initial_coupon: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
         dataframe=pd.DataFrame({
             self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
             self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
             self.PROFIT_COLUMN: 0.0,
             'Daily_interest': 0.0
-        }, index=pd.date_range(start=start_date, end=min(end_date, datetime.today())))
+        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
 
         dataframe.loc[start_date:start_date+pd.DateOffset(years=1), 'Rate']=initial_coupon
         dataframe.loc[start_date:start_date+pd.DateOffset(years=1), 'Daily_interest']=(amount_of_bonds*price_of_unit*initial_coupon/100)/365.0
