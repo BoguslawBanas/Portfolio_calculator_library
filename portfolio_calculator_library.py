@@ -47,14 +47,15 @@ class Portfolio:
 
         # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
         # one progress bar span the whole portfolio, tracking the unit of work that's actually
-        # slow: one yfinance fetch per ticker (Bonds rows are local computation, but are counted
-        # in too so the bar reaches 100% and moves smoothly through that fast section as well).
+        # slow: one yfinance fetch per ticker. A whole bonds directory only counts as a single
+        # unit — Bonds computation is fast, local work with no per-row network calls, and its
+        # progress_callback now fires once per Bonds instance rather than once per bond row.
         total_units=0
         for dir, type in sources.items():
             if type=='stock':
                 total_units+=Stock.count_tickers(dir)
             elif type=='bonds':
-                total_units+=Bonds.count_bonds(dir)
+                total_units+=1
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
