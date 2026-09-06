@@ -32,7 +32,8 @@ class Bonds:
         (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
         inflation_rate_file: CSVs expected in the working directory, used respectively by
         variable-rate and inflation-indexed bonds. progress_callback: optional zero-arg callback
-        invoked once per bond row, for a caller (e.g. Portfolio) tracking overall progress."""
+        invoked once, after all bond rows have been computed, for a caller (e.g. Portfolio)
+        tracking overall progress."""
         self.dataframe=pd.read_csv(dataframe+"/buy.csv")
         self.dataframe.index=pd.to_datetime(self.dataframe['date'], format='%Y-%m-%d')
         self.dataframe.drop(['date'], axis=1, inplace=True)
@@ -69,8 +70,8 @@ class Bonds:
             elif code=='E':
                 bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
 
-            if progress_callback is not None:
-                progress_callback()
+        if progress_callback is not None:
+            progress_callback()
 
         return self._merge(bonds)
 
