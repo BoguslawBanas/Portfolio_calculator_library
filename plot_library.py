@@ -54,13 +54,13 @@ class Plot:
         """Portfolio performance over time, driven by the Irr column.
         kind: 'plot' — matplotlib line plot of IRR, or 'candlestick' — plotly candlestick
         of IRR aggregated over resample_rule (min/max/first/last per bucket)."""
-        if 'Irr' not in self.portfolio.portfolio.columns:
+        if self.portfolio.IRR_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_irr()
         dataframe=self.portfolio.portfolio
 
         if kind=='plot':
             # Kept off money_plot on purpose: IRR is a percentage, and mixing it in would mean a dual-axis chart.
-            plt.plot(dataframe.index, dataframe['Irr'], color=CATEGORICAL_COLORS[0])
+            plt.plot(dataframe.index, dataframe[self.portfolio.IRR_COLUMN], color=CATEGORICAL_COLORS[0])
             plt.xlabel("Time")
             plt.ylabel("IRR (%)")
             plt.grid(visible=True)
@@ -70,7 +70,7 @@ class Plot:
                 plt.show()
         elif kind=='candlestick':
             resample_df=dataframe.resample(resample_rule).ffill()
-            open_close_low_high=dataframe['Irr'].resample(resample_rule).aggregate(['min', 'max', 'first', 'last'])
+            open_close_low_high=dataframe[self.portfolio.IRR_COLUMN].resample(resample_rule).aggregate(['min', 'max', 'first', 'last'])
 
             fig=go.Figure(data=[
                 go.Candlestick(
@@ -86,12 +86,12 @@ class Plot:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected 'plot' or 'candlestick')")
 
     def period_return_bar_plot(self, days_between: int=0, offset: int=0, path_to_save_fig: str=None):
-        if 'Daily_return' not in self.portfolio.portfolio.columns:
+        if self.portfolio.DAILY_RETURN_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_money_earned_between_dates_column(days_between, offset)
         dataframe=self.portfolio.portfolio
 
-        colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in dataframe['Daily_return']]
-        plt.bar(dataframe.index, dataframe['Daily_return'], color=colors, width=1.0)
+        colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in dataframe[self.portfolio.DAILY_RETURN_COLUMN]]
+        plt.bar(dataframe.index, dataframe[self.portfolio.DAILY_RETURN_COLUMN], color=colors, width=1.0)
         plt.axhline(0, color=COLOR_BASELINE, linewidth=1)
         plt.xlabel("Time")
         plt.ylabel("Daily return")
