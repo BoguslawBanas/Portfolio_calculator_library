@@ -109,8 +109,14 @@ class Stock:
                 continue
             state_value=os.path.splitext(filename)[0]
             df=pd.read_csv(os.path.join(directory, filename))
+            if df.empty:
+                continue
             df['state']=state_value
             dataframes.append(df)
+
+        if not dataframes:
+            raise ValueError(f"No non-empty .csv files found in {directory}")
+
         return pd.concat(dataframes)
 
     def _replace_isin_with_ticker(self, dataframe: pd.DataFrame) -> pd.DataFrame:
