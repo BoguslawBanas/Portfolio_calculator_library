@@ -1,24 +1,24 @@
 # Portfolio Library
 
-Biblioteka Python wspomagająca zarządzanie portfelem inwestycyjnym. Umożliwia analizę i przetwarzanie danych dotyczących obligacji skarbowych, akcji oraz funduszy ETF z wykorzystaniem bibliotek `pandas`, `matplotlib` oraz `yfinance`.
+A Python library that helps manage an investment portfolio. It enables the analysis and processing of data related to treasury bonds, stocks, and ETFs using the `pandas`, `plotly`, and `yfinance` libraries.
 
-## Funkcjonalności
+## Features
 
-Biblioteka składa się z czterech głównych modułów:
+The library consists of four main modules:
 
 ### 📈 stock_calculator_library
 
-Moduł odpowiedzialny za obsługę akcji oraz funduszy ETF.
+Module responsible for handling stocks and ETFs.
 
-Najważniejsze funkcje:
+Key features:
 
-- pobieranie historycznych notowań za pomocą biblioteki `yfinance`,
-- pobieranie informacji o instrumentach finansowych,
-- obliczanie stóp zwrotu,
-- przygotowanie danych do dalszej analizy portfela,
-- agregacja danych dla wielu instrumentów.
+- fetching historical price data via the `yfinance` library,
+- fetching financial instrument information,
+- calculating rates of return,
+- preparing data for further portfolio analysis,
+- aggregating data across multiple instruments.
 
-Biblioteka wykorzystuje:
+The module uses:
 
 - pandas
 - numpy
@@ -28,40 +28,40 @@ Biblioteka wykorzystuje:
 
 ### 🏦 bonds_calculator_library
 
-Moduł przeznaczony do obsługi polskich obligacji skarbowych.
+Module for handling Polish treasury bonds.
 
-Umożliwia między innymi:
+Among other things, it allows:
 
-- obliczanie wartości obligacji w czasie,
-- wyznaczanie naliczonych odsetek,
-- uwzględnianie kapitalizacji odsetek,
-- analizę harmonogramów wykupu,
-- śledzenie wartości inwestycji.
+- calculating bond value over time,
+- determining accrued interest,
+- accounting for interest capitalization,
+- analyzing redemption schedules,
+- tracking investment value.
 
 ---
 
 ### 📊 portfolio_calculator_library
 
-Moduł zawierający zestaw funkcji operujących na obiektach `pandas.DataFrame`.
+Module containing a set of functions operating on `pandas.DataFrame` objects.
 
-Pozwala między innymi na:
+Among other things, it allows:
 
-- transformację danych portfela,
-- łączenie danych z różnych źródeł,
-- uzupełnianie brakujących danych czasowych,
-- obliczanie wartości portfela w czasie,
-- agregację danych według aktywów,
-- przygotowanie danych do wizualizacji.
+- transforming portfolio data,
+- combining data from different sources,
+- filling in missing time-series data,
+- calculating portfolio value over time,
+- aggregating data by asset,
+- preparing data for visualization.
 
-Moduł nie odpowiada za pobieranie danych — jego zadaniem jest ich przetwarzanie.
+This module is not responsible for fetching data — its job is to process it.
 
 ---
 
 ### plot_library
 
-Moduł zawierający zestaw funkcji, która służy do generowania wykresów.
+Module containing a set of functions used to generate charts.
 
-## Przykładowa struktura projektu
+## Example project structure
 
 ```
 portfolio_library/
@@ -71,19 +71,19 @@ portfolio_library/
 ├── portfolio_library.py
 ```
 
-## Instalacja
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-lub
+or
 
 ```bash
 pip install pandas numpy yfinance
 ```
 
-## Przykład użycia
+## Usage example
 
 ```python
 from stock_library import download_prices
@@ -98,35 +98,35 @@ prices = download_prices(
 portfolio = calculate_portfolio_value(prices)
 ```
 
-## Wymagania
+## Requirements
 
 - Python 3.10+
 - pandas
 - numpy
 - yfinance
 
-## Zastosowania
+## Use cases
 
-Biblioteka została przygotowana z myślą o:
+The library was designed with the following use cases in mind:
 
-- prowadzeniu własnego portfela inwestycyjnego,
-- analizie historycznych wyników,
-- monitorowaniu wartości aktywów,
-- analizie obligacji skarbowych,
-- budowie własnych narzędzi do raportowania inwestycji.
+- managing your own investment portfolio,
+- analyzing historical performance,
+- monitoring asset value,
+- analyzing treasury bonds,
+- building your own investment reporting tools.
 
-## Rozwój
+## Development
 
-Projekt rozwijany jest modułowo, dzięki czemu kolejne klasy i funkcje mogą być dodawane niezależnie do poszczególnych modułów.
+The project is developed modularly, so new classes and functions can be added to each module independently.
 
-Planowane rozszerzenia obejmują m.in.:
+Planned extensions include, among others:
 
-- obsługę dywidend,
-- analizę podatkową,
-- eksport raportów do Excel/PDF,
-- wsparcie dla kolejnych źródeł danych,
-- rozbudowane statystyki portfela.
+- dividend handling,
+- tax analysis,
+- exporting reports to Excel/PDF,
+- support for additional data sources,
+- extended portfolio statistics.
 
-## Licencja
+## License
 
-Licencja MIT.
+MIT License.
