@@ -32,18 +32,26 @@ class Stock:
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
 
-        for idx, row in self.dataframe.iterrows():
-            if row['state']=='buy':
-                self.total_money_invested+=row[self.MONEY_INVESTED_COLUMN]
-
         dataframes=self._split_by_isin(self.dataframe)
-        dataframes_2=list()
 
+        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
+        # which derives it the same way) — recompute it here instead of assuming one exists.
+        money_invested_by_ticker=dict()
         for df in dataframes:
-            self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]=0.0
+            currency=Currency(self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to, df.index.min())
+
+            money_invested=0.0
             for idx, row in df.iterrows():
                 if row['state']=='buy':
-                    self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]+=(row[self.MONEY_INVESTED_COLUMN]/self.total_money_invested)*100.0
+                    money_invested+=round((row['penalty']+1.0)*row['amount_of_units']*row['price_of_unit']*currency.data.loc[idx, 'Close'], 2)
+
+            money_invested_by_ticker[df[self.TICKER_COLUMN].iloc[0]]=money_invested
+            self.total_money_invested+=money_invested
+
+        dataframes_2=list()
+        for df in dataframes:
+            ticker=df[self.TICKER_COLUMN].iloc[0]
+            self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
             dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to))
 
         self.data=self.merge(dataframes_2)
@@ -66,13 +74,6 @@ class Stock:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']
         return currency
-
-    def calculate_total_money_invested(self) -> float:
-        money_inv=0.0
-        for idx, row in self.dataframe.iterrows():
-            if row['state']=='buy':
-                money_inv+=row[self.MONEY_INVESTED_COLUMN]
-        return money_inv
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
