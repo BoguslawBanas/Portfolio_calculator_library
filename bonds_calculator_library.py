@@ -7,6 +7,7 @@ plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
 computes one DataFrame per bond row, and merges them into self.data right away.
 """
 
+from typing import Callable
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -24,21 +25,28 @@ class Bonds:
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
 
-    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv'):
+    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
         date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
         letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
         (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
         inflation_rate_file: CSVs expected in the working directory, used respectively by
-        variable-rate and inflation-indexed bonds."""
+        variable-rate and inflation-indexed bonds. progress_callback: optional zero-arg callback
+        invoked once per bond row, for a caller (e.g. Portfolio) tracking overall progress."""
         self.dataframe=pd.read_csv(dataframe+"/buy.csv")
         self.dataframe.index=pd.to_datetime(self.dataframe['date'], format='%Y-%m-%d')
         self.dataframe.drop(['date'], axis=1, inplace=True)
         self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y')
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y')
-        self.data=self._compute_data()
+        self.data=self._compute_data(progress_callback)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.distribution_by_ticker={'Polish bonds': 100.0}
+
+    @staticmethod
+    def count_bonds(directory_path: str) -> int:
+        """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
+        size a progress bar before construction."""
+        return len(pd.read_csv(directory_path+"/buy.csv"))
 
     @staticmethod
     def _load_rate_file(path: str, date_format: str) -> pd.DataFrame:
@@ -48,7 +56,7 @@ class Bonds:
         all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=datetime.today(), freq='D'))
         return all_days.join(rate_df).ffill()
 
-    def _compute_data(self) -> pd.DataFrame:
+    def _compute_data(self, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
         bonds=list()
         for idx, row in self.dataframe.iterrows():
             code=row['isin'][0]
@@ -60,6 +68,9 @@ class Bonds:
                 bonds.append(self._fixed_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
             elif code=='E':
                 bonds.append(self._inflationary_rate_bond(row[self.AMOUNT_OF_UNITS_COLUMN], 100.0, row[self.INITIAL_COUPON_COLUMN], row[self.ADDITIONAL_COUPON_COLUMN], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, row[self.IS_SWAPPED_COLUMN]))
+
+            if progress_callback is not None:
+                progress_callback()
 
         return self._merge(bonds)
 
