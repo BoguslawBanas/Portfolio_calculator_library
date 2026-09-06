@@ -11,6 +11,8 @@ import yfinance as yf
 
 
 class Currency:
+    CLOSE_COLUMN='Close'
+
     def __init__(self, currency_from: str, currency_to: str, start_date: datetime, end_date: datetime=None):
         """currency_from/currency_to: the two currency codes (e.g. 'usd', 'pln'); identical
         codes (case-insensitive) short-circuit to a flat 1.0 exchange rate instead of an
@@ -25,7 +27,7 @@ class Currency:
     def _fetch_data(self) -> pd.DataFrame:
         if self.currency_from.upper()==self.currency_to.upper():
             return pd.DataFrame({
-                'Close': 1.0
+                self.CLOSE_COLUMN: 1.0
             }, index=pd.date_range(start=self.start_date, end=self.end_date, freq='D'))
 
         ticker=yf.Ticker(self.currency_from.upper()+self.currency_to.upper()+"=X")
