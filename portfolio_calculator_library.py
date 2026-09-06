@@ -18,12 +18,27 @@ from .bonds_calculator_library import Bonds
 
 
 class Portfolio:
+    # --- Output: self.data contract + Portfolio-specific extras. The first three form the
+    # shared DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
-    DIVIDEND_COLUMN='Dividend'
-    ISIN_COLUMN='isin'
-    SOURCE_TYPE_COLUMN='type'
+    DAILY_RETURN_COLUMN='Daily_return'
+    IRR_COLUMN='Irr'
+    # Working-only columns, created and dropped again within calculate_irr.
+    PREV_MONEY_INVESTED_COLUMN='Prev_money_inv'
+    TOTAL_MONEY_COLUMN='Total_money'
+    CASHFLOW_COLUMN='Cashflow'
+
+    # --- Ingestion tags: synthesized while loading (from the sources dict / CSV filename),
+    # not read from inside a CSV cell — but consumed everywhere exactly like input columns. ---
+    SOURCE_TYPE_COLUMN='type'          # asset type ('stock'/'bonds'/...), from the sources dict
+    TRANSACTION_STATE_COLUMN='state'   # per-row state ('buy'/'sell'/...), from the CSV filename
+
+    # --- Input: columns read from a raw sources CSV (only reachable via the currently-dead
+    # _load_sources/_read_directory/_split_by_isin path — see __init__'s docstring/comments). ---
+    CSV_TICKER_COLUMN='isin'
+    CSV_DATE_COLUMN='date'
 
     def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD'):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
@@ -34,7 +49,7 @@ class Portfolio:
           column (as in create_dataframe_and_get_data).
         Directories and prepared CSVs can be mixed freely in the same dict; every row loaded
         from a given path is tagged with that path's type (SOURCE_TYPE_COLUMN) before all rows
-        are combined and split by ISIN_COLUMN, so each per-instrument dataframe carries along
+        are combined and split by CSV_TICKER_COLUMN, so each per-instrument dataframe carries along
         which asset-type module should process it (dataframe[Portfolio.SOURCE_TYPE_COLUMN].iloc[0]).
 
         tickers_json: optional path to the JSON file (see CLAUDE.md / stock_calculator_library)
@@ -92,33 +107,33 @@ class Portfolio:
         return cls({dataframe_file: source_type}, tickers_json)
 
     def _replace_isin_with_ticker(self):
-        """Swaps ISIN_COLUMN's values for the yfinance ticker symbol from self.tickers, in place on
-        every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
+        """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
+        on every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
         for dataframe in self.dataframes:
-            dataframe[self.ISIN_COLUMN]=dataframe[self.ISIN_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
+            dataframe[self.CSV_TICKER_COLUMN]=dataframe[self.CSV_TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
 
     def get_currency(self, isin: str) -> str:
         return self.tickers[isin]['currency']
 
     def get_dataframe_currency(self, dataframe: pd.DataFrame) -> str:
         """Currency of the instrument a per-instrument dataframe (one of self.dataframes) belongs to.
-        Once tickers_json is supplied, ISIN_COLUMN holds the yfinance ticker (see _replace_isin_with_ticker),
+        Once tickers_json is supplied, CSV_TICKER_COLUMN holds the yfinance ticker (see _replace_isin_with_ticker),
         so this looks the currency up by ticker rather than by the original ISIN."""
-        return self._currency_by_ticker[dataframe[self.ISIN_COLUMN].iloc[0]]
+        return self._currency_by_ticker[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
 
     @classmethod
     def _split_by_isin(cls, dataframe: pd.DataFrame) -> list:
         dataframes=dict()
         for _, row in dataframe.iterrows():
-            if dataframes.get(row[cls.ISIN_COLUMN]) is None:
-                dataframes[row[cls.ISIN_COLUMN]]=pd.DataFrame()
-            dataframes[row[cls.ISIN_COLUMN]]=pd.concat([dataframes[row[cls.ISIN_COLUMN]], row], axis=1)
+            if dataframes.get(row[cls.CSV_TICKER_COLUMN]) is None:
+                dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.DataFrame()
+            dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.concat([dataframes[row[cls.CSV_TICKER_COLUMN]], row], axis=1)
 
         list_of_dataframes=list(dataframes.values())
         for i in range(len(list_of_dataframes)):
             list_of_dataframes[i]=list_of_dataframes[i].transpose()
-            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i]['date'], format='%Y-%m-%d')
-            list_of_dataframes[i].drop(columns=['date'], inplace=True)
+            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
+            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
 
         return list_of_dataframes
 
@@ -145,7 +160,7 @@ class Portfolio:
                 continue
             state_value=os.path.splitext(filename)[0]
             df=pd.read_csv(os.path.join(directory, filename))
-            df['state']=state_value
+            df[self.TRANSACTION_STATE_COLUMN]=state_value
             # print(df) #remove
             # if state_value=='buy':
             #     money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
@@ -205,22 +220,22 @@ class Portfolio:
     def calculate_irr(self):
         dataframe=self.data
 
-        dataframe['Prev_money_inv']=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
-        dataframe['Total_money']=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
-        dataframe['Cashflow']=round(dataframe['Prev_money_inv']-dataframe[self.MONEY_INVESTED_COLUMN], 2)
+        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
+        dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
+        dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
 
-        irr=np.full(len(dataframe['Cashflow']), np.nan)
+        irr=np.full(len(dataframe[self.CASHFLOW_COLUMN]), np.nan)
         guess=0.1
         irr[0]=0.0
 
-        for i in range(len(dataframe['Cashflow'])):
-            guess=self._irr_newton(dataframe['Cashflow'].iloc[:i+1].to_list()+[dataframe['Total_money'].iloc[i]], guess=guess)
+        for i in range(len(dataframe[self.CASHFLOW_COLUMN])):
+            guess=self._irr_newton(dataframe[self.CASHFLOW_COLUMN].iloc[:i+1].to_list()+[dataframe[self.TOTAL_MONEY_COLUMN].iloc[i]], guess=guess)
             irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
             if np.isnan(guess):
                 guess=0.1
 
-        dataframe['Irr']=irr
-        self.portfolio=dataframe.drop(columns=['Prev_money_inv', 'Cashflow'], inplace=True)
+        dataframe[self.IRR_COLUMN]=irr
+        self.portfolio=dataframe.drop(columns=[self.PREV_MONEY_INVESTED_COLUMN, self.CASHFLOW_COLUMN], inplace=True)
 
     def get_earliest_date(self) -> datetime:
         earliest_date=datetime.today()
@@ -246,11 +261,11 @@ class Portfolio:
     def calculate_money_earned_between_dates_column(self, days_between: int=0, offset: int=0) -> pd.DataFrame:
         dataframe=self.portfolio
 
-        dataframe['Daily_return']=0.0
+        dataframe[self.DAILY_RETURN_COLUMN]=0.0
         if days_between==0:
             days_between=(dataframe.index[-1]-dataframe.index[0]).days
         for idx, _ in dataframe.iterrows():
-            dataframe.loc[idx, 'Daily_return']=round(
+            dataframe.loc[idx, self.DAILY_RETURN_COLUMN]=round(
                 self.calculate_money_earned_between_dates(idx-pd.DateOffset(days=days_between+offset), idx-pd.DateOffset(days=offset))/days_between, 2
             )
 
