@@ -20,7 +20,6 @@ from .currency_calculator_library import Currency
 
 
 class Stock:
-    MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
@@ -186,7 +185,7 @@ class Stock:
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 
-                proceeds=rows['Money_invested']*currency.data.loc[idx, 'Close']
+                proceeds=rows['amount_of_units']*rows['price_of_unit']*currency.data.loc[idx, 'Close']
 
                 data.loc[idx, 'Units']-=units_sold
                 data.loc[idx, 'Money_invested']-=money_invested_removed
