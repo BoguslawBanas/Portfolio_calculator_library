@@ -32,18 +32,26 @@ class Stock:
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
 
-        for idx, row in self.dataframe.iterrows():
-            if row['state']=='buy':
-                self.total_money_invested+=row[self.MONEY_INVESTED_COLUMN]
-
         dataframes=self._split_by_isin(self.dataframe)
-        dataframes_2=list()
 
+        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
+        # which derives it the same way) — recompute it here instead of assuming one exists.
+        money_invested_by_ticker=dict()
         for df in dataframes:
-            self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]=0.0
+            currency=Currency(self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to, df.index.min())
+
+            money_invested=0.0
             for idx, row in df.iterrows():
                 if row['state']=='buy':
-                    self.distribution_by_ticker[df[self.TICKER_COLUMN].iloc[0]]+=(row[self.MONEY_INVESTED_COLUMN]/self.total_money_invested)*100.0
+                    money_invested+=round((row['penalty']+1.0)*row['amount_of_units']*row['price_of_unit']*currency.data.loc[idx, 'Close'], 2)
+
+            money_invested_by_ticker[df[self.TICKER_COLUMN].iloc[0]]=money_invested
+            self.total_money_invested+=money_invested
+
+        dataframes_2=list()
+        for df in dataframes:
+            ticker=df[self.TICKER_COLUMN].iloc[0]
+            self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
             dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to))
 
         self.data=self.merge(dataframes_2)
@@ -66,13 +74,6 @@ class Stock:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']
         return currency
-
-    def calculate_total_money_invested(self) -> float:
-        money_inv=0.0
-        for idx, row in self.dataframe.iterrows():
-            if row['state']=='buy':
-                money_inv+=row[self.MONEY_INVESTED_COLUMN]
-        return money_inv
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
@@ -108,8 +109,14 @@ class Stock:
                 continue
             state_value=os.path.splitext(filename)[0]
             df=pd.read_csv(os.path.join(directory, filename))
+            if df.empty:
+                continue
             df['state']=state_value
             dataframes.append(df)
+
+        if not dataframes:
+            raise ValueError(f"No non-empty .csv files found in {directory}")
+
         return pd.concat(dataframes)
 
     def _replace_isin_with_ticker(self, dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -136,7 +143,6 @@ class Stock:
         data['Close']=data['Close']*currency.data['Close']
 
         data['Money_invested']=0.0
-        data['Avg_price']=0.0
         data['Dividend']=0.0
         data['Units']=0.0
         data['Realized_profit']=0.0
@@ -145,69 +151,50 @@ class Stock:
         # the running average cost basis built up by every buy that precedes it in time.
         running_units=0.0
         running_money_invested=0.0
-        running_weight=0.0
 
         for idx, rows in dataframe.sort_index(kind='stable').iterrows():
             if rows['state']=='buy':
                 units=round(rows['amount_of_units'], 4)
                 raw_money_invested=rows['amount_of_units']*rows['price_of_unit']*currency.data.loc[idx, 'Close']
                 money_invested=round((rows['penalty']+1.0)*raw_money_invested, 2)
-                weight=raw_money_invested*rows['price_of_unit']*currency.data.loc[idx, 'Close']*(1+rows['penalty'])
 
                 data.loc[idx, 'Money_invested']+=money_invested
                 data.loc[idx, 'Units']+=units
-                data.loc[idx, 'Avg_price']+=weight
 
                 running_units+=units
                 running_money_invested+=money_invested
-                running_weight+=weight
             elif rows['state']=='sell':
                 units_sold=round(rows['amount_of_units'], 4)
                 if units_sold>running_units+1e-9:
                     raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {idx.date()}: only {running_units} units held.")
 
-                # Remove cost basis/weight in proportion to the units sold so the average price
-                # of the remaining position is unchanged by a partial sell.
+                # Remove cost basis in proportion to the units sold so the average price of the
+                # remaining position (Money_invested/Units) is unchanged by a partial sell.
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
-                weight_removed=running_weight*fraction_sold
+
+                proceeds=rows['Money_invested']*currency.data.loc[idx, 'Close']
 
                 data.loc[idx, 'Units']-=units_sold
                 data.loc[idx, 'Money_invested']-=money_invested_removed
-                data.loc[idx, 'Avg_price']-=weight_removed
-                data.loc[idx, 'Realized_profit']+=round(rows['Money_invested']-money_invested_removed, 2)
+                data.loc[idx, 'Realized_profit']+=round(proceeds-money_invested_removed, 2)
 
                 running_units-=units_sold
                 running_money_invested-=money_invested_removed
-                running_weight-=weight_removed
             elif rows['state']=='sell_tax':
-                data.loc[idx, 'Realized_profit']-=round(rows['sell_tax'], 2)
-            elif rows['state'] in ('swap', 'swap_tax'):
-                pass
+                data.loc[idx, 'Realized_profit']-=round(rows['sell_tax']*currency.data.loc[idx, 'Close'], 2)
             elif rows['state']=='dividend':
-                data.loc[idx, 'Dividend']+=round(rows['dividend'], 2)
+                data.loc[idx, 'Dividend']+=round(rows['dividend']*currency.data.loc[idx, 'Close'], 2)
             elif rows['state']=='dividend_tax':
-                data.loc[idx, 'Dividend']-=round(rows['dividend_tax'], 2)
+                data.loc[idx, 'Dividend']-=round(rows['dividend_tax']*currency.data.loc[idx, 'Close'], 2)
 
-        money_invested_cumsum=data['Money_invested'].cumsum()
-        weight_cumsum=data['Avg_price'].cumsum()
-
-        data['Money_invested']=money_invested_cumsum
+        data['Money_invested']=data['Money_invested'].cumsum()
         data['Units']=data['Units'].cumsum()
-        # A fully closed-out position drives both sides of the ratio to ~0; treat that as
-        # Avg_price==0 rather than propagating a 0/0 division.
-        data['Avg_price']=(weight_cumsum/money_invested_cumsum.mask(money_invested_cumsum.abs()<1e-9)).fillna(0.0)
         data['Dividend']=data['Dividend'].cumsum()
         data['Realized_profit']=data['Realized_profit'].cumsum()
-        data['Money_invested_after_penalty']=data['Avg_price']*data['Units']
 
-        avg_price_for_division=data['Avg_price'].mask(data['Avg_price'].abs()<1e-9)
-        data['Profit_without_dividends']=round(
-            (
-                (data['Close']-avg_price_for_division)/avg_price_for_division*data['Money_invested']
-                -data['Money_invested']+data['Money_invested_after_penalty']
-            ).fillna(0.0), 2
-        )
+        # Unrealized profit = current market value of the held units minus their cost basis.
+        data['Profit_without_dividends']=round(data['Close']*data['Units']-data['Money_invested'], 2)
         data['Profit']=round(data['Profit_without_dividends']+data['Dividend']+data['Realized_profit'], 2)
-        data.drop(columns=['Close', 'Money_invested_after_penalty', 'Avg_price', 'Units'], inplace=True)
+        data.drop(columns=['Close', 'Units'], inplace=True)
         return data
