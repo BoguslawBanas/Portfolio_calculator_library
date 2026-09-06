@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import Bonds
 
@@ -44,25 +45,37 @@ class Portfolio:
         self.total_invested_money=0.0
         portfolio_list=list()
 
+        # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
+        # one progress bar span the whole portfolio, tracking the unit of work that's actually
+        # slow: one yfinance fetch per ticker (Bonds rows are local computation, but are counted
+        # in too so the bar reaches 100% and moves smoothly through that fast section as well).
+        total_units=0
         for dir, type in sources.items():
             if type=='stock':
-                stock=Stock(dir, tickers_json, currency)
-                self.distribution_by_directory[dir]=stock.total_money_invested
-                self.total_invested_money+=stock.total_money_invested
-                for key, value in stock.distribution_by_ticker.items():
-                    self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
-                portfolio_list.append(stock)
+                total_units+=Stock.count_tickers(dir)
             elif type=='bonds':
-                bonds=Bonds(dir)
-                self.distribution_by_directory[dir]=bonds.total_money_invested
-                self.total_invested_money+=bonds.total_money_invested
-                for key, value in bonds.distribution_by_ticker.items():
-                    self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
-                portfolio_list.append(bonds)
-            elif type=='crypto':
-                pass
-            elif type=='commodities':
-                pass
+                total_units+=Bonds.count_bonds(dir)
+
+        with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
+            for dir, type in sources.items():
+                if type=='stock':
+                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=stock.total_money_invested
+                    self.total_invested_money+=stock.total_money_invested
+                    for key, value in stock.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
+                    portfolio_list.append(stock)
+                elif type=='bonds':
+                    bonds=Bonds(dir, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=bonds.total_money_invested
+                    self.total_invested_money+=bonds.total_money_invested
+                    for key, value in bonds.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
+                    portfolio_list.append(bonds)
+                elif type=='crypto':
+                    pass
+                elif type=='commodities':
+                    pass
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money
