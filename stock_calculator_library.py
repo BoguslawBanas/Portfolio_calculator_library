@@ -13,6 +13,7 @@ makes: run as a standalone script from the repo root rather than as part of a pa
 import os
 import json
 from datetime import datetime
+from typing import Callable
 import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import Currency
@@ -26,7 +27,10 @@ class Stock:
     TICKER_COLUMN='isin'
     SOURCE_TYPE_COLUMN='state'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str):
+    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None):
+        """progress_callback: optional zero-arg callback invoked once per ticker, right after that
+        ticker's price history has been fetched and computed — the unit of work a caller (e.g.
+        Portfolio) would want to track progress by, since that fetch is what actually takes time."""
         self.total_money_invested=0.0
         self.distribution_by_ticker=dict()
         self.dataframe=self._load_sources(directory_path)
@@ -53,6 +57,8 @@ class Stock:
             ticker=df[self.TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
             dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.TICKER_COLUMN), currency_to))
+            if progress_callback is not None:
+                progress_callback()
 
         self.data=self.merge(dataframes_2)
 
@@ -102,7 +108,14 @@ class Stock:
 
         return list_of_dataframes
 
-    def _load_sources(self, directory: str) -> pd.DataFrame:
+    @classmethod
+    def count_tickers(cls, directory_path: str) -> int:
+        """Number of distinct tickers/ISINs in a source directory, without fetching any price
+        data — lets a caller (e.g. Portfolio) size a progress bar before construction."""
+        return cls._load_sources(directory_path)[cls.TICKER_COLUMN].nunique()
+
+    @staticmethod
+    def _load_sources(directory: str) -> pd.DataFrame:
         dataframes=list()
         for filename in sorted(os.listdir(directory)):
             if not filename.endswith('.csv'):
