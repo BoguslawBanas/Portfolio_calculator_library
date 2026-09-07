@@ -49,7 +49,9 @@ class Stock:
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes time."""
         self.total_money_invested=0.0
+        self.total_current_value=0.0
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_current_value=dict()
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
 
@@ -70,12 +72,22 @@ class Stock:
             self.total_money_invested+=money_invested
 
         dataframes_2=list()
+        current_value_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
-            dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to))
+            computed=self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to)
+            dataframes_2.append(computed)
+
+            # Current market value of the position: cost basis still held plus its unrealized gain.
+            current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
+            self.total_current_value+=current_value_by_ticker[ticker]
+
             if progress_callback is not None:
                 progress_callback()
+
+        for ticker, value in current_value_by_ticker.items():
+            self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0
 
         self.data=self.merge(dataframes_2)
 
