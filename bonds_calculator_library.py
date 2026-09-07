@@ -52,7 +52,9 @@ class Bonds:
         self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y', today)
         self.data=self._compute_data(today, progress_callback)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
+        self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.distribution_by_ticker={'Polish bonds': 100.0}
+        self.distribution_by_ticker_current_value={'Polish bonds': 100.0}
 
     @staticmethod
     def count_bonds(directory_path: str) -> int:
