@@ -169,6 +169,7 @@ plot.allocation_plot(by="ticker", kind="histogram", metric="revenue")
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - a revenue-only chart in `Plot` (skipping IRR), with dividends optionally included or excluded
+- a new type of plot the compare distribution (default) vs distribution by current value (histogram type)
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - caching computed DataFrames to disk instead of re-fetching/recomputing on every run
 
