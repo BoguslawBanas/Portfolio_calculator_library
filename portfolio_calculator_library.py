@@ -16,6 +16,7 @@ from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import Bonds
 from .commodity_calculator_library import Commodity
+from .crypto_calculator_library import Crypto
 
 
 class Portfolio:
@@ -74,6 +75,8 @@ class Portfolio:
                 total_units+=1
             elif type=='commodities':
                 total_units+=Commodity.count_tickers(dir)
+            elif type=='crypto':
+                total_units+=Crypto.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
@@ -91,8 +94,6 @@ class Portfolio:
                     for key, value in bonds.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
                     portfolio_list.append(bonds)
-                elif type=='crypto':
-                    pass
                 elif type=='commodities':
                     commodity=Commodity(dir, currency, progress_callback=progress_bar.update)
                     self.distribution_by_directory[dir]=commodity.total_money_invested
@@ -100,6 +101,13 @@ class Portfolio:
                     for key, value in commodity.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*commodity.total_money_invested, 2)
                     portfolio_list.append(commodity)
+                elif type=='crypto':
+                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=crypto.total_money_invested
+                    self.total_invested_money+=crypto.total_money_invested
+                    for key, value in crypto.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*crypto.total_money_invested, 2)
+                    portfolio_list.append(crypto)
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money

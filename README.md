@@ -55,9 +55,19 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - no dividends — `Profit` is unrealized plus realized gain
 - optional progress-bar hook, driven by `Portfolio` (see below)
 
+### ₿ `crypto_calculator_library.Crypto`
+
+Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a daily investment/profit DataFrame — the same pattern as `Commodity`, minus the physical-delivery framing.
+
+- prices via `yfinance` USD-quoted tickers (`BTC-USD`, `ETH-USD`, ...), converted to the target currency via `Currency`
+- full or partial sells, tracked against a running average cost basis, same as `Stock`/`Commodity`
+- no dividends — `Profit` is unrealized plus realized gain
+- units rounded to 8 decimal places (vs. `Commodity`'s 4) for fractional holdings
+- optional progress-bar hook, driven by `Portfolio` (see below)
+
 ### 🚧 In progress
 
-`crypto_calculator_library.py` and `bank_account_calculator_library.py` are early, function-based prototypes that predate `Stock`/`Bonds`/`Commodity`'s class-based design and aren't wired into `Portfolio` yet.
+`bank_account_calculator_library.py` is an early, function-based prototype that predates `Stock`/`Bonds`/`Commodity`/`Crypto`'s class-based design and isn't wired into `Portfolio` yet.
 
 ## Project structure
 
@@ -67,10 +77,10 @@ Portfolio_calculator_library/
 ├── stock_calculator_library.py          # Stock
 ├── bonds_calculator_library.py          # Bonds
 ├── commodity_calculator_library.py      # Commodity
+├── crypto_calculator_library.py         # Crypto
 ├── currency_calculator_library.py       # Currency
 ├── portfolio_calculator_library.py      # Portfolio
 ├── plot_library.py                      # Plot
-├── crypto_calculator_library.py         # prototype, not yet integrated
 ├── bank_account_calculator_library.py   # prototype, not yet integrated
 └── LICENSE
 ```
@@ -106,13 +116,15 @@ from Portfolio_calculator_library.plot_library import Plot
 
 # Each source is a directory of per-transaction-state CSVs: buy.csv, sell.csv,
 # sell_tax.csv, dividend.csv, dividend_tax.csv (stocks), buy.csv, sell.csv, sell_tax.csv
-# (commodities — symbol column must be one of Commodity.TICKERS's keys, e.g. "gold"),
+# (commodities — symbol column must be one of Commodity.TICKERS's keys, e.g. "gold";
+# crypto — same shape, symbol column must be one of Crypto.TICKERS's keys, e.g. "bitcoin"),
 # or buy.csv plus interest_rate.csv/inflation_rate.csv (bonds — the two rate CSVs are
 # read from the bonds directory itself, not the working directory).
 sources = {
     "data/stocks": "stock",
     "data/bonds": "bonds",
     "data/commodities": "commodities",
+    "data/crypto": "crypto",
 }
 
 # tickers.json maps each ISIN to its yfinance ticker and native currency, e.g.
@@ -149,7 +161,7 @@ plot.allocation_plot(by="ticker", kind="pie")
 
 ## Roadmap
 
-- crypto and bank account support, following the `Stock`/`Bonds`/`Commodity` pattern
+- bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - allocation by current market value, not just amount invested
 - revenue allocation — how much each source/ticker's revenue contributes to total portfolio revenue
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
