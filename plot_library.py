@@ -107,14 +107,22 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def allocation_plot(self, by: str='ticker', kind: str='pie', max_slices: int=7, path_to_save_fig: str=None):
+    def allocation_plot(self, by: str='ticker', kind: str='pie', metric: str='invested', max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
-        by: 'ticker' — self.portfolio.distribution_by_ticker, or 'directory' — self.portfolio.distribution_by_directory.
-        kind: 'pie' — donut chart, or 'histogram' — bar chart."""
+        by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value), or 'directory' —
+        self.portfolio.distribution_by_directory(_current_value).
+        kind: 'pie' — donut chart, or 'histogram' — bar chart.
+        metric: 'invested' — allocation by amount invested (cost basis), or 'current_value' —
+        allocation by what each position is actually worth today (cost basis still held plus
+        unrealized gain)."""
+        if metric not in ('invested', 'current_value'):
+            raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected 'invested' or 'current_value')")
+        by_current_value=metric=='current_value'
+
         if by=='ticker':
-            distribution=self.portfolio.distribution_by_ticker
+            distribution=self.portfolio.distribution_by_ticker_current_value if by_current_value else self.portfolio.distribution_by_ticker
         elif by=='directory':
-            distribution=self.portfolio.distribution_by_directory
+            distribution=self.portfolio.distribution_by_directory_current_value if by_current_value else self.portfolio.distribution_by_directory
         else:
             raise ValueError(f"Unknown allocation_plot by: {by!r} (expected 'ticker' or 'directory')")
 
