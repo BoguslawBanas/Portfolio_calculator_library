@@ -164,6 +164,7 @@ plot.allocation_plot(by="ticker", kind="pie")
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - allocation by current market value, not just amount invested
 - revenue allocation — how much each source/ticker's revenue contributes to total portfolio revenue
+- a revenue-only chart in `Plot` (skipping IRR), with dividends optionally included or excluded
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - caching computed DataFrames to disk instead of re-fetching/recomputing on every run
 
