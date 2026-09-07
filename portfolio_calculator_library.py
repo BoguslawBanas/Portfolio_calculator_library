@@ -15,6 +15,7 @@ import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import Bonds
+from .commodity_calculator_library import Commodity
 
 
 class Portfolio:
@@ -42,7 +43,7 @@ class Portfolio:
 
     def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD'):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
-        'bank_account', 'crypto'). Each path is either
+        'commodities', 'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
           create_dataframe_and_get_data_from_directory), or
         - an already-prepared single transactions CSV that already has a 'state'
@@ -71,6 +72,8 @@ class Portfolio:
                 total_units+=Stock.count_tickers(dir)
             elif type=='bonds':
                 total_units+=1
+            elif type=='commodities':
+                total_units+=Commodity.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
@@ -91,7 +94,12 @@ class Portfolio:
                 elif type=='crypto':
                     pass
                 elif type=='commodities':
-                    pass
+                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=commodity.total_money_invested
+                    self.total_invested_money+=commodity.total_money_invested
+                    for key, value in commodity.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*commodity.total_money_invested, 2)
+                    portfolio_list.append(commodity)
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money
