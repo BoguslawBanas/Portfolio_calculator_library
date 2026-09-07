@@ -53,8 +53,10 @@ class Bonds:
         self.data=self._compute_data(today, progress_callback)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
+        self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
         self.distribution_by_ticker={'Polish bonds': 100.0}
         self.distribution_by_ticker_current_value={'Polish bonds': 100.0}
+        self.distribution_by_ticker_revenue={'Polish bonds': 100.0}
 
     @staticmethod
     def count_bonds(directory_path: str) -> int:
