@@ -32,7 +32,7 @@ Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone
 Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataFrame.
 
 - builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
-- allocation by ticker/directory, both by amount invested (cost basis) and by current market value (cost basis still held plus unrealized gain)
+- allocation by ticker/directory, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
@@ -45,7 +45,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `money_plot` — money invested vs. total revenue, as overlaid lines or a stacked area
 - `performance_plot` — IRR over time, as a line or a candlestick chart
 - `period_return_bar_plot` — rolling daily return, colored by sign
-- `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested or by current market value
+- `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
 
 ### 🪙 `commodity_calculator_library.Commodity`
 
@@ -134,8 +134,10 @@ portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd")
 
 print(f"Total invested: {portfolio.total_invested_money:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
-print(portfolio.distribution_by_ticker)               # allocation by amount invested
+print(f"Total revenue: {portfolio.total_revenue:.2f}")
+print(portfolio.distribution_by_ticker)                # allocation by amount invested
 print(portfolio.distribution_by_ticker_current_value)  # allocation by current market value
+print(portfolio.distribution_by_ticker_revenue)         # allocation by share of total gains
 
 portfolio.calculate_irr()
 
@@ -143,6 +145,7 @@ plot = Plot(portfolio)
 plot.money_plot()
 plot.performance_plot(kind="candlestick")
 plot.allocation_plot(by="ticker", kind="pie", metric="current_value")
+plot.allocation_plot(by="ticker", kind="histogram", metric="revenue")
 ```
 
 ## Requirements
@@ -165,7 +168,6 @@ plot.allocation_plot(by="ticker", kind="pie", metric="current_value")
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- revenue allocation — how much each source/ticker's revenue contributes to total portfolio revenue
 - a revenue-only chart in `Plot` (skipping IRR), with dividends optionally included or excluded
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - caching computed DataFrames to disk instead of re-fetching/recomputing on every run
