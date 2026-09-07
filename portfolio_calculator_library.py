@@ -25,6 +25,9 @@ class Portfolio:
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
+    # Only present when at least one Stock source contributed (the only asset type that
+    # produces a Dividend column) — read via self.data.get(DIVIDEND_COLUMN, 0.0), not [].
+    DIVIDEND_COLUMN='Dividend'
     DAILY_RETURN_COLUMN='Daily_return'
     IRR_COLUMN='Irr'
     # Working-only columns, created and dropped again within calculate_irr.
