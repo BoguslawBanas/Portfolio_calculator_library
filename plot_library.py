@@ -157,3 +157,38 @@ class Plot:
             self._render(fig, path_to_save_fig)
         else:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected 'pie' or 'histogram')")
+
+    def allocation_comparison_plot(self, by: str='ticker', max_slices: int=7, path_to_save_fig: str=None):
+        """Grouped bar chart comparing each ticker's/directory's allocation by amount invested
+        (cost basis, the default allocation_plot metric) against its allocation by current
+        market value — lets you see at a glance which positions have grown or shrunk relative
+        to what was put in.
+        by: 'ticker' — self.portfolio.distribution_by_ticker/_current_value, or 'directory' —
+        self.portfolio.distribution_by_directory/_current_value."""
+        if by=='ticker':
+            invested, current_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_current_value
+        elif by=='directory':
+            invested, current_value=self.portfolio.distribution_by_directory, self.portfolio.distribution_by_directory_current_value
+        else:
+            raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected 'ticker' or 'directory')")
+
+        # Sort/group by the invested metric (the "default" allocation_plot ordering), then carry
+        # the same grouping over to current_value so both bars for a given label line up.
+        ordered_keys=sorted(invested, key=invested.get, reverse=True)
+        if len(ordered_keys)>max_slices:
+            kept_keys, other_keys=ordered_keys[:max_slices], ordered_keys[max_slices:]
+            labels=kept_keys+['Other']
+            invested_values=[invested[key] for key in kept_keys]+[sum(invested[key] for key in other_keys)]
+            current_values=[current_value[key] for key in kept_keys]+[sum(current_value[key] for key in other_keys)]
+        else:
+            labels=ordered_keys
+            invested_values=[invested[key] for key in labels]
+            current_values=[current_value[key] for key in labels]
+
+        fig=go.Figure(data=[
+            go.Bar(x=labels, y=invested_values, name='Invested', marker_color=CATEGORICAL_COLORS[0]),
+            go.Bar(x=labels, y=current_values, name='Current value', marker_color=CATEGORICAL_COLORS[1]),
+        ])
+        fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)", barmode='group')
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
