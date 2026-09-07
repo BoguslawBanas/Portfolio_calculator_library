@@ -59,10 +59,13 @@ class Portfolio:
         When given, get_currency()/get_dataframe_currency() become available."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
+        self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
+        self.distribution_by_ticker_revenue=dict()
         self.total_invested_money=0.0
         self.total_current_value=0.0
+        self.total_revenue=0.0
         portfolio_list=list()
 
         # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
@@ -87,45 +90,61 @@ class Portfolio:
                     stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update)
                     self.distribution_by_directory[dir]=stock.total_money_invested
                     self.distribution_by_directory_current_value[dir]=stock.total_current_value
+                    self.distribution_by_directory_revenue[dir]=stock.total_revenue
                     self.total_invested_money+=stock.total_money_invested
                     self.total_current_value+=stock.total_current_value
+                    self.total_revenue+=stock.total_revenue
                     for key, value in stock.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
                     for key, value in stock.distribution_by_ticker_current_value.items():
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*stock.total_current_value, 2)
+                    for key, value in stock.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*stock.total_revenue, 2)
                     portfolio_list.append(stock)
                 elif type=='bonds':
                     bonds=Bonds(dir, progress_callback=progress_bar.update)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
+                    self.distribution_by_directory_revenue[dir]=bonds.total_revenue
                     self.total_invested_money+=bonds.total_money_invested
                     self.total_current_value+=bonds.total_current_value
+                    self.total_revenue+=bonds.total_revenue
                     for key, value in bonds.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
                     for key, value in bonds.distribution_by_ticker_current_value.items():
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*bonds.total_current_value, 2)
+                    for key, value in bonds.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*bonds.total_revenue, 2)
                     portfolio_list.append(bonds)
                 elif type=='commodities':
                     commodity=Commodity(dir, currency, progress_callback=progress_bar.update)
                     self.distribution_by_directory[dir]=commodity.total_money_invested
                     self.distribution_by_directory_current_value[dir]=commodity.total_current_value
+                    self.distribution_by_directory_revenue[dir]=commodity.total_revenue
                     self.total_invested_money+=commodity.total_money_invested
                     self.total_current_value+=commodity.total_current_value
+                    self.total_revenue+=commodity.total_revenue
                     for key, value in commodity.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*commodity.total_money_invested, 2)
                     for key, value in commodity.distribution_by_ticker_current_value.items():
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*commodity.total_current_value, 2)
+                    for key, value in commodity.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*commodity.total_revenue, 2)
                     portfolio_list.append(commodity)
                 elif type=='crypto':
                     crypto=Crypto(dir, currency, progress_callback=progress_bar.update)
                     self.distribution_by_directory[dir]=crypto.total_money_invested
                     self.distribution_by_directory_current_value[dir]=crypto.total_current_value
+                    self.distribution_by_directory_revenue[dir]=crypto.total_revenue
                     self.total_invested_money+=crypto.total_money_invested
                     self.total_current_value+=crypto.total_current_value
+                    self.total_revenue+=crypto.total_revenue
                     for key, value in crypto.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*crypto.total_money_invested, 2)
                     for key, value in crypto.distribution_by_ticker_current_value.items():
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*crypto.total_current_value, 2)
+                    for key, value in crypto.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*crypto.total_revenue, 2)
                     portfolio_list.append(crypto)
 
         for key, value in self.distribution_by_directory.items():
@@ -134,11 +153,17 @@ class Portfolio:
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value
 
+        for key, value in self.distribution_by_directory_revenue.items():
+            self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue
+
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*value/self.total_invested_money
 
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value
+
+        for key, value in self.distribution_by_ticker_revenue.items():
+            self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue
 
         self.data=self.merge(portfolio_list)
 
