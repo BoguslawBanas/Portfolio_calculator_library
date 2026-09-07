@@ -15,6 +15,8 @@ import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import Bonds
+from .commodity_calculator_library import Commodity
+from .crypto_calculator_library import Crypto
 
 
 class Portfolio:
@@ -42,7 +44,7 @@ class Portfolio:
 
     def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD'):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
-        'bank_account', 'crypto'). Each path is either
+        'commodities', 'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
           create_dataframe_and_get_data_from_directory), or
         - an already-prepared single transactions CSV that already has a 'state'
@@ -71,6 +73,10 @@ class Portfolio:
                 total_units+=Stock.count_tickers(dir)
             elif type=='bonds':
                 total_units+=1
+            elif type=='commodities':
+                total_units+=Commodity.count_tickers(dir)
+            elif type=='crypto':
+                total_units+=Crypto.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
@@ -88,10 +94,20 @@ class Portfolio:
                     for key, value in bonds.distribution_by_ticker.items():
                         self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
                     portfolio_list.append(bonds)
-                elif type=='crypto':
-                    pass
                 elif type=='commodities':
-                    pass
+                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=commodity.total_money_invested
+                    self.total_invested_money+=commodity.total_money_invested
+                    for key, value in commodity.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*commodity.total_money_invested, 2)
+                    portfolio_list.append(commodity)
+                elif type=='crypto':
+                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update)
+                    self.distribution_by_directory[dir]=crypto.total_money_invested
+                    self.total_invested_money+=crypto.total_money_invested
+                    for key, value in crypto.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*crypto.total_money_invested, 2)
+                    portfolio_list.append(crypto)
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money
@@ -194,7 +210,18 @@ class Portfolio:
         """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
         Equivalent of merge_dataframes(dataframes)."""
         list_of_df=[df.data for df in dataframes]
-        return pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
+        merged=pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
+        return Portfolio._prepend_zero_day(merged)
+
+    @staticmethod
+    def _prepend_zero_day(dataframe: pd.DataFrame) -> pd.DataFrame:
+        """Adds a zero-valued row one day before the first date, so IRR/return
+        calculations have a clean starting point (see README roadmap)."""
+        zero_row=pd.DataFrame(
+            [{col: 0.0 for col in dataframe.columns}],
+            index=[dataframe.index[0]-pd.DateOffset(days=1)]
+        )
+        return pd.concat([zero_row, dataframe]).sort_index()
 
     def resample(self, resample_rule: str) -> pd.DataFrame:
         timedelta_to_subtract: pd.DateOffset

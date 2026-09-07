@@ -1,8 +1,10 @@
 """
-Class-based crypto calculator, built the same way as commodity_calculator_library.Commodity:
-a set of buy/sell transactions turned into a daily investment/profit DataFrame. Crypto doesn't
-pay dividends, so there's no Dividend column — Profit is simply unrealized plus realized
-profit, the same two terms Stock uses minus the dividend one.
+Class-based commodity calculator, built the same way as stock_calculator_library.Stock but
+scoped to physical commodities (gold, silver, ...) instead of stocks/ETFs: a set of buy/sell
+transactions priced in a chosen unit (troy ounce, gram, ...) turned into a daily
+investment/profit DataFrame. Commodities don't pay dividends, so there's no Dividend column —
+Profit is simply unrealized plus realized profit, the same two terms Stock uses minus the
+dividend one.
 """
 
 import os
@@ -13,7 +15,7 @@ import yfinance as yf
 from .currency_calculator_library import Currency
 
 
-class Crypto:
+class Commodity:
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -32,25 +34,24 @@ class Crypto:
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
     CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
-    CSV_FEE_COLUMN='fee'
+    CSV_PREMIUM_COLUMN='premium'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
-    # Every one of these yfinance tickers is USD-quoted, so unlike Stock/Bonds there's no
-    # per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
+    # Every one of these yfinance futures tickers is USD-quoted, so unlike Stock/Bonds there's
+    # no per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
     TICKERS={
-        'bitcoin': 'BTC-USD',
-        'ethereum': 'ETH-USD',
-        'solana': 'SOL-USD',
-        'cardano': 'ADA-USD',
-        'dogecoin': 'DOGE-USD',
-        'ripple': 'XRP-USD',
+        'gold': 'GC=F',
+        'silver': 'SI=F',
+        'platinum': 'PL=F',
+        'palladium': 'PA=F',
+        'copper': 'HG=F',
     }
     QUOTE_CURRENCY='usd'
 
     def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
-        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'bitcoin', 'ethereum').
+        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
         progress_callback: optional zero-arg callback invoked once per symbol, right after that
         symbol's price history has been fetched and computed — the unit of work a caller (e.g.
@@ -71,7 +72,7 @@ class Crypto:
             money_invested=0.0
             for idx, row in df.iterrows():
                 if row[self.SOURCE_TYPE_COLUMN]=='buy':
-                    money_invested+=round((row[self.CSV_FEE_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
+                    money_invested+=round((row[self.CSV_PREMIUM_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
 
             money_invested_by_symbol[df[self.CSV_TICKER_COLUMN].iloc[0]]=money_invested
             self.total_money_invested+=money_invested
@@ -160,9 +161,9 @@ class Crypto:
 
         for idx, rows in dataframe.sort_index(kind='stable').iterrows():
             if rows[self.SOURCE_TYPE_COLUMN]=='buy':
-                units=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 8)
+                units=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 4)
                 raw_money_invested=rows[self.CSV_AMOUNT_OF_UNITS_COLUMN]*rows[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN]
-                money_invested=round((rows[self.CSV_FEE_COLUMN]+1.0)*raw_money_invested, 2)
+                money_invested=round((rows[self.CSV_PREMIUM_COLUMN]+1.0)*raw_money_invested, 2)
 
                 data.loc[idx, self.MONEY_INVESTED_COLUMN]+=money_invested
                 data.loc[idx, self.UNITS_COLUMN]+=units
@@ -170,7 +171,7 @@ class Crypto:
                 running_units+=units
                 running_money_invested+=money_invested
             elif rows[self.SOURCE_TYPE_COLUMN]=='sell':
-                units_sold=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 8)
+                units_sold=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 4)
                 if units_sold>running_units+1e-9:
                     raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {idx.date()}: only {running_units} units held.")
 
