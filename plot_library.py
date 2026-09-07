@@ -7,6 +7,7 @@ inlined here, driven by whatever DataFrame/columns the Portfolio instance alread
 alone (not matplotlib) so every chart type - including the candlestick - comes from one library.
 """
 
+import pandas as pd
 import plotly.graph_objects as go
 from .portfolio_calculator_library import Portfolio
 
@@ -92,6 +93,31 @@ class Plot:
             self._render(fig, path_to_save_fig)
         else:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected 'plot' or 'candlestick')")
+
+    def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
+        """Portfolio revenue (total gain) over time — a simpler, non-IRR read of performance
+        than performance_plot. Reads self.portfolio.data directly rather than
+        self.portfolio.portfolio, so — unlike performance_plot/period_return_bar_plot — it needs
+        no prior calculate_irr()/calculate_money_earned_between_dates_column() call.
+        include_dividends: True (default) — a single 'Revenue' line, Profit as-is (dividends
+        already summed into it); False — two separate lines, revenue with dividends backed out
+        (Profit - Dividend) and dividends on their own."""
+        dataframe=self.portfolio.data
+        dividends=dataframe.get(self.portfolio.DIVIDEND_COLUMN, pd.Series(0.0, index=dataframe.index))
+
+        if include_dividends:
+            fig=go.Figure(data=[
+                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN], mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0]))
+            ])
+        else:
+            fig=go.Figure(data=[
+                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN]-dividends, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0])),
+                go.Scatter(x=dataframe.index, y=dividends, mode='lines', name='Dividends', line=dict(color=CATEGORICAL_COLORS[1])),
+            ])
+
+        fig.update_layout(xaxis_title="Time", yaxis_title="Money", legend=dict(x=0, y=1))
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
 
     def period_return_bar_plot(self, days_between: int=0, offset: int=0, path_to_save_fig: str=None):
         if self.portfolio.DAILY_RETURN_COLUMN not in self.portfolio.portfolio.columns:
