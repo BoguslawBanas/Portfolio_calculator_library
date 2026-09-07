@@ -44,6 +44,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 
 - `money_plot` — money invested vs. total revenue, as overlaid lines or a stacked area
 - `performance_plot` — IRR over time, as a line or a candlestick chart
+- `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
 - `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by current market value, side by side per ticker/directory
@@ -145,6 +146,7 @@ portfolio.calculate_irr()
 plot = Plot(portfolio)
 plot.money_plot()
 plot.performance_plot(kind="candlestick")
+plot.revenue_plot(include_dividends=False)
 plot.allocation_plot(by="ticker", kind="pie", metric="current_value")
 plot.allocation_plot(by="ticker", kind="histogram", metric="revenue")
 plot.allocation_comparison_plot(by="ticker")
@@ -170,7 +172,6 @@ plot.allocation_comparison_plot(by="ticker")
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- a revenue-only chart in `Plot` (skipping IRR), with dividends optionally included or excluded
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - caching computed DataFrames to disk instead of re-fetching/recomputing on every run
 
