@@ -136,9 +136,10 @@ plot.allocation_plot(by="ticker", kind="pie")
 
 ## Roadmap
 
-- a zero-money "day one" row so IRR/return calculations have a clean starting point
 - commodity, crypto, and bank account support, following the `Stock`/`Bonds` pattern
 - allocation by current market value, not just amount invested
+- revenue allocation — how much each source/ticker's revenue contributes to total portfolio revenue
+- option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - caching computed DataFrames to disk instead of re-fetching/recomputing on every run
 
 ## License
