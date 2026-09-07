@@ -50,8 +50,10 @@ class Stock:
         Portfolio) would want to track progress by, since that fetch is what actually takes time."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
+        self.total_revenue=0.0
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
+        self.distribution_by_ticker_revenue=dict()
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
 
@@ -73,6 +75,7 @@ class Stock:
 
         dataframes_2=list()
         current_value_by_ticker=dict()
+        revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
@@ -83,11 +86,19 @@ class Stock:
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             self.total_current_value+=current_value_by_ticker[ticker]
 
+            # Revenue: this ticker's all-time gain (unrealized + dividends + realized), which
+            # can be negative for a losing position.
+            revenue_by_ticker[ticker]=computed[self.PROFIT_COLUMN].iloc[-1]
+            self.total_revenue+=revenue_by_ticker[ticker]
+
             if progress_callback is not None:
                 progress_callback()
 
         for ticker, value in current_value_by_ticker.items():
             self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0
+
+        for ticker, value in revenue_by_ticker.items():
+            self.distribution_by_ticker_revenue[ticker]=(value/self.total_revenue)*100.0
 
         self.data=self.merge(dataframes_2)
 
