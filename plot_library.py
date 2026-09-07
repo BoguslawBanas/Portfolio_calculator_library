@@ -107,22 +107,29 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
+    # Suffix appended to 'distribution_by_ticker'/'distribution_by_directory' to reach the
+    # Portfolio attribute backing each allocation_plot metric.
+    METRIC_ATTRIBUTE_SUFFIXES={'invested': '', 'current_value': '_current_value', 'revenue': '_revenue'}
+
     def allocation_plot(self, by: str='ticker', kind: str='pie', metric: str='invested', max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
-        by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value), or 'directory' —
-        self.portfolio.distribution_by_directory(_current_value).
-        kind: 'pie' — donut chart, or 'histogram' — bar chart.
-        metric: 'invested' — allocation by amount invested (cost basis), or 'current_value' —
+        by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value/_revenue), or
+        'directory' — self.portfolio.distribution_by_directory(_current_value/_revenue).
+        kind: 'pie' — donut chart, or 'histogram' — bar chart. metric='revenue' can produce a
+        negative share (a losing position/source), which a pie chart can't represent
+        meaningfully — prefer kind='histogram' whenever that's possible.
+        metric: 'invested' — allocation by amount invested (cost basis), 'current_value' —
         allocation by what each position is actually worth today (cost basis still held plus
-        unrealized gain)."""
-        if metric not in ('invested', 'current_value'):
-            raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected 'invested' or 'current_value')")
-        by_current_value=metric=='current_value'
+        unrealized gain), or 'revenue' — allocation by each position's share of total portfolio
+        gains (unrealized + dividends + realized; can be negative for a losing position)."""
+        if metric not in self.METRIC_ATTRIBUTE_SUFFIXES:
+            raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected 'invested', 'current_value', or 'revenue')")
+        suffix=self.METRIC_ATTRIBUTE_SUFFIXES[metric]
 
         if by=='ticker':
-            distribution=self.portfolio.distribution_by_ticker_current_value if by_current_value else self.portfolio.distribution_by_ticker
+            distribution=getattr(self.portfolio, f'distribution_by_ticker{suffix}')
         elif by=='directory':
-            distribution=self.portfolio.distribution_by_directory_current_value if by_current_value else self.portfolio.distribution_by_directory
+            distribution=getattr(self.portfolio, f'distribution_by_directory{suffix}')
         else:
             raise ValueError(f"Unknown allocation_plot by: {by!r} (expected 'ticker' or 'directory')")
 
