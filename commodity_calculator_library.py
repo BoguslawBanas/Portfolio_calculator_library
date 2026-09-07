@@ -8,7 +8,6 @@ dividend one.
 """
 
 import os
-import json
 from datetime import datetime
 from typing import Callable
 import pandas as pd
@@ -38,20 +37,29 @@ class Commodity:
     CSV_PREMIUM_COLUMN='premium'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
-    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None):
+    # Every one of these yfinance futures tickers is USD-quoted, so unlike Stock/Bonds there's
+    # no per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
+    TICKERS={
+        'gold': 'GC=F',
+        'silver': 'SI=F',
+        'platinum': 'PL=F',
+        'palladium': 'PA=F',
+        'copper': 'HG=F',
+    }
+    QUOTE_CURRENCY='usd'
+
+    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
-        sell_tax.csv), state inferred from filename, one row per transaction. tickers_json:
-        path to a JSON file mapping each symbol (CSV_TICKER_COLUMN's values, e.g. 'gold',
-        'silver') to the yfinance ticker that prices it and its quote currency, e.g.
-        {"gold": {"ticker": "GC=F", "currency": "usd"}, "silver": {"ticker": "SI=F", "currency": "usd"}}.
-        currency_to: target currency every instrument is converted to. progress_callback:
-        optional zero-arg callback invoked once per symbol, right after that symbol's price
-        history has been fetched and computed — the unit of work a caller (e.g. Portfolio)
-        would want to track progress by, since that fetch is what actually takes time."""
+        sell_tax.csv), state inferred from filename, one row per transaction. Each row's
+        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
+        currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
+        progress_callback: optional zero-arg callback invoked once per symbol, right after that
+        symbol's price history has been fetched and computed — the unit of work a caller (e.g.
+        Portfolio) would want to track progress by, since that fetch is what actually takes
+        time."""
         self.total_money_invested=0.0
         self.distribution_by_ticker=dict()
         self.dataframe=self._load_sources(directory_path)
-        self.tickers=self._load_tickers_json(tickers_json)
 
         dataframes=self._split_by_symbol(self.dataframe)
 
@@ -59,7 +67,7 @@ class Commodity:
         # which derives it the same way) — recompute it here instead of assuming one exists.
         money_invested_by_symbol=dict()
         for df in dataframes:
-            currency=Currency(self.get_ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN), currency_to, df.index.min())
+            currency=Currency(self.QUOTE_CURRENCY, currency_to, df.index.min())
 
             money_invested=0.0
             for idx, row in df.iterrows():
@@ -73,31 +81,17 @@ class Commodity:
         for df in dataframes:
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[symbol]=(money_invested_by_symbol[symbol]/self.total_money_invested)*100.0
-            dataframes_2.append(self._compute_data(df, self.get_ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN), currency_to))
+            dataframes_2.append(self._compute_data(df, currency_to))
             if progress_callback is not None:
                 progress_callback()
 
         self.data=self.merge(dataframes_2)
 
     @staticmethod
-    def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, symbol_column_name: str) -> str:
-        """Quote currency of a per-instrument dataframe's symbol, looked up from tickers_json.
-        Only works if all rows share the same symbol. Equivalent of Stock.get_ticker_currency."""
-        with open(path_to_json_file, "r") as f:
-            j=json.load(f)
-            currency=j[dataframe[symbol_column_name].iloc[0]]['currency']
-        return currency
-
-    @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
         """Sums a list of per-instrument DataFrames by date into a single aggregate DataFrame.
         Equivalent of Stock.merge."""
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
-
-    @staticmethod
-    def _load_tickers_json(tickers_json: str) -> dict:
-        with open(tickers_json, 'r') as f:
-            return json.load(f)
 
     @classmethod
     def _split_by_symbol(cls, dataframe: pd.DataFrame) -> list:
@@ -139,11 +133,11 @@ class Commodity:
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str) -> pd.DataFrame:
         start_date=dataframe.index.min()
-        ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
+        ticker_name=self.TICKERS[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
 
-        currency=Currency(currency_from, currency_to, start_date)
+        currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
