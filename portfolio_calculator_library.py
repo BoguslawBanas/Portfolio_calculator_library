@@ -194,7 +194,18 @@ class Portfolio:
         """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
         Equivalent of merge_dataframes(dataframes)."""
         list_of_df=[df.data for df in dataframes]
-        return pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
+        merged=pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
+        return Portfolio._prepend_zero_day(merged)
+
+    @staticmethod
+    def _prepend_zero_day(dataframe: pd.DataFrame) -> pd.DataFrame:
+        """Adds a zero-valued row one day before the first date, so IRR/return
+        calculations have a clean starting point (see README roadmap)."""
+        zero_row=pd.DataFrame(
+            [{col: 0.0 for col in dataframe.columns}],
+            index=[dataframe.index[0]-pd.DateOffset(days=1)]
+        )
+        return pd.concat([zero_row, dataframe]).sort_index()
 
     def resample(self, resample_rule: str) -> pd.DataFrame:
         timedelta_to_subtract: pd.DateOffset
