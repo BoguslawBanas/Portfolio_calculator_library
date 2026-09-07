@@ -1,52 +1,201 @@
-import yfinance as yf
-import pandas as pd
+"""
+Class-based crypto calculator, built the same way as commodity_calculator_library.Commodity:
+a set of buy/sell transactions turned into a daily investment/profit DataFrame. Crypto doesn't
+pay dividends, so there's no Dividend column — Profit is simply unrealized plus realized
+profit, the same two terms Stock uses minus the dividend one.
+"""
+
+import os
 from datetime import datetime
-from currency_calculator_library import get_currency_exchange_rate_data
+from typing import Callable
+import pandas as pd
+import yfinance as yf
+from .currency_calculator_library import Currency
 
-def get_data_from_ticker(df: pd.DataFrame, currency_from: str, currency_to: str, ticker_column_name: str) -> pd.DataFrame:
-    start_date=df.index[0]
-    currency_data=get_currency_exchange_rate_data(currency_from, currency_to, start_date)
 
-    return get_data_from_ticker_with_currency_data(df, currency_data, ticker_column_name)
+class Crypto:
+    # --- Output: self.data / working DataFrame columns. The first three form the shared
+    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    MONEY_INVESTED_COLUMN='Money_invested'
+    PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
+    PROFIT_COLUMN='Profit'
+    REALIZED_PROFIT_COLUMN='Realized_profit'
+    UNITS_COLUMN='Units'
+    CLOSE_COLUMN='Close'
 
-def get_data_from_ticker_with_currency_data(df: pd.DataFrame, currency_data: pd.DataFrame, ticker_column_name: str) -> pd.DataFrame:
-    start_date=df.index[0]
+    # --- Ingestion tag: synthesized while loading (from the CSV filename), not read from
+    # inside a CSV cell — but consumed everywhere exactly like an input column. ---
+    SOURCE_TYPE_COLUMN='state'
 
-    data=yf.download(df[ticker_column_name].iloc[0], start=start_date, end=datetime.today()+pd.DateOffset(days=1))
-    data=data.droplevel(level='Ticker', axis=1)
-    data.drop(columns=['High', 'Low', 'Open', 'Volume'], inplace=True)
+    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). ---
+    CSV_TICKER_COLUMN='symbol'
+    CSV_DATE_COLUMN='date'
+    CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
+    CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
+    CSV_FEE_COLUMN='fee'
+    CSV_SELL_TAX_COLUMN='sell_tax'
 
-    all_days=pd.DataFrame(
-        index=pd.date_range(start=start_date, end=datetime.today(), freq='D')
-    )
-    data=all_days.join(data).ffill()
-    data['Close']=data['Close']*currency_data['Close']
+    # Every one of these yfinance tickers is USD-quoted, so unlike Stock/Bonds there's no
+    # per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
+    TICKERS={
+        'bitcoin': 'BTC-USD',
+        'ethereum': 'ETH-USD',
+        'solana': 'SOL-USD',
+        'cardano': 'ADA-USD',
+        'dogecoin': 'DOGE-USD',
+        'ripple': 'XRP-USD',
+    }
+    QUOTE_CURRENCY='usd'
 
-    data['Money_invested']=0.0
-    data['Money_invested_after_penalty']=0.0
-    data['Avg_price']=0.0
-    data['Dividend']=0.0
+    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None):
+        """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
+        sell_tax.csv), state inferred from filename, one row per transaction. Each row's
+        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'bitcoin', 'ethereum').
+        currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
+        progress_callback: optional zero-arg callback invoked once per symbol, right after that
+        symbol's price history has been fetched and computed — the unit of work a caller (e.g.
+        Portfolio) would want to track progress by, since that fetch is what actually takes
+        time."""
+        self.total_money_invested=0.0
+        self.distribution_by_ticker=dict()
+        self.dataframe=self._load_sources(directory_path)
 
-    for idx, rows in df.iterrows():
-        if rows['state']=='buy':
-            data.loc[idx, 'Money_invested']=round(rows['money_invested'], 2)
-            data.loc[idx, 'Money_invested_after_penalty']=round(rows['money_invested']*(1-rows['penalty']), 2)
-            data.loc[idx, 'Avg_price']=(rows['money_invested']*rows['price_of_unit']*currency_data.loc[idx, 'Close'])
-        elif rows['state']=='sell':
-            pass
-        elif rows['state']=='sell_tax':
-            pass
-        elif rows['state']=='dividend':
-            data.loc[idx, 'Dividend']+=round(rows['money_invested'], 2)
-        elif rows['state']=='dividend_tax':
-            data.loc[idx, 'Dividend']-=round(rows['money_invested'], 2)
+        dataframes=self._split_by_symbol(self.dataframe)
 
-    data['Money_invested']=data['Money_invested'].cumsum()
-    data['Money_invested_after_penalty']=data['Money_invested_after_penalty'].cumsum()
-    data['Avg_price']=data['Avg_price'].cumsum()/data['Money_invested']
-    data['Dividend']=data['Dividend'].cumsum()
+        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
+        # which derives it the same way) — recompute it here instead of assuming one exists.
+        money_invested_by_symbol=dict()
+        for df in dataframes:
+            currency=Currency(self.QUOTE_CURRENCY, currency_to, df.index.min())
 
-    data['Profit_without_dividends']=round((data['Close']-data['Avg_price'])/data['Avg_price']*data['Money_invested']-data['Money_invested']+data['Money_invested_after_penalty'], 2)
-    data['Profit']=round(data['Profit_without_dividends']+data['Dividend'], 2)
-    data.drop(columns=['Close', 'Money_invested_after_penalty', 'Avg_price'], inplace=True)
-    return data
+            money_invested=0.0
+            for idx, row in df.iterrows():
+                if row[self.SOURCE_TYPE_COLUMN]=='buy':
+                    money_invested+=round((row[self.CSV_FEE_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
+
+            money_invested_by_symbol[df[self.CSV_TICKER_COLUMN].iloc[0]]=money_invested
+            self.total_money_invested+=money_invested
+
+        dataframes_2=list()
+        for df in dataframes:
+            symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
+            self.distribution_by_ticker[symbol]=(money_invested_by_symbol[symbol]/self.total_money_invested)*100.0
+            dataframes_2.append(self._compute_data(df, currency_to))
+            if progress_callback is not None:
+                progress_callback()
+
+        self.data=self.merge(dataframes_2)
+
+    @staticmethod
+    def merge(dataframes: list) -> pd.DataFrame:
+        """Sums a list of per-instrument DataFrames by date into a single aggregate DataFrame.
+        Equivalent of Stock.merge."""
+        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
+
+    @classmethod
+    def _split_by_symbol(cls, dataframe: pd.DataFrame) -> list:
+        dataframes=dict()
+        for _, row in dataframe.iterrows():
+            if dataframes.get(row[cls.CSV_TICKER_COLUMN]) is None:
+                dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.DataFrame()
+            dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.concat([dataframes[row[cls.CSV_TICKER_COLUMN]], row], axis=1)
+
+        list_of_dataframes=list(dataframes.values())
+        for i in range(len(list_of_dataframes)):
+            list_of_dataframes[i]=list_of_dataframes[i].transpose()
+            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
+            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
+
+        return list_of_dataframes
+
+    @classmethod
+    def count_tickers(cls, directory_path: str) -> int:
+        """Number of distinct symbols in a source directory, without fetching any price data —
+        lets a caller (e.g. Portfolio) size a progress bar before construction."""
+        return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
+
+    @classmethod
+    def _load_sources(cls, directory: str) -> pd.DataFrame:
+        dataframes=list()
+        for filename in sorted(os.listdir(directory)):
+            if not filename.endswith('.csv'):
+                continue
+            state_value=os.path.splitext(filename)[0]
+            df=pd.read_csv(os.path.join(directory, filename))
+            if df.empty:
+                continue
+            df[cls.SOURCE_TYPE_COLUMN]=state_value
+            dataframes.append(df)
+
+        if not dataframes:
+            raise ValueError(f"No non-empty .csv files found in {directory}")
+
+        return pd.concat(dataframes)
+
+    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str) -> pd.DataFrame:
+        start_date=dataframe.index.min()
+        ticker_name=self.TICKERS[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
+
+        currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date)
+
+        ticker=yf.Ticker(ticker_name)
+        ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
+        ticker_data.index=ticker_data.index.tz_localize(None).normalize()
+
+        all_days=pd.DataFrame(
+            index=pd.date_range(start=start_date, end=datetime.today(), freq='D').tz_localize(None).normalize()
+        )
+        data=all_days.join(ticker_data).ffill()
+        data[self.CLOSE_COLUMN]=data[self.CLOSE_COLUMN]*currency.data[self.CLOSE_COLUMN]
+
+        data[self.MONEY_INVESTED_COLUMN]=0.0
+        data[self.UNITS_COLUMN]=0.0
+        data[self.REALIZED_PROFIT_COLUMN]=0.0
+
+        # Transactions must be walked in date order (not CSV/file order) since a sell needs
+        # the running average cost basis built up by every buy that precedes it in time.
+        running_units=0.0
+        running_money_invested=0.0
+
+        for idx, rows in dataframe.sort_index(kind='stable').iterrows():
+            if rows[self.SOURCE_TYPE_COLUMN]=='buy':
+                units=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 8)
+                raw_money_invested=rows[self.CSV_AMOUNT_OF_UNITS_COLUMN]*rows[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN]
+                money_invested=round((rows[self.CSV_FEE_COLUMN]+1.0)*raw_money_invested, 2)
+
+                data.loc[idx, self.MONEY_INVESTED_COLUMN]+=money_invested
+                data.loc[idx, self.UNITS_COLUMN]+=units
+
+                running_units+=units
+                running_money_invested+=money_invested
+            elif rows[self.SOURCE_TYPE_COLUMN]=='sell':
+                units_sold=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 8)
+                if units_sold>running_units+1e-9:
+                    raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {idx.date()}: only {running_units} units held.")
+
+                # Remove cost basis in proportion to the units sold so the average price of the
+                # remaining position (Money_invested/Units) is unchanged by a partial sell.
+                fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
+                money_invested_removed=round(running_money_invested*fraction_sold, 2)
+
+                proceeds=rows[self.CSV_AMOUNT_OF_UNITS_COLUMN]*rows[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN]
+
+                data.loc[idx, self.UNITS_COLUMN]-=units_sold
+                data.loc[idx, self.MONEY_INVESTED_COLUMN]-=money_invested_removed
+                data.loc[idx, self.REALIZED_PROFIT_COLUMN]+=round(proceeds-money_invested_removed, 2)
+
+                running_units-=units_sold
+                running_money_invested-=money_invested_removed
+            elif rows[self.SOURCE_TYPE_COLUMN]=='sell_tax':
+                data.loc[idx, self.REALIZED_PROFIT_COLUMN]-=round(rows[self.CSV_SELL_TAX_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
+
+        data[self.MONEY_INVESTED_COLUMN]=data[self.MONEY_INVESTED_COLUMN].cumsum()
+        data[self.UNITS_COLUMN]=data[self.UNITS_COLUMN].cumsum()
+        data[self.REALIZED_PROFIT_COLUMN]=data[self.REALIZED_PROFIT_COLUMN].cumsum()
+
+        # Unrealized profit = current market value of the held units minus their cost basis.
+        data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
+        data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
+        data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
+        return data
