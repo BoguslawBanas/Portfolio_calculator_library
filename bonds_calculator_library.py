@@ -40,16 +40,17 @@ class Bonds:
         date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
         letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
         (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
-        inflation_rate_file: CSVs expected in the working directory, used respectively by
-        variable-rate and inflation-indexed bonds. progress_callback: optional zero-arg callback
-        invoked once, after all bond rows have been computed, for a caller (e.g. Portfolio)
-        tracking overall progress."""
+        inflation_rate_file: CSVs used respectively by variable-rate and inflation-indexed
+        bonds, resolved relative to dataframe (the bonds source directory) — pass an absolute
+        path instead to point elsewhere. progress_callback: optional zero-arg callback invoked
+        once, after all bond rows have been computed, for a caller (e.g. Portfolio) tracking
+        overall progress."""
         today=datetime.today()
         self.dataframe=pd.read_csv(os.path.join(dataframe, "buy.csv"))
         self.dataframe.index=pd.to_datetime(self.dataframe[self.CSV_DATE_COLUMN], format='%Y-%m-%d')
         self.dataframe.drop([self.CSV_DATE_COLUMN], axis=1, inplace=True)
-        self.interest_rate_data=self._load_rate_file(interest_rate_file, '%m-%Y', today)
-        self.inflation_rate_data=self._load_rate_file(inflation_rate_file, '%m-%Y', today)
+        self.interest_rate_data=self._load_rate_file(os.path.join(dataframe, interest_rate_file), '%m-%Y', today)
+        self.inflation_rate_data=self._load_rate_file(os.path.join(dataframe, inflation_rate_file), '%m-%Y', today)
         self.data=self._compute_data(today, progress_callback)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.distribution_by_ticker={'Polish bonds': 100.0}

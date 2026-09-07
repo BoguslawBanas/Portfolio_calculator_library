@@ -107,8 +107,8 @@ from Portfolio_calculator_library.plot_library import Plot
 # Each source is a directory of per-transaction-state CSVs: buy.csv, sell.csv,
 # sell_tax.csv, dividend.csv, dividend_tax.csv (stocks), buy.csv, sell.csv, sell_tax.csv
 # (commodities — symbol column must be one of Commodity.TICKERS's keys, e.g. "gold"),
-# or buy.csv (bonds — interest_rate.csv/inflation_rate.csv are read from the current
-# working directory).
+# or buy.csv plus interest_rate.csv/inflation_rate.csv (bonds — the two rate CSVs are
+# read from the bonds directory itself, not the working directory).
 sources = {
     "data/stocks": "stock",
     "data/bonds": "bonds",
