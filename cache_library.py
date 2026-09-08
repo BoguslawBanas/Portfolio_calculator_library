@@ -56,6 +56,36 @@ class DiskCache:
             if filename.endswith('.pkl'):
                 os.remove(os.path.join(self.cache_dir, filename))
 
+    def evict_stale(self) -> int:
+        """Deletes every entry not computed today, reclaiming disk space from orphaned
+        entries (see clear()'s docstring) without needing to track which keys are still
+        'live'. Safe to call at any point, including mid-run: an entry not computed today is
+        already worthless to get() (a cache miss), so removing it changes no caller's
+        behavior — either nothing will ever recompute that key again (truly orphaned, so
+        deleting it is pure cleanup), or something will recompute it later today, at which
+        point set() writes a fresh file to the same path regardless of whether the old one
+        was still there. A corrupted/unreadable entry (see get()'s docstring) is removed the
+        same way — it's equally worthless. Returns the number of files removed."""
+        if not os.path.isdir(self.cache_dir):
+            return 0
+
+        today=datetime.today().date()
+        removed=0
+        for filename in os.listdir(self.cache_dir):
+            if not filename.endswith('.pkl'):
+                continue
+            path=os.path.join(self.cache_dir, filename)
+            try:
+                with open(path, 'rb') as f:
+                    entry=pickle.load(f)
+                is_stale=entry.get('computed_on')!=today
+            except (pickle.UnpicklingError, EOFError, AttributeError, ImportError, IndexError):
+                is_stale=True
+            if is_stale:
+                os.remove(path)
+                removed+=1
+        return removed
+
     def _path(self, key: str) -> str:
         return os.path.join(self.cache_dir, hashlib.sha256(key.encode()).hexdigest()+'.pkl')
 
