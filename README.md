@@ -196,6 +196,7 @@ plot.allocation_comparison_plot(by="ticker")
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 - ~~caching computed DataFrames to disk instead of re-fetching/recomputing on every run~~ — done, see `cache_library.DiskCache` and the `cache_dir` argument above
+- automatic eviction of orphaned cache entries — a cache file whose key (ticker/currency/transactions hash) nothing recomputes anymore (a removed ticker, an edited transaction) is never revisited, so it's never overwritten or deleted on its own and just accumulates on disk; `DiskCache.clear()` covers a manual wipe today, but there's no automatic pruning yet
 
 ## License
 
