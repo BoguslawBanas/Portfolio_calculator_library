@@ -17,6 +17,7 @@ from typing import Callable
 import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import Currency
+from .cache_library import DiskCache
 
 
 class Stock:
@@ -44,10 +45,15 @@ class Stock:
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None):
+    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """progress_callback: optional zero-arg callback invoked once per ticker, right after that
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
-        Portfolio) would want to track progress by, since that fetch is what actually takes time."""
+        Portfolio) would want to track progress by, since that fetch is what actually takes time.
+        cache_dir: optional directory to cache each ticker's computed DataFrame in, keyed by
+        ticker/currency/transactions and valid for the day it was written — see
+        cache_library.DiskCache. Also passed down to every Currency this Stock constructs.
+        force_refresh: when True (and cache_dir is set), ignores any cached entry and
+        recomputes/re-fetches everything, then overwrites the cache with the fresh result."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -56,6 +62,7 @@ class Stock:
         self.distribution_by_ticker_revenue=dict()
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
+        self._cache_dir=cache_dir
 
         dataframes=self._split_by_isin(self.dataframe)
 
@@ -63,7 +70,7 @@ class Stock:
         # which derives it the same way) — recompute it here instead of assuming one exists.
         money_invested_by_ticker=dict()
         for df in dataframes:
-            currency=Currency(self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, df.index.min())
+            currency=Currency(self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, df.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
 
             money_invested=0.0
             for idx, row in df.iterrows():
@@ -79,7 +86,7 @@ class Stock:
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
-            computed=self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to)
+            computed=self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
@@ -178,11 +185,20 @@ class Stock:
         dataframe[self.CSV_TICKER_COLUMN]=dataframe[self.CSV_TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
         return dataframe
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
         start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
 
-        currency=Currency(currency_from, currency_to, start_date)
+        cache=DiskCache(cache_dir) if cache_dir else None
+        cache_key=None
+        if cache is not None:
+            cache_key=DiskCache.make_key('stock', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
+            if not force_refresh:
+                cached=cache.get(cache_key)
+                if cached is not None:
+                    return cached
+
+        currency=Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
@@ -250,4 +266,8 @@ class Stock:
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
+
+        if cache is not None:
+            cache.set(cache_key, data)
+
         return data

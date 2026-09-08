@@ -12,6 +12,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from .cache_library import DiskCache
 
 
 class Bonds:
@@ -35,7 +36,7 @@ class Bonds:
     CSV_INTEREST_RATE_COLUMN='rate'
     CSV_INFLATION_COLUMN='inflation'
 
-    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None):
+    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
         date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
         letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
@@ -44,14 +45,39 @@ class Bonds:
         bonds, resolved relative to dataframe (the bonds source directory) — pass an absolute
         path instead to point elsewhere. progress_callback: optional zero-arg callback invoked
         once, after all bond rows have been computed, for a caller (e.g. Portfolio) tracking
-        overall progress."""
+        overall progress.
+        cache_dir: optional directory to cache the fully computed bonds DataFrame in, keyed by
+        the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the day it
+        was written — see cache_library.DiskCache.
+        force_refresh: when True (and cache_dir is set), ignores any cached entry and
+        recomputes everything, then overwrites the cache with the fresh result."""
         today=datetime.today()
-        self.dataframe=pd.read_csv(os.path.join(dataframe, "buy.csv"))
+        interest_rate_path=os.path.join(dataframe, interest_rate_file)
+        inflation_rate_path=os.path.join(dataframe, inflation_rate_file)
+        buy_path=os.path.join(dataframe, "buy.csv")
+
+        self.dataframe=pd.read_csv(buy_path)
         self.dataframe.index=pd.to_datetime(self.dataframe[self.CSV_DATE_COLUMN], format='%Y-%m-%d')
         self.dataframe.drop([self.CSV_DATE_COLUMN], axis=1, inplace=True)
-        self.interest_rate_data=self._load_rate_file(os.path.join(dataframe, interest_rate_file), '%m-%Y', today)
-        self.inflation_rate_data=self._load_rate_file(os.path.join(dataframe, inflation_rate_file), '%m-%Y', today)
-        self.data=self._compute_data(today, progress_callback)
+        self.interest_rate_data=self._load_rate_file(interest_rate_path, '%m-%Y', today)
+        self.inflation_rate_data=self._load_rate_file(inflation_rate_path, '%m-%Y', today)
+
+        cache=DiskCache(cache_dir) if cache_dir else None
+        cache_key=None
+        cached=None
+        if cache is not None:
+            cache_key=DiskCache.make_key('bonds', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
+            if not force_refresh:
+                cached=cache.get(cache_key)
+
+        if cached is not None:
+            self.data=cached
+            if progress_callback is not None:
+                progress_callback()
+        else:
+            self.data=self._compute_data(today, progress_callback)
+            if cache is not None:
+                cache.set(cache_key, self.data)
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
