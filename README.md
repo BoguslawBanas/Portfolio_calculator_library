@@ -37,6 +37,18 @@ Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataF
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
+- optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
+- optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
+
+### 💾 `cache_library.DiskCache`
+
+Disk cache backing the optional `cache_dir`/`force_refresh` arguments on `Stock`/`Bonds`/`Commodity`/`Crypto`/`Currency`/`Portfolio` — opt-in, off by default.
+
+- caches each source's fully computed DataFrame (price history already fetched, transactions already walked), so a same-day re-run skips both the `yfinance` calls and the recomputation entirely
+- a cache entry is valid only for the day it was written — every calculator fetches price/rate history up to "today", so entries auto-invalidate the next calendar day
+- also invalidates on any change to the underlying inputs (an edited/added/removed transaction, a different ticker/currency pair) by folding a hash of them into the cache key, independent of the day-based expiry
+- `force_refresh=True` bypasses a cache read for one run without touching disk — a per-call cold start
+- `DiskCache(cache_dir).clear()` deletes every cached entry (the directory itself is left in place) — use it to reclaim space from orphaned entries (a ticker/transaction combination nothing computes anymore, so nothing ever overwrites its file) or to force a clean slate by hand
 
 ### 📉 `plot_library.Plot`
 
@@ -84,6 +96,7 @@ Portfolio_calculator_library/
 ├── currency_calculator_library.py       # Currency
 ├── portfolio_calculator_library.py      # Portfolio
 ├── plot_library.py                      # Plot
+├── cache_library.py                     # DiskCache
 ├── bank_account_calculator_library.py   # prototype, not yet integrated
 └── LICENSE
 ```
@@ -132,7 +145,16 @@ sources = {
 
 # tickers.json maps each ISIN to its yfinance ticker and native currency, e.g.
 # {"US78462F1030": {"ticker": "SPY", "currency": "usd"}}
-portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd")
+# cache_dir is optional: when given, every source's computed DataFrame is cached to disk for
+# the day, so re-running later today skips both the yfinance calls and the recomputation.
+# force_refresh=True ignores the cache for this one run and refreshes it with fresh data —
+# a one-off cold start, e.g. Portfolio(sources, ..., cache_dir=".portfolio_cache", force_refresh=True).
+portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd", cache_dir=".portfolio_cache")
+
+# To wipe the cache entirely (e.g. to reclaim space from stale/orphaned entries) instead of
+# forcing a single refresh:
+# from Portfolio_calculator_library.cache_library import DiskCache
+# DiskCache(".portfolio_cache").clear()
 
 print(f"Total invested: {portfolio.total_invested_money:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
@@ -173,7 +195,8 @@ plot.allocation_comparison_plot(by="ticker")
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
-- caching computed DataFrames to disk instead of re-fetching/recomputing on every run
+- ~~caching computed DataFrames to disk instead of re-fetching/recomputing on every run~~ — done, see `cache_library.DiskCache` and the `cache_dir` argument above
+- automatic eviction of orphaned cache entries — a cache file whose key (ticker/currency/transactions hash) nothing recomputes anymore (a removed ticker, an edited transaction) is never revisited, so it's never overwritten or deleted on its own and just accumulates on disk; `DiskCache.clear()` covers a manual wipe today, but there's no automatic pruning yet
 
 ## License
 
