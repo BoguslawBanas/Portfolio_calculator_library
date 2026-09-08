@@ -45,7 +45,7 @@ class Portfolio:
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD'):
+    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
         'commodities', 'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
@@ -59,7 +59,11 @@ class Portfolio:
 
         tickers_json: optional path to the JSON file (see CLAUDE.md / stock_calculator_library)
         mapping each ISIN to {"ticker": <yfinance symbol>, "currency": <instrument currency>}.
-        When given, get_currency()/get_dataframe_currency() become available."""
+        When given, get_currency()/get_dataframe_currency() become available.
+
+        cache_dir: optional directory to cache every source's computed DataFrame in — see
+        cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
+        constructed below; disabled (no caching) when left as None."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
@@ -90,7 +94,7 @@ class Portfolio:
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update)
+                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir)
                     self.distribution_by_directory[dir]=stock.total_money_invested
                     self.distribution_by_directory_current_value[dir]=stock.total_current_value
                     self.distribution_by_directory_revenue[dir]=stock.total_revenue
@@ -105,7 +109,7 @@ class Portfolio:
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*stock.total_revenue, 2)
                     portfolio_list.append(stock)
                 elif type=='bonds':
-                    bonds=Bonds(dir, progress_callback=progress_bar.update)
+                    bonds=Bonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
                     self.distribution_by_directory_revenue[dir]=bonds.total_revenue
@@ -120,7 +124,7 @@ class Portfolio:
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*bonds.total_revenue, 2)
                     portfolio_list.append(bonds)
                 elif type=='commodities':
-                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update)
+                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir)
                     self.distribution_by_directory[dir]=commodity.total_money_invested
                     self.distribution_by_directory_current_value[dir]=commodity.total_current_value
                     self.distribution_by_directory_revenue[dir]=commodity.total_revenue
@@ -135,7 +139,7 @@ class Portfolio:
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*commodity.total_revenue, 2)
                     portfolio_list.append(commodity)
                 elif type=='crypto':
-                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update)
+                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir)
                     self.distribution_by_directory[dir]=crypto.total_money_invested
                     self.distribution_by_directory_current_value[dir]=crypto.total_current_value
                     self.distribution_by_directory_revenue[dir]=crypto.total_revenue
@@ -171,9 +175,9 @@ class Portfolio:
         self.data=self.merge(portfolio_list)
 
     @classmethod
-    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None) -> 'Portfolio':
+    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
-        return cls({dataframe_file: source_type}, tickers_json)
+        return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir)
 
     def _replace_isin_with_ticker(self):
         """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
