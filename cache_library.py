@@ -45,6 +45,17 @@ class DiskCache:
         with open(self._path(key), 'wb') as f:
             pickle.dump({'computed_on': datetime.today().date(), 'data': dataframe}, f)
 
+    def clear(self):
+        """Deletes every cached entry in cache_dir (the directory itself is left in place).
+        Use this to reclaim space from orphaned entries — one whose key (ticker/currency/
+        transactions hash) is no longer recomputed by anything, so it would otherwise never
+        get overwritten or removed on its own — or simply to force a clean slate."""
+        if not os.path.isdir(self.cache_dir):
+            return
+        for filename in os.listdir(self.cache_dir):
+            if filename.endswith('.pkl'):
+                os.remove(os.path.join(self.cache_dir, filename))
+
     def _path(self, key: str) -> str:
         return os.path.join(self.cache_dir, hashlib.sha256(key.encode()).hexdigest()+'.pkl')
 

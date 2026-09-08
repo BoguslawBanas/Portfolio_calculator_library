@@ -36,7 +36,7 @@ class Bonds:
     CSV_INTEREST_RATE_COLUMN='rate'
     CSV_INFLATION_COLUMN='inflation'
 
-    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None):
+    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
         date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
         letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
@@ -48,7 +48,9 @@ class Bonds:
         overall progress.
         cache_dir: optional directory to cache the fully computed bonds DataFrame in, keyed by
         the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the day it
-        was written — see cache_library.DiskCache."""
+        was written — see cache_library.DiskCache.
+        force_refresh: when True (and cache_dir is set), ignores any cached entry and
+        recomputes everything, then overwrites the cache with the fresh result."""
         today=datetime.today()
         interest_rate_path=os.path.join(dataframe, interest_rate_file)
         inflation_rate_path=os.path.join(dataframe, inflation_rate_file)
@@ -65,7 +67,8 @@ class Bonds:
         cached=None
         if cache is not None:
             cache_key=DiskCache.make_key('bonds', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
-            cached=cache.get(cache_key)
+            if not force_refresh:
+                cached=cache.get(cache_key)
 
         if cached is not None:
             self.data=cached

@@ -14,19 +14,23 @@ from .cache_library import DiskCache
 class Currency:
     CLOSE_COLUMN='Close'
 
-    def __init__(self, currency_from: str, currency_to: str, start_date: datetime, end_date: datetime=None, cache_dir: str=None):
+    def __init__(self, currency_from: str, currency_to: str, start_date: datetime, end_date: datetime=None, cache_dir: str=None, force_refresh: bool=False):
         """currency_from/currency_to: the two currency codes (e.g. 'usd', 'pln'); identical
         codes (case-insensitive) short-circuit to a flat 1.0 exchange rate instead of an
         API call. end_date defaults to today — computed here rather than as a literal default
         value, so it reflects the actual construction time instead of import time.
         cache_dir: optional directory to cache the fetched exchange-rate DataFrame in, keyed
         by currency pair and start/end date and valid for the day it was written — see
-        cache_library.DiskCache. Skipped for a same-currency pair, which never calls out."""
+        cache_library.DiskCache. Skipped for a same-currency pair, which never calls out.
+        force_refresh: when True (and cache_dir is set), skips reading the cache — always
+        re-fetches — but still writes the fresh result back, refreshing the entry for callers
+        that don't pass force_refresh."""
         self.currency_from=currency_from
         self.currency_to=currency_to
         self.start_date=start_date
         self.end_date=end_date if end_date is not None else datetime.today()
         self._cache=DiskCache(cache_dir) if cache_dir else None
+        self._force_refresh=force_refresh
         self.data=self._fetch_data()
 
     def _fetch_data(self) -> pd.DataFrame:
@@ -38,9 +42,10 @@ class Currency:
         cache_key=None
         if self._cache is not None:
             cache_key=DiskCache.make_key('currency', self.currency_from.upper(), self.currency_to.upper(), self.start_date.date(), self.end_date.date())
-            cached=self._cache.get(cache_key)
-            if cached is not None:
-                return cached
+            if not self._force_refresh:
+                cached=self._cache.get(cache_key)
+                if cached is not None:
+                    return cached
 
         ticker=yf.Ticker(self.currency_from.upper()+self.currency_to.upper()+"=X")
         data=ticker.history(start=self.start_date, end=self.end_date, repair=True, actions=False)

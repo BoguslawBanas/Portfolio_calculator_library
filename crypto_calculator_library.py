@@ -48,7 +48,7 @@ class Crypto:
     }
     QUOTE_CURRENCY='usd'
 
-    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None):
+    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
         CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'bitcoin', 'ethereum').
@@ -59,7 +59,9 @@ class Crypto:
         time.
         cache_dir: optional directory to cache each symbol's computed DataFrame in, keyed by
         symbol/currency/transactions and valid for the day it was written — see
-        cache_library.DiskCache. Also passed down to every Currency this Crypto constructs."""
+        cache_library.DiskCache. Also passed down to every Currency this Crypto constructs.
+        force_refresh: when True (and cache_dir is set), ignores any cached entry and
+        recomputes/re-fetches everything, then overwrites the cache with the fresh result."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -74,7 +76,7 @@ class Crypto:
         # which derives it the same way) — recompute it here instead of assuming one exists.
         money_invested_by_symbol=dict()
         for df in dataframes:
-            currency=Currency(self.QUOTE_CURRENCY, currency_to, df.index.min(), cache_dir=cache_dir)
+            currency=Currency(self.QUOTE_CURRENCY, currency_to, df.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
 
             money_invested=0.0
             for idx, row in df.iterrows():
@@ -90,7 +92,7 @@ class Crypto:
         for df in dataframes:
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[symbol]=(money_invested_by_symbol[symbol]/self.total_money_invested)*100.0
-            computed=self._compute_data(df, currency_to, cache_dir)
+            computed=self._compute_data(df, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
@@ -158,7 +160,7 @@ class Crypto:
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
         start_date=dataframe.index.min()
         ticker_name=self.TICKERS[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
 
@@ -166,11 +168,12 @@ class Crypto:
         cache_key=None
         if cache is not None:
             cache_key=DiskCache.make_key('crypto', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
-            cached=cache.get(cache_key)
-            if cached is not None:
-                return cached
+            if not force_refresh:
+                cached=cache.get(cache_key)
+                if cached is not None:
+                    return cached
 
-        currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir)
+        currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
