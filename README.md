@@ -196,8 +196,6 @@ plot.allocation_comparison_plot(by="ticker")
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
-- ~~caching computed DataFrames to disk instead of re-fetching/recomputing on every run~~ — done, see `cache_library.DiskCache` and the `cache_dir` argument above
-- ~~automatic eviction of orphaned cache entries~~ — done, see `DiskCache.evict_stale()` above; `Portfolio` runs it automatically at the end of construction whenever `cache_dir` is set
 
 ## License
 
