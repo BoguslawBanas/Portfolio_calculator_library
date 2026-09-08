@@ -17,6 +17,7 @@ from .stock_calculator_library import Stock
 from .bonds_calculator_library import Bonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
+from .cache_library import DiskCache
 
 
 class Portfolio:
@@ -63,7 +64,10 @@ class Portfolio:
 
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
-        constructed below; disabled (no caching) when left as None.
+        constructed below; disabled (no caching) when left as None. Once every source is
+        loaded, __init__ also sweeps cache_dir once via DiskCache.evict_stale() — reclaiming
+        orphaned entries (see README Roadmap) automatically on every Portfolio construction,
+        rather than requiring a manual DiskCache(cache_dir).clear().
 
         force_refresh: when True (and cache_dir is set), every source ignores its cached
         entry and recomputes/re-fetches from scratch, then overwrites the cache with the
@@ -177,6 +181,9 @@ class Portfolio:
             self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue
 
         self.data=self.merge(portfolio_list)
+
+        if cache_dir is not None:
+            DiskCache(cache_dir).evict_stale()
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> 'Portfolio':
