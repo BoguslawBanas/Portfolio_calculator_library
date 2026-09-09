@@ -1,16 +1,20 @@
 """
 Tests for bonds_calculator_library.PolishRetailBonds — no network involved (bonds have no
-yfinance-fetchable price, see the module's own docstring), just the accrual formulas keyed
-off each bond-type code (R/D/T/E) plus the interest_rate.csv/inflation_rate.csv rate history.
+yfinance-fetchable price, see the module's own docstring), just the accrual formulas keyed off
+each bond-type code's three-letter prefix (OTS/ROR/DOR/TOS/COI/ROS/EDO/ROD) plus the
+interest_rate.csv/inflation_rate.csv rate history.
 
-Dates are chosen relative to date.today() (a handful of days ago) so every day in a bond's
-window falls in "year 0" (days_from_beginning < 365) unless a test specifically wants to cross
-a year boundary — that keeps the expected-value arithmetic below (transcribed independently
-from the accrual formulas, not just re-calling the implementation) simple and exact.
+Dates are chosen relative to date.today() so every test's expected values are computed
+dynamically (via _expected_profit below, a hand-written parallel transcription of each accrual
+shape's formula — not a call into PolishRetailBonds itself) rather than hardcoded, so the suite
+stays correct regardless of what day it happens to run on. Every rate_row/inflation_row default
+is dated far in the past (2020) specifically so ffill carries that single value forward through
+whatever calendar months a test's dynamic dates actually touch.
 """
 
 from datetime import date, timedelta
 
+import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import PolishRetailBonds
@@ -24,104 +28,227 @@ def make_bonds_dir(make_source_dir, buy_csv: str, rate_row: str="01-2020,5.0\n",
     })
 
 
-def test_fixed_rate_t_bond_accrues_at_documented_daily_rate(make_source_dir):
-    start=date.today()-timedelta(days=3)
+def _expected_profit(start, today, code, initial_coupon, additional_coupon, external_rate=0.0, amount=1.0, is_swapped=False):
+    """Independent transcription of PolishRetailBonds._bond_dataframe's per-period accrual, used
+    to compute an expected Profit without calling into the class under test. external_rate is the
+    single ffilled interest_rate.csv/inflation_rate.csv value a rate_source type would see for
+    every period-2-onward lookup (both this helper's tests and PolishRetailBonds._external_rate
+    resolve it via ffill from one old CSV row, so it's constant regardless of which calendar
+    months the test's dynamic dates actually land in)."""
+    config=PolishRetailBonds.BOND_TYPES[code]
+    start_ts, today_ts=pd.Timestamp(start), pd.Timestamp(today)
+    base=PolishRetailBonds.NOMINAL_VALUE*amount
+    payments_per_year=12//config['period_months']
+    gross=0.0
+
+    for period in range(config['num_periods']):
+        period_start=start_ts+pd.DateOffset(months=config['period_months']*period)
+        if period_start>today_ts:
+            break
+        period_end=start_ts+pd.DateOffset(months=config['period_months']*(period+1))
+        period_days=(period_end-period_start).days
+        rate=initial_coupon if period==0 or config['rate_source'] is None else max(external_rate, 0.0)+additional_coupon
+
+        last_day=min(period_end-pd.DateOffset(days=1), today_ts)
+        days_elapsed=(last_day-period_start).days+1
+        if days_elapsed<=0:
+            break
+        gross+=base*rate/100.0*days_elapsed/(period_days*payments_per_year)
+
+        if config['compounding']:
+            base=base*(1+rate/100.0)
+
+    return round(gross*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
+
+
+def test_bond_type_registry_matches_documented_taxonomy():
+    """Pins the whole taxonomy transcribed from bonds_lists/*.pdf (the official listy emisyjne,
+    supplied for review — see README) in one place, independent of any accrual math."""
+    assert PolishRetailBonds.BOND_TYPES=={
+        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0),
+        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10),
+        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10),
+        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10),
+        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10),
+        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0),
+        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10),
+        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0),
+    }
+    # Every type's full term (period_months * num_periods) matches its tenor as named/described
+    # in its own list emisyjny.
+    terms_in_months={'OTS': 3, 'ROR': 12, 'DOR': 24, 'TOS': 36, 'COI': 48, 'ROS': 72, 'EDO': 120, 'ROD': 144}
+    for code, months in terms_in_months.items():
+        config=PolishRetailBonds.BOND_TYPES[code]
+        assert config['period_months']*config['num_periods']==months, code
+
+
+def test_ots_single_period_uses_initial_coupon(make_source_dir):
+    start=date.today()-timedelta(days=2)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
         "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-        f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n"
+        f"{start.isoformat()},OTS0826,1,0.0,2.0,False\n"
     ))
-    bonds=PolishRetailBonds(bonds_dir)
-    data=bonds.data
+    data=PolishRetailBonds(bonds_dir).data
 
-    n_days=(date.today()-start).days+1
-    coupon=6.0
-    daily_profit=100.0*((1+coupon/100)**1-(1+coupon/100)**0)/365.0  # tax=0.0% for T bonds
-    expected_profit=round(daily_profit*n_days, 2)
-
+    expected=_expected_profit(start, date.today(), 'OTS', initial_coupon=2.0, additional_coupon=0.0)
     assert data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(100.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
-    assert bonds.total_revenue==pytest.approx(expected_profit)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert expected>0.0  # sanity check the helper itself isn't vacuously computing zero
 
 
-def test_variable_rate_r_bond_uses_interest_rate_csv_plus_additional_coupon(make_source_dir):
+def test_ror_first_period_uses_initial_coupon_ignoring_interest_rate_csv(make_source_dir):
     start=date.today()-timedelta(days=3)
     bonds_dir=make_bonds_dir(
         make_source_dir,
         buy_csv=(
             "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-            f"{start.isoformat()},ROR0125,1,0.5,0.0,False\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,99.0\n",  # deliberately absurd - proving period 1 never reads this
+    )
+    data=PolishRetailBonds(bonds_dir).data
+
+    expected=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=99.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    # If period 1 had used interest_rate.csv (99.0) instead of initial_coupon (4.0), profit would
+    # be wildly higher - this pins that it didn't.
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]<1.0
+
+
+def test_ror_second_period_uses_interest_rate_csv_plus_additional_coupon(make_source_dir):
+    start=date.today()-timedelta(days=45)  # safely into period index 1 (the second month) regardless of month lengths
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
         ),
         rate_row="01-2020,6.0\n",
     )
-    bonds=PolishRetailBonds(bonds_dir)
-    data=bonds.data
+    data=PolishRetailBonds(bonds_dir).data
 
-    n_days=(date.today()-start).days+1
-    rate, additional_coupon, tax=6.0, 0.5, 19.0
-    daily_profit=(100.0*(1+(rate+additional_coupon)/100)-100.0)/365.0*(1-tax/100)
-    expected_profit=round(daily_profit*n_days, 2)
-
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
+    expected=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    # Confirms this test actually exercises period 2, not just period 1 again.
+    period_1_only=_expected_profit(start, start+timedelta(days=20), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>period_1_only
 
 
-def test_is_swapped_adds_a_flat_bonus_on_the_last_computed_day(make_source_dir):
-    start=date.today()-timedelta(days=3)
+def test_coi_first_period_fixed_then_inflation_plus_margin(make_source_dir):
+    start=date.today()-timedelta(days=400)  # more than a year ago - into period index 1
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},COI0930,1,1.5,4.75,False\n"
+        ),
+        inflation_row="01-2020,3.0\n",
+    )
+    data=PolishRetailBonds(bonds_dir).data
 
-    def build(is_swapped: str):
-        bonds_dir=make_bonds_dir(
-            make_source_dir,
-            buy_csv=(
-                "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-                f"{start.isoformat()},ROR0225,1,0.0,0.0,{is_swapped}\n"
-            ),
-            rate_row="01-2020,6.0\n",
-        )
-        return PolishRetailBonds(bonds_dir).data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
-
-    profit_not_swapped=build('False')
-    profit_swapped=build('True')
-    # amount_of_units=1 -> bonus is 1*0.1.
-    assert profit_swapped-profit_not_swapped==pytest.approx(0.1)
+    expected=_expected_profit(start, date.today(), 'COI', initial_coupon=4.75, additional_coupon=1.5, external_rate=3.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
 
 
-def test_edo_bond_year_2_accrual_bug_is_locked_by_regression_test(make_source_dir):
-    """
-    Documents CURRENT (buggy) behavior, not correct behavior — see the README Roadmap entry on
-    _inflationary_rate_bond's year-2-onward accrual bug. Its `for i in range(9)` loop breaks on
-    its very first iteration for every real (10-year) EDO bond, and because the DataFrame is
-    pre-initialized with Profit=0.0 and only the first-year slice ever gets overwritten with the
-    cumulative daily-interest series, Profit for any day past the first year doesn't merely stop
-    growing — it reverts to 0.0 (masked by whatever bonus is_swapped adds, if any).
+def test_tos_compounds_across_periods(make_source_dir):
+    start=date.today()-timedelta(days=400)  # into period index 1 (year 2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    data=PolishRetailBonds(bonds_dir).data
 
-    This test exists so that whoever fixes the accrual bug gets a loud, expected failure here
-    telling them to update this test's expectation, rather than an unnoticed behavior change.
-    """
+    expected=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    # Compounding means year 2's contribution alone (computed on the grown base) exceeds what a
+    # flat, non-compounding year 2 at the same rate would have contributed.
+    non_compounding_equivalent=PolishRetailBonds.NOMINAL_VALUE*4.4/100.0*(1-PolishRetailBonds.TAX_RATE/100.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>non_compounding_equivalent
+
+
+def test_edo_continues_accruing_past_year_one(make_source_dir):
+    """EDO's real term is 10 annual periods; this used to be locked in as a regression test for a
+    bug where Profit reverted to 0.0 past year one (see git history / README Roadmap - fixed as
+    part of the taxonomy rework, so this now asserts the fixed behavior instead)."""
     start=date.today()-timedelta(days=400)  # more than a year ago
     bonds_dir=make_bonds_dir(
         make_source_dir,
         buy_csv=(
             "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-            f"{start.isoformat()},EDO0321,1,1.0,3.0,False\n"
+            f"{start.isoformat()},EDO0936,1,2.0,5.35,False\n"
         ),
         inflation_row="01-2020,2.5\n",
     )
-    bonds=PolishRetailBonds(bonds_dir)
-    data=bonds.data
+    data=PolishRetailBonds(bonds_dir).data
 
-    # Some day within the first year does show growing profit...
-    one_year_from_start=data.loc[start.isoformat():(start+timedelta(days=200)).isoformat()]
-    assert one_year_from_start[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>0.0
+    profit_within_year_one=data.loc[start.isoformat():(start+timedelta(days=200)).isoformat(), PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
+    profit_today=data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
 
-    # ...but today (400 days in, past the first-year cutoff) has reverted to exactly 0.0.
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(0.0)
-    assert data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(0.0)
+    assert profit_within_year_one>0.0
+    assert profit_today>profit_within_year_one  # keeps growing past the year-1 boundary, unlike the old bug
+
+    expected=_expected_profit(start, date.today(), 'EDO', initial_coupon=5.35, additional_coupon=2.0, external_rate=2.5)
+    assert profit_today==pytest.approx(expected)
+
+
+def test_swap_discount_reduces_cost_basis_and_raises_profit_by_the_same_amount_every_day(make_source_dir):
+    start=date.today()-timedelta(days=3)
+
+    def build(is_swapped: str):
+        bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.0,4.0,{is_swapped}\n"
+        ))
+        return PolishRetailBonds(bonds_dir).data
+
+    not_swapped, swapped=build('False'), build('True')
+
+    # amount_of_units=1, ROR's swap_discount=0.10 zł/bond -> cost basis 0.10 lower.
+    assert not_swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(100.0)
+    assert swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(99.90)
+
+    # Accrual is always computed off the full nominal value regardless of what was paid, so a
+    # lower cost basis means Profit is uniformly higher by the same 0.10 - every day, not just at
+    # the end (unlike the pre-rework flat maturity-day bonus).
+    delta=swapped[PolishRetailBonds.PROFIT_COLUMN]-not_swapped[PolishRetailBonds.PROFIT_COLUMN]
+    assert delta.sub(0.10).abs().max()<1e-9
+
+
+@pytest.mark.parametrize('code,row', [
+    ('OTS0826', "OTS0826,1,0.0,2.0"),
+    ('ROS0932', "ROS0932,1,2.0,5.0"),
+    ('ROD0938', "ROD0938,1,2.5,5.6"),
+])
+def test_swap_has_no_effect_for_par_priced_or_non_exchangeable_types(make_source_dir, code, row):
+    start=date.today()-timedelta(days=2)
+
+    def build(is_swapped: str):
+        bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},{row},{is_swapped}\n"
+        ))
+        return PolishRetailBonds(bonds_dir).data
+
+    not_swapped, swapped=build('False'), build('True')
+    assert swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(not_swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+    assert swapped[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(not_swapped[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
+
+
+def test_unknown_bond_code_raises_value_error(make_source_dir):
+    start=date.today()-timedelta(days=1)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},XYZ0125,1,0.0,5.0,False\n"
+    ))
+    with pytest.raises(ValueError, match='XYZ'):
+        PolishRetailBonds(bonds_dir)
 
 
 def test_count_bonds_reads_row_count_without_computing(make_source_dir):
     start=date.today()-timedelta(days=1)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
         "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-        f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n"
-        f"{start.isoformat()},ROR0325,2,0.5,0.0,False\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+        f"{start.isoformat()},ROR0927,2,0.5,4.0,False\n"
     ))
     assert PolishRetailBonds.count_bonds(bonds_dir)==2

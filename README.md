@@ -19,10 +19,12 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 
 ### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
-Computes the value over time of Polish retail treasury bonds (*obligacje detaliczne*), given a directory of holdings plus two rate CSVs (`interest_rate.csv`, `inflation_rate.csv`). Named for what it actually models — unlike a market-traded bond (a Treasury ETF, a corporate bond, anything with a `yfinance`-fetchable price, which fits `Stock`'s existing model as-is), these aren't traded on any exchange: bought directly from the Treasury, no secondary market or observable price, only redeemable early at a fixed penalty (`is_swapped` below).
+Computes the value over time of Polish retail treasury bonds (*obligacje detaliczne*), given a directory of holdings plus two rate CSVs (`interest_rate.csv`, `inflation_rate.csv`). Named for what it actually models — unlike a market-traded bond (a Treasury ETF, a corporate bond, anything with a `yfinance`-fetchable price, which fits `Stock`'s existing model as-is), these aren't traded on any exchange: bought directly from the Treasury, no secondary market or observable price, only redeemable early at a fixed penalty.
 
-- fixed-rate (`T`, 3-year), variable-rate (`R`/`D`, 1-/2-year), and inflation-indexed (`E`, 10-year, EDO) bonds
-- daily accrued interest, compounded per bond type's own rules
+- all eight bond types currently sold — `OTS` (3-month, fixed), `ROR`/`DOR` (1-/2-year, variable, monthly periods), `TOS` (3-year, fixed, compounding), `COI` (4-year, first year fixed then inflation-indexed), `ROS`/`ROD` (6-/12-year family bonds, inflation-indexed, compounding, not exchangeable), `EDO` (10-year retirement, inflation-indexed, compounding) — dispatched off each holding's bond code's three-letter prefix (e.g. `ROR` out of `ROR0927`), not a single letter
+- each type's period length/count, flat-payout-vs-compounding accrual, and rate source (fixed for life, external interest-rate history, or external inflation history) is one entry in `PolishRetailBonds.BOND_TYPES`, transcribed from the Ministry of Finance's own *listy emisyjne* (emission letters) for a real issuance of each type — supplied for review as `bonds_lists/*.pdf`, not bundled with the repo (see `.gitignore`)
+- `is_swapped` (per holding) discounts the cost basis by that type's *cena zamiany* — the price of buying the bond by exchanging a maturing predecessor's redemption proceeds instead of paying cash (0.10 zł/bond for every exchange-eligible type except `OTS`, priced at par; no effect at all for `ROS`/`ROD`, which aren't exchangeable) — reflected in `Profit` from day one, not as a lump sum tacked onto the final day
+- interest always accrues on each bond's full nominal value (100 zł) regardless of `is_swapped`'s discount, and a flat 19% tax (`PolishRetailBonds.TAX_RATE`) is applied uniformly — neither the exact tax treatment nor the discount amount is stated in the *listy emisyjne* themselves (tax law and bank-quoted exchange pricing aren't issuance terms), so both are asserted as named constants rather than sourced per type
 
 ### 💱 `currency_calculator_library.Currency`
 
@@ -192,7 +194,7 @@ pip install -e ".[test]"   # or: pip install pytest
 pytest
 ```
 
-`test_bonds_calculator.py` includes a regression test that intentionally locks in `_inflationary_rate_bond`'s current (buggy) year-2-onward accrual behavior — see the Roadmap entry on it — so fixing that bug will fail that one test on purpose, as a reminder to update its expectation rather than an unnoticed behavior change.
+`test_bonds_calculator.py` pins `PolishRetailBonds.BOND_TYPES`' whole taxonomy (period length/count, flat-vs-compounding accrual, rate source) in one test, independent of the accrual math tests, as a single place that fails loudly if the registry ever drifts from what `bonds_lists/*.pdf` (the *listy emisyjne* it was transcribed from) actually says.
 
 ## Requirements
 
@@ -216,10 +218,10 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- validate `PolishRetailBonds` against real historical Polish retail bond rate data (supplied for review, not bundled with the library) to catch further correctness bugs like the EDO accrual issue below, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
-- fix `_inflationary_rate_bond`'s year-2-onward interest accrual: its `for i in range(9)` loop breaks on its very first iteration for every real (10-year) EDO bond, so `Profit` only ever reflects the first year's `initial_coupon` and silently stops growing for the rest of the holding period
+- ~~validate `PolishRetailBonds` against real historical Polish retail bond rate data and refactor its three near-duplicate accrual methods to share logic~~ — done: `bonds_calculator_library.py` was rewritten against the Ministry of Finance's own *listy emisyjne* for all eight currently-sold bond types (`bonds_lists/*.pdf`, supplied for review, not bundled with the library), replacing the old single-letter (`R`/`D`/`T`/`E`) dispatch — which couldn't even distinguish `ROR`/`ROS`/`ROD` from each other, all starting with `R` — with a `BOND_TYPES` registry (period length/count, flat-vs-compounding accrual, rate source) feeding one shared accrual method; this also fixed the year-2-onward EDO accrual bug below as a side effect
+- `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types) and the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*) are both asserted, not derived from the *listy emisyjne* — neither withholding tax nor bank-quoted exchange pricing is an issuance term, so neither appears in them; double-check both against a current, authoritative source before relying on this for real tax reporting
 - apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
-- pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
+- model early redemption (*przedterminowy wykup*) — every list emisyjny defines a separate, lower payout formula for cashing out before maturity (the *cena zamiany* discount notwithstanding); `PolishRetailBonds` only ever reports the held-to-maturity accrued value, consistent with the library's "value over time" framing, but a caller wanting a realistic today-if-I-cashed-out number has no way to get one yet
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 
 ## License
