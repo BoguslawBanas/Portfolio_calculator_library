@@ -393,13 +393,19 @@ class Portfolio:
     def calculate_money_earned_between_dates_column(self, days_between: int=0, offset: int=0) -> pd.DataFrame:
         dataframe=self.portfolio
 
-        dataframe[self.DAILY_RETURN_COLUMN]=0.0
         if days_between==0:
             days_between=(dataframe.index[-1]-dataframe.index[0]).days
-        for idx, _ in dataframe.iterrows():
-            dataframe.loc[idx, self.DAILY_RETURN_COLUMN]=round(
-                self.calculate_money_earned_between_dates(idx-pd.DateOffset(days=days_between+offset), idx-pd.DateOffset(days=offset))/days_between, 2
-            )
+
+        # Same formula as calculate_money_earned_between_dates (Profit `offset` days ago minus
+        # Profit `days_between+offset` days ago, 0.0 wherever that date falls outside the
+        # index), but for every row at once via .shift() instead of calling it in a per-row
+        # Python loop. .shift(N) moving N *rows* is calendar-day-offset-equivalent to
+        # idx-pd.DateOffset(days=N) only when the index is a continuous daily range - true here
+        # before resample() (see its own use in the README/example), not after, since resample()
+        # produces a weekly/monthly/etc. index where shifting by rows and by days diverge.
+        recent_profit=dataframe[self.PROFIT_COLUMN].shift(offset).fillna(0.0)
+        older_profit=dataframe[self.PROFIT_COLUMN].shift(days_between+offset).fillna(0.0)
+        dataframe[self.DAILY_RETURN_COLUMN]=round((recent_profit-older_profit)/days_between, 2)
 
         self.portfolio=dataframe
         return self.portfolio

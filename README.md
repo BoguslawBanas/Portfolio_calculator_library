@@ -210,7 +210,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
 - add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists
-- vectorize `Portfolio.calculate_money_earned_between_dates_column()`'s per-day `.iterrows()` loop
 
 ## License
 
