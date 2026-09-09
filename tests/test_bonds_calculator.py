@@ -12,6 +12,9 @@ is dated far in the past (2020) specifically so ffill carries that single value 
 whatever calendar months a test's dynamic dates actually touch.
 """
 
+import glob
+import os
+import pickle
 from datetime import date, timedelta
 
 import pandas as pd
@@ -282,6 +285,30 @@ def test_distribution_by_ticker_survives_a_cache_hit(make_source_dir, cache_dir)
 
     assert warm.distribution_by_ticker==cold.distribution_by_ticker
     assert set(warm.distribution_by_ticker)=={'TOS', 'ROR'}
+
+
+def test_stale_incompatible_cache_entry_is_recomputed_not_crashed(make_source_dir, cache_dir):
+    """Regression test: a same-day cache entry whose payload predates the (dataframe,
+    type_dataframes) tuple __init__ now expects — e.g. left over from before
+    distribution_by_ticker started breaking down by bond type — must not crash construction,
+    even though it's otherwise still 'fresh' (computed today, so DiskCache.get() wouldn't reject
+    it on age alone)."""
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+
+    PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # primes a real cache entry under the real key
+    [cache_file]=glob.glob(os.path.join(cache_dir, '*.pkl'))
+    with open(cache_file, 'rb') as f:
+        entry=pickle.load(f)
+    entry['data']=pd.DataFrame({'Money_invested': [1.0], 'Profit_without_dividends': [0.0], 'Profit': [0.0]})  # old, pre-tuple shape
+    with open(cache_file, 'wb') as f:
+        pickle.dump(entry, f)
+
+    bonds=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # must not raise - recomputes instead
+    assert bonds.distribution_by_ticker=={'TOS': 100.0}
 
 
 def test_unknown_bond_code_raises_value_error(make_source_dir):

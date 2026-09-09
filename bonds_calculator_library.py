@@ -125,18 +125,30 @@ class PolishRetailBonds:
         cache_key=None
         cached=None
         if cache is not None:
-            cache_key=DiskCache.make_key('bonds', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
+            # 'bonds-v2', not 'bonds': the cached value's shape changed from a bare DataFrame to
+            # a (dataframe, type_dataframes) tuple when distribution_by_ticker started breaking
+            # down by bond type. buy.csv/the rate files aren't necessarily what changed between
+            # versions, so their content hash alone wouldn't invalidate an old-shaped, same-day
+            # entry already on disk - bump this tag again if the cached shape ever changes again.
+            cache_key=DiskCache.make_key('bonds-v2', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
             if not force_refresh:
                 cached=cache.get(cache_key)
+                if cached is not None:
+                    try:
+                        self.data, type_dataframes=cached
+                    except (TypeError, ValueError):
+                        # Belt-and-suspenders alongside the version tag above, in case a cache
+                        # entry with yet another shape ever reaches here regardless (e.g. hand-
+                        # edited, or a future change that forgets to bump the tag) - safer to
+                        # recompute than to crash construction or silently misinterpret it.
+                        cached=None
 
-        if cached is not None:
-            self.data, type_dataframes=cached
-            if progress_callback is not None:
-                progress_callback()
-        else:
+        if cached is None:
             self.data, type_dataframes=self._compute_data(today, progress_callback)
             if cache is not None:
                 cache.set(cache_key, (self.data, type_dataframes))
+        elif progress_callback is not None:
+            progress_callback()
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
