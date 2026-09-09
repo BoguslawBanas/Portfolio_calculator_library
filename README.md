@@ -105,6 +105,7 @@ Portfolio_calculator_library/
 ├── cache_library.py                     # DiskCache
 ├── bank_account_calculator_library.py   # prototype, not yet integrated
 ├── __init__.py                          # re-exports the classes above at the package root
+├── tests/                               # pytest suite — see Testing below
 └── LICENSE
 ```
 
@@ -182,6 +183,17 @@ plot.allocation_plot(by="ticker", kind="histogram", metric="revenue")
 plot.allocation_comparison_plot(by="ticker")
 ```
 
+## Testing
+
+`tests/` holds an automated `pytest` suite — one module per calculator (`test_stock_calculator.py`, `test_bonds_calculator.py`, `test_commodity_calculator.py`, `test_crypto_calculator.py`, `test_currency_calculator.py`, `test_cache_library.py`) plus `test_portfolio_calculator.py` for the multi-source integration layer. Every test runs against synthetic, fixed CSV data written to a temp directory — `yfinance.Ticker` is monkeypatched suite-wide (see `tests/conftest.py`) to a deterministic fake price series, so the suite needs no network access and never depends on real market data.
+
+```bash
+pip install -e ".[test]"   # or: pip install pytest
+pytest
+```
+
+`test_bonds_calculator.py` includes a regression test that intentionally locks in `_inflationary_rate_bond`'s current (buggy) year-2-onward accrual behavior — see the Roadmap entry on it — so fixing that bug will fail that one test on purpose, as a reminder to update its expectation rather than an unnoticed behavior change.
+
 ## Requirements
 
 - Python 3.10+
@@ -206,10 +218,9 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - validate `PolishRetailBonds` against real historical Polish retail bond rate data (supplied for review, not bundled with the library) to catch further correctness bugs like the EDO accrual issue below, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
 - fix `_inflationary_rate_bond`'s year-2-onward interest accrual: its `for i in range(9)` loop breaks on its very first iteration for every real (10-year) EDO bond, so `Profit` only ever reflects the first year's `initial_coupon` and silently stops growing for the rest of the holding period
-- add an automated test suite (e.g. `pytest`, one module per calculator plus integration tests against fixed synthetic data) — there are currently no committed tests, so regressions like the EDO accrual bug above can ship unnoticed
 - apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
-- add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists
+- add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 
 ## License
 

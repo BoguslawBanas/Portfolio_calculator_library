@@ -6,3 +6,4 @@ todo
 build
 *.egg-info
 dist
+.pytest_cache

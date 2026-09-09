@@ -1,0 +1,117 @@
+"""
+Tests for portfolio_calculator_library.Portfolio, combining multiple asset-type sources —
+the integration layer on top of the individual Stock/Bonds/Commodity/Crypto suites.
+"""
+
+from datetime import date, timedelta
+
+import pytest
+
+from Portfolio_calculator_library import Portfolio
+
+
+def build_single_stock_portfolio(make_source_dir, make_tickers_json, currency='usd'):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+        'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                    "2024-03-01,US0000000001,4,120.0\n",
+        'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    return Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency=currency)
+
+
+def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    data=portfolio.data
+    # Money_invested (the data column): current cost basis still held, reduced by the 4-unit
+    # sell -> 1000*0.6 = 600. total_invested_money: gross amount ever bought (1000), unreduced
+    # by later sells — the two track different things (position size vs. lifetime capital in).
+    assert data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
+    assert portfolio.total_invested_money==pytest.approx(1000.0)
+    # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
+    # by the CSV's isin column, not the yfinance ticker symbol.
+    assert 'US0000000001' in portfolio.distribution_by_ticker
+    assert portfolio.distribution_by_directory
+    assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+
+
+def test_zero_day_row_is_prepended_before_the_first_transaction(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    data=portfolio.data
+    assert data.index[0]<data.index[1]
+    first_row=data.iloc[0]
+    assert (first_row==0.0).all()
+
+
+def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_tickers_json):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    start=date.today()-timedelta(days=3)
+    bonds_dir=make_source_dir('bonds', {
+        'buy.csv': "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+                   f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n",
+        'interest_rate.csv': "date,rate\n01-2020,5.0\n",
+        'inflation_rate.csv': "date,inflation\n01-2020,4.0\n",
+    })
+
+    portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
+
+    assert portfolio.total_invested_money==pytest.approx(1000.0+100.0)
+    assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
+    assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    # Dividend column only exists because the stock source contributed one.
+    assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
+
+
+def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd', cache_dir=cache_dir)
+    calls_after_first=len(mock_yfinance.call_log)
+    Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd', cache_dir=cache_dir)
+    # The second construction should have been served entirely from cache_dir.
+    assert len(mock_yfinance.call_log)==calls_after_first
+
+
+def test_force_refresh_ignores_the_cache(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd', cache_dir=cache_dir)
+    calls_after_first=len(mock_yfinance.call_log)
+    Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd', cache_dir=cache_dir, force_refresh=True)
+    assert len(mock_yfinance.call_log)>calls_after_first
+
+
+def test_calculate_irr_starts_at_zero_and_covers_every_row(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    portfolio.calculate_irr()
+    irr=portfolio.portfolio[Portfolio.IRR_COLUMN]
+    # Day 0's IRR is always exactly 0%: guess**0==1 regardless of whether Newton's method
+    # converges on that first (degenerate, all-zero-cashflow) iteration.
+    assert irr.iloc[0]==pytest.approx(0.0)
+    assert len(irr)==len(portfolio.portfolio)
+
+
+def test_calculate_money_earned_between_dates_matches_column_version(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    portfolio.calculate_irr()  # populates self.portfolio, which the two methods below read from
+    from datetime import datetime as dt
+    single_value=portfolio.calculate_money_earned_between_dates(dt(2024, 1, 15), dt(2024, 6, 1))
+    days_between=(dt(2024, 6, 1)-dt(2024, 1, 15)).days
+    column=portfolio.calculate_money_earned_between_dates_column(days_between=days_between, offset=0)
+    row_at_end_date=column.loc['2024-06-01', Portfolio.DAILY_RETURN_COLUMN]
+    assert row_at_end_date==pytest.approx(round(single_value/days_between, 2))
