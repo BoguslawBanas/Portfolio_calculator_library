@@ -1,21 +1,42 @@
 """
-Class-based version of bonds_calculator_library.py, following the same pattern as
-portfolio_calculator_library.py's Portfolio class: the free functions
-(create_dataframe_and_get_data, get_data_from_dataframe, fixed_rate_bond,
-variable_rate_bond, inflationary_rate_bond) become a PolishRetailBonds class whose
-constructor plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
-computes one DataFrame per bond row, and merges them into self.data right away.
+PolishRetailBonds models Polish retail treasury bonds (obligacje detaliczne) — bought directly
+from the Treasury, no secondary market or observable price, only redeemable early at a fixed
+penalty rather than sold. That's why this class looks nothing like Stock/Commodity/Crypto: no
+yfinance fetch, no Currency conversion (see README Roadmap), just each bond type's own accrual
+formula keyed off the bond code's three-letter prefix.
 
-Named PolishRetailBonds, not just Bonds, because these are specifically Polish retail
-treasury bonds (obligacje detaliczne) — unlike a market-traded bond (a Treasury ETF, a
-corporate bond, anything with a yfinance-fetchable price), they aren't traded on any
-exchange: they're bought directly from the Treasury, have no secondary market or observable
-price, and can only be redeemed early (at a fixed penalty via is_swapped below), not sold.
-That's also why this class looks nothing like Stock/Commodity/Crypto: there's no yfinance
-fetch and no Currency conversion, only a closed-form accrual formula keyed off the bond-type
-code (R/D/T/E) and the government-published rate CSVs. A market-traded bond needs none of
-that — it fits Stock's existing buy/sell/dividend model as-is, a coupon payment being
-structurally identical to a dividend one.
+The accrual rules below (period length/count, compounding vs. flat payout, rate source, and the
+'cena zamiany' exchange discount) are transcribed from the Ministry of Finance's own listy
+emisyjne (emission letters) for one real issuance of each of the eight bond types currently
+sold, supplied for review as bonds_lists/*.pdf (not bundled with this repo — see README). Every
+one of those eight follows one of two accrual shapes:
+
+- "flat": each period's interest is paid out at the period's end, computed off the bond's fixed
+  NOMINAL_VALUE (not compounded into a growing base) — O = N*r/100*a/(D*F), where r is that
+  period's annual rate, a is the actual number of days elapsed in the period so far, D is the
+  actual number of days in the period, and F is the number of periods per year (so D*F
+  approximates a 365-day year). ROR, DOR, and COI use this shape.
+- "compounding": interest is only ever paid at final redemption, and each period's base is the
+  previous period's base plus that period's own interest — W = N*(1+r_1)*(1+r_2)*...*(1+r_k).
+  TOS, ROS, EDO, and ROD use this shape. Day-to-day, the currently-accruing period still adds a
+  flat per-day amount (base*r/100/(D*F)), same as the "flat" shape — only the base each period
+  starts from differs.
+
+OTS (a single 3-month period, always at its CSV_INITIAL_COUPON_COLUMN rate) is a degenerate case
+of "flat" with only one period.
+
+Every bond type's rate for its first period comes straight from CSV_INITIAL_COUPON_COLUMN — a
+promotional rate fixed at issuance, not derived from any external rate history. TOS reuses that
+same rate for every later period too (truly fixed-for-life); every other multi-period type looks
+up interest_rate_data (ROR/DOR, NBP reference rate) or inflation_rate_data (COI/ROS/EDO/ROD, CPI)
+for each later period's base rate and adds CSV_ADDITIONAL_COUPON_COLUMN as that period's margin —
+both quoted per-issuance in each type's own list emisyjny, so both belong in the per-holding CSV
+row rather than as a class constant.
+
+None of the eight letters mention withholding tax at all — that's tax law, not an issuance term,
+so it's asserted here as one TAX_RATE constant applied uniformly, rather than inferred per type
+(the prior version of this class applied 19% to variable-rate bonds and 0% to fixed-rate ones,
+a split that had no documented basis and is not carried forward — see README Roadmap on this).
 """
 
 import os
@@ -28,14 +49,12 @@ from .cache_library import DiskCache
 
 class PolishRetailBonds:
     # --- Output: self.data / working DataFrame columns. The first three form the shared
-    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). Bonds don't
+    # separately track a realized/dividend component, so PROFIT_WITHOUT_DIVIDEND_COLUMN and
+    # PROFIT_COLUMN are always identical. ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
-    RATE_COLUMN='Rate'
-    DAILY_INTEREST_COLUMN='Daily_interest'
-    DAYS_FROM_BEGINNING_COLUMN='Days_from_beginning'
-    YEARS_FROM_BEGINNING_COLUMN='Years_from_beginning'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv. ---
     CSV_TICKER_COLUMN='isin'
@@ -47,19 +66,48 @@ class PolishRetailBonds:
     CSV_INTEREST_RATE_COLUMN='rate'
     CSV_INFLATION_COLUMN='inflation'
 
+    NOMINAL_VALUE=100.0  # zł per bond, every type (every list emisyjny's ust. 2)
+    TAX_RATE=19.0  # % 'podatek Belki' on interest income — see module docstring: not sourced from
+                   # the listy emisyjne (they don't set tax law), asserted as one uniform rate
+
+    # One entry per bond-type code (the CSV isin/code's first three letters — e.g. 'ROR' out of
+    # 'ROR0927'). period_months/num_periods: length of one interest period and the bond's full
+    # term in periods (period_months*num_periods = the term listed in each type's own list
+    # emisyjny — e.g. ROR = 1*12 = 12 months). compounding: see module docstring's two accrual
+    # shapes. rate_source: None — every period reuses CSV_INITIAL_COUPON_COLUMN unchanged (only
+    # TOS: truly fixed-for-life); 'interest'/'inflation' — only period 1 uses
+    # CSV_INITIAL_COUPON_COLUMN, every later period looks up interest_rate_data/
+    # inflation_rate_data and adds CSV_ADDITIONAL_COUPON_COLUMN as that period's margin.
+    # swap_discount: zł/bond subtracted from NOMINAL_VALUE when CSV_IS_SWAPPED_COLUMN is set —
+    # the 'cena zamiany' discount for a bond bought by exchanging a maturing predecessor's
+    # redemption proceeds instead of paying cash. 0.0 where a type's list emisyjny either prices
+    # that exchange at par (OTS) or doesn't offer one at all (ROS/ROD — family bonds restricted
+    # to child-benefit recipients, not tradable or exchangeable; see their own list emisyjny's
+    # absence of a 'zamiana' section, unlike every other type here).
+    BOND_TYPES={
+        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0),
+        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10),
+        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10),
+        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10),
+        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10),
+        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0),
+        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10),
+        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0),
+    }
+
     def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
-        date, code, amount_of_units, additional_coupon, initial_coupon, is_swapped. The first
-        letter of code selects the bond type: R (1-year) / D (2-year) -> variable-rate, T
-        (3-year) -> fixed-rate, E (10-year) -> inflation-indexed. interest_rate_file/
-        inflation_rate_file: CSVs used respectively by variable-rate and inflation-indexed
-        bonds, resolved relative to dataframe (the bonds source directory) — pass an absolute
-        path instead to point elsewhere. progress_callback: optional zero-arg callback invoked
-        once, after all bond rows have been computed, for a caller (e.g. Portfolio) tracking
-        overall progress.
-        cache_dir: optional directory to cache the fully computed bonds DataFrame in, keyed by
-        the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the day it
-        was written — see cache_library.DiskCache.
+        date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
+        BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
+        interest_rate_file/inflation_rate_file: CSVs used respectively by 'interest'/'inflation'
+        rate_source types (see BOND_TYPES), resolved relative to dataframe (the bonds source
+        directory) — pass an absolute path instead to point elsewhere. progress_callback:
+        optional zero-arg callback invoked once, after all bond rows have been computed, for a
+        caller (e.g. Portfolio) tracking overall progress.
+        cache_dir: optional directory to cache the fully computed bonds data in (both self.data
+        and the per-bond-type breakdown behind distribution_by_ticker — see _compute_data),
+        keyed by the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the
+        day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
         today=datetime.today()
@@ -77,24 +125,59 @@ class PolishRetailBonds:
         cache_key=None
         cached=None
         if cache is not None:
-            cache_key=DiskCache.make_key('bonds', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
+            # 'bonds-v2', not 'bonds': the cached value's shape changed from a bare DataFrame to
+            # a (dataframe, type_dataframes) tuple when distribution_by_ticker started breaking
+            # down by bond type. buy.csv/the rate files aren't necessarily what changed between
+            # versions, so their content hash alone wouldn't invalidate an old-shaped, same-day
+            # entry already on disk - bump this tag again if the cached shape ever changes again.
+            cache_key=DiskCache.make_key('bonds-v2', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
             if not force_refresh:
                 cached=cache.get(cache_key)
+                if cached is not None:
+                    try:
+                        self.data, type_dataframes=cached
+                    except (TypeError, ValueError):
+                        # Belt-and-suspenders alongside the version tag above, in case a cache
+                        # entry with yet another shape ever reaches here regardless (e.g. hand-
+                        # edited, or a future change that forgets to bump the tag) - safer to
+                        # recompute than to crash construction or silently misinterpret it.
+                        cached=None
 
-        if cached is not None:
-            self.data=cached
-            if progress_callback is not None:
-                progress_callback()
-        else:
-            self.data=self._compute_data(today, progress_callback)
+        if cached is None:
+            self.data, type_dataframes=self._compute_data(today, progress_callback)
             if cache is not None:
-                cache.set(cache_key, self.data)
+                cache.set(cache_key, (self.data, type_dataframes))
+        elif progress_callback is not None:
+            progress_callback()
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
-        self.distribution_by_ticker={'Polish bonds': 100.0}
-        self.distribution_by_ticker_current_value={'Polish bonds': 100.0}
-        self.distribution_by_ticker_revenue={'Polish bonds': 100.0}
+
+        # Broken down by bond type (its three-letter code, e.g. 'ROR') rather than one flat
+        # 'Polish bonds' bucket, the same way Stock/Commodity/Crypto break distribution_by_ticker
+        # down by ticker/symbol - merging per type first (type_dataframes below), not per holding,
+        # so two separate holdings of the same type (e.g. two different ROR issues) land in one
+        # slice instead of two.
+        self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_current_value=dict()
+        self.distribution_by_ticker_revenue=dict()
+        # A bond's own DataFrame only ever runs through its own maturity date (see
+        # _bond_dataframe's index=...end=min(end_date, today)) - once every holding of a type has
+        # matured, that type's merged type_dataframe simply stops too, short of self.data's last
+        # date (still extended by whatever other types/holdings are still active). Its .iloc[-1]
+        # would then be a stale maturity-day snapshot, not '0 held today' - skip any type whose
+        # last row isn't actually on the same date as self.data's, so an expired bond type drops
+        # out of the distribution entirely instead of still counting as if still held.
+        last_date=self.data.index[-1]
+        for code, type_dataframe in type_dataframes.items():
+            if type_dataframe.index[-1]<last_date:
+                continue
+            money_invested=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]
+            current_value=money_invested+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
+            revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
+            self.distribution_by_ticker[code]=(money_invested/self.total_money_invested)*100.0
+            self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0
+            self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0
 
     @staticmethod
     def count_bonds(directory_path: str) -> int:
@@ -110,107 +193,102 @@ class PolishRetailBonds:
         all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=today, freq='D'))
         return all_days.join(rate_df).ffill()
 
-    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
-        # Note on scope: unlike Stock/Commodity/Crypto's per-transaction loops (which walk
-        # potentially hundreds of rows doing per-row pandas .loc[] scatter-writes), this loop
-        # runs once per bond HOLDING - typically a handful, not hundreds - and each iteration's
-        # real cost is the vectorized pandas work inside _fixed_rate_bond/_variable_rate_bond/
-        # _inflationary_rate_bond (already vectorized over that bond's full date range), not the
-        # row access itself. Swapping itertuples() (which builds a namedtuple per row) for plain
-        # numpy arrays still avoids that overhead, so it's worth doing, but the payoff here is
-        # much smaller than the transaction-walking loops' - see the Roadmap discussion.
-        codes=self.dataframe[self.CSV_TICKER_COLUMN].str[0].to_numpy()
+    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> tuple:
+        """Returns (merged_dataframe, type_dataframes) — the whole-portfolio DataFrame (self.data)
+        plus a dict of {bond-type code: merged DataFrame} for that type alone, one entry per
+        distinct type actually held, used to compute distribution_by_ticker(_current_value/
+        _revenue) in __init__. Both are cached together (see __init__) so a cache hit doesn't
+        lose the per-type breakdown."""
+        # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
+        # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
+        # handful, not hundreds), and the real per-iteration cost is the vectorized-per-period
+        # accrual math inside _bond_dataframe, not the row access itself.
+        codes=self.dataframe[self.CSV_TICKER_COLUMN].str[:3].to_numpy()
+        raw_codes=self.dataframe[self.CSV_TICKER_COLUMN].to_numpy()
         amounts=self.dataframe[self.CSV_AMOUNT_OF_UNITS_COLUMN].to_numpy()
         is_swapped_values=self.dataframe[self.CSV_IS_SWAPPED_COLUMN].to_numpy()
         additional_coupons=self.dataframe[self.CSV_ADDITIONAL_COUPON_COLUMN].to_numpy()
         initial_coupons=self.dataframe[self.CSV_INITIAL_COUPON_COLUMN].to_numpy()
         dates=self.dataframe.index
 
-        bonds=list()
+        bonds_by_type=dict()
         for i in range(len(self.dataframe)):
-            idx=dates[i]
             code=codes[i]
-            amount_of_units=amounts[i]
-            is_swapped=is_swapped_values[i]
-            if code=='R':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
-            elif code=='D':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
-            elif code=='T':
-                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, initial_coupons[i], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
-            elif code=='E':
-                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, initial_coupons[i], additional_coupons[i], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
+            if code not in self.BOND_TYPES:
+                raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.BOND_TYPES)}.")
+            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, bool(is_swapped_values[i]))
+            bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
             progress_callback()
 
-        return self._merge(bonds)
+        type_dataframes={code: self._merge(holdings) for code, holdings in bonds_by_type.items()}
+        return self._merge(list(type_dataframes.values())), type_dataframes
 
     @staticmethod
     def _merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame.
-        Equivalent of the old portfolio_calculator_library.merge_dataframes(dataframes)."""
+        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame."""
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
-    def _fixed_rate_bond(self, amount_of_bonds: int, price_of_unit: float, coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
-        dataframe=pd.DataFrame({
-            self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
-            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
-            self.PROFIT_COLUMN: 0.0,
-        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
+    def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:
+        """The published rate feeding a period-2-onward rate (before that period's own margin is
+        added) — interest_rate_data (NBP reference rate) for 'interest', inflation_rate_data (CPI)
+        for 'inflation'. Floored at 0 per every list emisyjny's 'w przypadku gdy i<0 przyjmuje się
+        że i=0' clause. CPI is looked up a month before period_start (it's published in arrears
+        for the prior 12 months); the NBP reference rate is looked up at period_start itself —
+        both external rate files only carry monthly-resolution, forward-filled data, coarser than
+        each list emisyjny's precise 'Nth business day before' lookup rule, so this takes the
+        rate already in effect at the relevant date rather than reproducing that day-count."""
+        if source=='interest':
+            raw=self.interest_rate_data.loc[period_start, self.CSV_INTEREST_RATE_COLUMN]
+        else:
+            lookup_date=period_start-pd.DateOffset(months=1)
+            raw=self.inflation_rate_data.loc[lookup_date, self.CSV_INFLATION_COLUMN]
+        return max(raw, 0.0)
 
-        dataframe[self.DAYS_FROM_BEGINNING_COLUMN]=(dataframe.index-start_date).days
-        dataframe[self.YEARS_FROM_BEGINNING_COLUMN]=np.floor(dataframe[self.DAYS_FROM_BEGINNING_COLUMN]/365)
-        dataframe[self.PROFIT_COLUMN]=(amount_of_bonds*price_of_unit*(1+coupon/100)**(1+dataframe[self.YEARS_FROM_BEGINNING_COLUMN])-amount_of_bonds*100*(1+coupon/100)**(dataframe[self.YEARS_FROM_BEGINNING_COLUMN]))/365.0*(1-tax/100)
-        dataframe[self.PROFIT_COLUMN]=round(dataframe[self.PROFIT_COLUMN].cumsum(), 2)
-        dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]
+    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool) -> pd.DataFrame:
+        config=self.BOND_TYPES[code]
+        period_months=config['period_months']
+        num_periods=config['num_periods']
+        compounding=config['compounding']
+        rate_source=config['rate_source']
+        payments_per_year=12//period_months
 
-        dataframe.drop(columns=[self.DAYS_FROM_BEGINNING_COLUMN, self.YEARS_FROM_BEGINNING_COLUMN], inplace=True)
-        return dataframe
+        end_date=start_date+pd.DateOffset(months=period_months*num_periods)-pd.DateOffset(days=1)
+        index=pd.date_range(start=start_date, end=min(end_date, today))
 
-    def _variable_rate_bond(self, amount_of_bonds: int, price_of_unit: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
-        dataframe=pd.DataFrame({
-            self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
-            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
-            self.PROFIT_COLUMN: 0.0
-        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
+        # Interest always accrues on the bond's full NOMINAL_VALUE, whether bought for cash or
+        # (at a discount) by exchange — only the cost basis below differs.
+        base=self.NOMINAL_VALUE*amount_of_bonds
+        daily_interest=pd.Series(0.0, index=index)
 
-        dataframe=dataframe.join(self.interest_rate_data)
-
-        dataframe[self.PROFIT_COLUMN]=(amount_of_bonds*price_of_unit*(1+(dataframe[self.CSV_INTEREST_RATE_COLUMN]+additional_coupon)/100)-(amount_of_bonds*price_of_unit))/365.0*(1-tax/100)
-        dataframe[self.PROFIT_COLUMN]=round(dataframe[self.PROFIT_COLUMN].cumsum(), 2)
-        dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]
-
-        dataframe.drop(columns=[self.CSV_INTEREST_RATE_COLUMN], inplace=True)
-
-        if is_swapped:
-            dataframe.loc[dataframe.index.max(), self.PROFIT_COLUMN]+=amount_of_bonds*0.1
-        return dataframe
-
-    def _inflationary_rate_bond(self, amount_of_bonds: int, price_of_unit: float, initial_coupon: float, additional_coupon: float, start_date: datetime, end_date: datetime, tax: float, today: datetime, is_swapped: bool=False) -> pd.DataFrame:
-        dataframe=pd.DataFrame({
-            self.MONEY_INVESTED_COLUMN: amount_of_bonds*price_of_unit,
-            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: 0.0,
-            self.PROFIT_COLUMN: 0.0,
-            self.DAILY_INTEREST_COLUMN: 0.0
-        }, index=pd.date_range(start=start_date, end=min(end_date, today)))
-
-        dataframe.loc[start_date:start_date+pd.DateOffset(years=1), self.RATE_COLUMN]=initial_coupon
-        dataframe.loc[start_date:start_date+pd.DateOffset(years=1), self.DAILY_INTEREST_COLUMN]=(amount_of_bonds*price_of_unit*initial_coupon/100)/365.0
-        dataframe.loc[start_date:start_date+pd.DateOffset(years=1), self.PROFIT_COLUMN]=dataframe[self.DAILY_INTEREST_COLUMN].cumsum()
-
-        for i in range(9):
-            tmp_end_date=min(start_date+pd.DateOffset(years=i+2), end_date)
-            if tmp_end_date<end_date:
+        for period in range(num_periods):
+            period_start=start_date+pd.DateOffset(months=period_months*period)
+            if period_start>today:
                 break
-            dataframe.loc[start_date+pd.DateOffset(years=i+1, days=1):tmp_end_date, self.RATE_COLUMN]=self.inflation_rate_data.loc[pd.to_datetime(start_date+pd.DateOffset(years=i+1)-pd.DateOffset(months=1)), self.CSV_INFLATION_COLUMN]+additional_coupon
-            dataframe.loc[start_date+pd.DateOffset(years=i+1):tmp_end_date, self.DAILY_INTEREST_COLUMN]=((amount_of_bonds*price_of_unit+dataframe.loc[start_date+pd.DateOffset(years=i+1), 'Close'])*dataframe[self.RATE_COLUMN]/100)/365.0
-            dataframe.loc[start_date+pd.DateOffset(years=i+1):tmp_end_date, self.PROFIT_COLUMN]=dataframe[self.DAILY_INTEREST_COLUMN].cumsum()
+            period_end=start_date+pd.DateOffset(months=period_months*(period+1))
+            period_days=(period_end-period_start).days
 
-        dataframe.drop(columns=[self.RATE_COLUMN, self.DAILY_INTEREST_COLUMN], inplace=True)
-        dataframe[self.PROFIT_COLUMN]=round(dataframe[self.PROFIT_COLUMN]*(1-tax/100), 2)
+            rate=initial_coupon if period==0 or rate_source is None else self._external_rate(rate_source, period_start)+additional_coupon
+
+            period_index=pd.date_range(start=period_start, end=min(period_end-pd.DateOffset(days=1), today))
+            if len(period_index)==0:
+                break
+            daily_interest.loc[period_index]=base*rate/100.0/(period_days*payments_per_year)
+
+            if compounding:
+                base=base*(1+rate/100.0)
+
+        discount=config['swap_discount'] if is_swapped else 0.0
+        price_per_bond=self.NOMINAL_VALUE-discount
+
+        # Redemption value is always based on NOMINAL_VALUE regardless of what was actually paid
+        # (see base above), so a lower cost basis (money_invested, below) needs a matching credit
+        # here to keep this contract's Money_invested + Profit = current total value true from day
+        # one - not just a lump sum tacked onto the final day, as the pre-rework version did it.
+        # Untaxed: it's a purchase-price discount, not interest income.
+        dataframe=pd.DataFrame(index=index)
+        dataframe[self.MONEY_INVESTED_COLUMN]=amount_of_bonds*price_per_bond
+        dataframe[self.PROFIT_COLUMN]=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount
         dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]
-
-        if is_swapped:
-            dataframe.loc[dataframe.index.max(), self.PROFIT_COLUMN]+=amount_of_bonds*0.1
         return dataframe
