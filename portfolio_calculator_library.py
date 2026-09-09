@@ -339,12 +339,28 @@ class Portfolio:
         dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
         dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
 
-        irr=np.full(len(dataframe[self.CASHFLOW_COLUMN]), np.nan)
+        n=len(dataframe[self.CASHFLOW_COLUMN])
+        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
+        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
+
+        irr=np.full(n, np.nan)
         guess=0.1
         irr[0]=0.0
 
-        for i in range(len(dataframe[self.CASHFLOW_COLUMN])):
-            guess=self._irr_newton(dataframe[self.CASHFLOW_COLUMN].iloc[:i+1].to_list()+[dataframe[self.TOTAL_MONEY_COLUMN].iloc[i]], guess=guess)
+        # Day i's IRR input is every cashflow through day i, plus day i's total money as a
+        # closing/terminal value - dataframe[CASHFLOW_COLUMN].iloc[:i+1].to_list()+[...] used to
+        # rebuild that (i+2)-element list from scratch on every iteration (an O(n) copy each
+        # time, so O(n^2) total over the full loop). Since only the last two slots actually
+        # change between iterations - the newly-added cashflow term and the terminal value - a
+        # single preallocated buffer can be extended by two O(1) writes per iteration instead:
+        # position i gets this day's cashflow (permanently, matching what the list-rebuild
+        # would have had there), position i+1 gets this day's terminal value (overwriting the
+        # previous iteration's terminal value, which was never anything but scratch space).
+        buffer=np.empty(n+1, dtype=np.float64)
+        for i in range(n):
+            buffer[i]=cashflow_values[i]
+            buffer[i+1]=total_money_values[i]
+            guess=self._irr_newton(buffer[:i+2], guess=guess)
             irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
             if np.isnan(guess):
                 guess=0.1
