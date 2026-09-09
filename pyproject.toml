@@ -24,8 +24,8 @@ charts-export = ["kaleido>=0.2.1"]
 # The package's modules currently live at the repo root (not in a Portfolio_calculator_library/
 # subdirectory) and use relative imports, so they're only importable as a package named
 # Portfolio_calculator_library - see README's Installation section. This mapping tells
-# setuptools where that package's source actually is; it still relies on the __init__.py the
-# Installation section already asks you to add by hand (not tracked in git on purpose).
+# setuptools where that package's source (including __init__.py, tracked in the repo root)
+# actually is.
 [tool.setuptools]
 packages = ["Portfolio_calculator_library"]
 

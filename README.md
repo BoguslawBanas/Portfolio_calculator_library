@@ -104,40 +104,29 @@ Portfolio_calculator_library/
 ├── plot_library.py                      # Plot
 ├── cache_library.py                     # DiskCache
 ├── bank_account_calculator_library.py   # prototype, not yet integrated
+├── __init__.py                          # re-exports the classes above at the package root
 └── LICENSE
 ```
 
 ## Installation
 
-The modules use relative imports (`from .module import ...`), so they're meant to be used as a package. There's currently no `__init__.py` tracked in the repo — add an empty one at the project root first, before installing or importing:
+The modules use relative imports (`from .module import ...`), so they're meant to be used as a package — `__init__.py` (tracked in the repo, re-exporting each class above) is what makes that work. Either:
 
-```
-Portfolio_calculator_library/
-├── __init__.py   # add this
-├── stock_calculator_library.py
-└── ...
-```
-
-With that in place, either:
-
-- **Just the dependencies** — install from `requirements.txt` and keep using the sys.path setup the Usage example below relies on:
+- **Just the dependencies** — install from `requirements.txt` and put the repo's *parent* directory on `sys.path` yourself (see `example_data/example.py` for a working example of that setup) so `Portfolio_calculator_library` resolves as a package:
   ```bash
   pip install -r requirements.txt
   ```
-- **Install the package itself** — from one directory above the repo, so it installs as the `Portfolio_calculator_library` package (matches `pyproject.toml`'s packaging config):
+- **Install the package itself** — from one directory above the repo, so it installs as the `Portfolio_calculator_library` package (matches `pyproject.toml`'s packaging config) and is importable like any other installed package, no `sys.path` setup needed:
   ```bash
   pip install ./Portfolio_calculator_library
   ```
 
 `Plot`'s `path_to_save_fig` option (saving a chart to a file instead of displaying it) additionally needs `kaleido` — `pip install kaleido`, or `pip install ".[charts-export]"` if you installed the package itself.
 
-If you installed the package itself, that's it — `Portfolio_calculator_library` is importable like any other installed package. If you only installed the dependencies, the Usage example below still needs the repo's *parent* directory on `sys.path` (see `example_data/example.py` for a working example of that setup) so `Portfolio_calculator_library` resolves as a package.
-
 ## Usage example
 
 ```python
-from Portfolio_calculator_library.portfolio_calculator_library import Portfolio
-from Portfolio_calculator_library.plot_library import Plot
+from Portfolio_calculator_library import Portfolio, Plot
 
 # Each source is a directory of per-transaction-state CSVs: buy.csv, sell.csv,
 # sell_tax.csv, dividend.csv, dividend_tax.csv (stocks), buy.csv, sell.csv, sell_tax.csv
