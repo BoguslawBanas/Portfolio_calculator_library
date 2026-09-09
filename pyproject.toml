@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-calculator-library"
+version = "0.1.0"
+description = "Tracks the performance of an investment portfolio combining stocks/ETFs, Polish retail treasury bonds, commodities, and crypto into a single aggregated view."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Bogusław Banaś" }]
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "yfinance>=0.2.28",
+    "plotly>=5.18",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+charts-export = ["kaleido>=0.2.1"]
+test = ["pytest>=7.4"]
+
+# The package's modules currently live at the repo root (not in a Portfolio_calculator_library/
+# subdirectory) and use relative imports, so they're only importable as a package named
+# Portfolio_calculator_library - see README's Installation section. This mapping tells
+# setuptools where that package's source (including __init__.py, tracked in the repo root)
+# actually is.
+[tool.setuptools]
+packages = ["Portfolio_calculator_library"]
+
+[tool.setuptools.package-dir]
+Portfolio_calculator_library = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

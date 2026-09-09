@@ -2,9 +2,20 @@
 Class-based version of bonds_calculator_library.py, following the same pattern as
 portfolio_calculator_library.py's Portfolio class: the free functions
 (create_dataframe_and_get_data, get_data_from_dataframe, fixed_rate_bond,
-variable_rate_bond, inflationary_rate_bond) become a Bonds class whose constructor
-plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
+variable_rate_bond, inflationary_rate_bond) become a PolishRetailBonds class whose
+constructor plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
 computes one DataFrame per bond row, and merges them into self.data right away.
+
+Named PolishRetailBonds, not just Bonds, because these are specifically Polish retail
+treasury bonds (obligacje detaliczne) — unlike a market-traded bond (a Treasury ETF, a
+corporate bond, anything with a yfinance-fetchable price), they aren't traded on any
+exchange: they're bought directly from the Treasury, have no secondary market or observable
+price, and can only be redeemed early (at a fixed penalty via is_swapped below), not sold.
+That's also why this class looks nothing like Stock/Commodity/Crypto: there's no yfinance
+fetch and no Currency conversion, only a closed-form accrual formula keyed off the bond-type
+code (R/D/T/E) and the government-published rate CSVs. A market-traded bond needs none of
+that — it fits Stock's existing buy/sell/dividend model as-is, a coupon payment being
+structurally identical to a dividend one.
 """
 
 import os
@@ -15,7 +26,7 @@ from datetime import datetime
 from .cache_library import DiskCache
 
 
-class Bonds:
+class PolishRetailBonds:
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -100,20 +111,35 @@ class Bonds:
         return all_days.join(rate_df).ffill()
 
     def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
+        # Note on scope: unlike Stock/Commodity/Crypto's per-transaction loops (which walk
+        # potentially hundreds of rows doing per-row pandas .loc[] scatter-writes), this loop
+        # runs once per bond HOLDING - typically a handful, not hundreds - and each iteration's
+        # real cost is the vectorized pandas work inside _fixed_rate_bond/_variable_rate_bond/
+        # _inflationary_rate_bond (already vectorized over that bond's full date range), not the
+        # row access itself. Swapping itertuples() (which builds a namedtuple per row) for plain
+        # numpy arrays still avoids that overhead, so it's worth doing, but the payoff here is
+        # much smaller than the transaction-walking loops' - see the Roadmap discussion.
+        codes=self.dataframe[self.CSV_TICKER_COLUMN].str[0].to_numpy()
+        amounts=self.dataframe[self.CSV_AMOUNT_OF_UNITS_COLUMN].to_numpy()
+        is_swapped_values=self.dataframe[self.CSV_IS_SWAPPED_COLUMN].to_numpy()
+        additional_coupons=self.dataframe[self.CSV_ADDITIONAL_COUPON_COLUMN].to_numpy()
+        initial_coupons=self.dataframe[self.CSV_INITIAL_COUPON_COLUMN].to_numpy()
+        dates=self.dataframe.index
+
         bonds=list()
-        for row in self.dataframe.itertuples():
-            idx=row.Index
-            code=getattr(row, self.CSV_TICKER_COLUMN)[0]
-            amount_of_units=getattr(row, self.CSV_AMOUNT_OF_UNITS_COLUMN)
-            is_swapped=getattr(row, self.CSV_IS_SWAPPED_COLUMN)
+        for i in range(len(self.dataframe)):
+            idx=dates[i]
+            code=codes[i]
+            amount_of_units=amounts[i]
+            is_swapped=is_swapped_values[i]
             if code=='R':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='D':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='T':
-                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_INITIAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
+                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, initial_coupons[i], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
             elif code=='E':
-                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_INITIAL_COUPON_COLUMN), getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
+                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, initial_coupons[i], additional_coupons[i], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
 
         if progress_callback is not None:
             progress_callback()

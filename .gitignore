@@ -2,5 +2,8 @@ __pycache__
 CLAUDE.md
 example_data
 todo
-__init__.py
 .portfolio_cache
+build
+*.egg-info
+dist
+.pytest_cache

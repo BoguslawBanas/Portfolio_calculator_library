@@ -19,6 +19,11 @@ import pandas as pd
 
 
 class DiskCache:
+    # Marker file recording the last date evict_stale_if_due() actually ran the scan — doesn't
+    # end in '.pkl', so get()/set()/clear()/evict_stale() (which all filter on that extension)
+    # never touch it.
+    _EVICT_STALE_MARKER='.evict_stale_last_run'
+
     def __init__(self, cache_dir: str):
         self.cache_dir=cache_dir
 
@@ -46,14 +51,15 @@ class DiskCache:
             pickle.dump({'computed_on': datetime.today().date(), 'data': dataframe}, f)
 
     def clear(self):
-        """Deletes every cached entry in cache_dir (the directory itself is left in place).
-        Use this to reclaim space from orphaned entries — one whose key (ticker/currency/
-        transactions hash) is no longer recomputed by anything, so it would otherwise never
-        get overwritten or removed on its own — or simply to force a clean slate."""
+        """Deletes every cached entry in cache_dir, plus evict_stale_if_due()'s marker file if
+        present (the directory itself is left in place). Use this to reclaim space from
+        orphaned entries — one whose key (ticker/currency/transactions hash) is no longer
+        recomputed by anything, so it would otherwise never get overwritten or removed on its
+        own — or simply to force a clean slate."""
         if not os.path.isdir(self.cache_dir):
             return
         for filename in os.listdir(self.cache_dir):
-            if filename.endswith('.pkl'):
+            if filename.endswith('.pkl') or filename==self._EVICT_STALE_MARKER:
                 os.remove(os.path.join(self.cache_dir, filename))
 
     def evict_stale(self) -> int:
@@ -84,6 +90,35 @@ class DiskCache:
             if is_stale:
                 os.remove(path)
                 removed+=1
+        return removed
+
+    def evict_stale_if_due(self) -> int:
+        """Like evict_stale(), but skips the scan entirely if it already ran today, remembered
+        via a small marker file in cache_dir — throttles the otherwise O(cache size) sweep
+        (open+unpickle every entry) to once per calendar day instead of once per call. Use this
+        for an automatic/repeated sweep (e.g. once per Portfolio construction); call
+        evict_stale() directly instead when you specifically want an unconditional sweep right
+        now. Returns the number of files removed (0 when the scan was skipped)."""
+        if not os.path.isdir(self.cache_dir):
+            return 0
+
+        today=datetime.today().date()
+        marker_path=os.path.join(self.cache_dir, self._EVICT_STALE_MARKER)
+
+        if os.path.exists(marker_path):
+            try:
+                with open(marker_path, 'r') as f:
+                    last_run=datetime.strptime(f.read().strip(), '%Y-%m-%d').date()
+                if last_run==today:
+                    return 0
+            except (ValueError, OSError):
+                pass  # corrupted/unreadable marker — fall through, sweep, and rewrite it
+
+        removed=self.evict_stale()
+
+        with open(marker_path, 'w') as f:
+            f.write(today.isoformat())
+
         return removed
 
     def _path(self, key: str) -> str:

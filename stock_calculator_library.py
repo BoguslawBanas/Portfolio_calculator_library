@@ -14,6 +14,7 @@ import os
 import json
 from datetime import datetime
 from typing import Callable
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import Currency
@@ -45,7 +46,7 @@ class Stock:
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """progress_callback: optional zero-arg callback invoked once per ticker, right after that
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes time.
@@ -53,13 +54,22 @@ class Stock:
         ticker/currency/transactions and valid for the day it was written — see
         cache_library.DiskCache. Also passed down to every Currency this Stock constructs.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes/re-fetches everything, then overwrites the cache with the fresh result."""
+        recomputes/re-fetches everything, then overwrites the cache with the fresh result.
+        include_native_currency: when True, also computes each ticker's DataFrame in its own
+        native currency (self.native_data[ticker], self.native_currency[ticker]) alongside the
+        currency_to-converted one in self.data — isolates that ticker's own performance from
+        FX movement against currency_to. Off by default: for a foreign-currency ticker this is
+        a second yfinance fetch/computation (the price history itself doesn't depend on
+        currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
+        already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.native_data=dict()
+        self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
         self._cache_dir=cache_dir
@@ -86,7 +96,8 @@ class Stock:
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
-            computed=self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, cache_dir, force_refresh)
+            ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
+            computed=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
@@ -97,6 +108,15 @@ class Stock:
             # can be negative for a losing position.
             revenue_by_ticker[ticker]=computed[self.PROFIT_COLUMN].iloc[-1]
             self.total_revenue+=revenue_by_ticker[ticker]
+
+            if include_native_currency:
+                # Already the same currency -> computed is already this ticker's native-currency
+                # DataFrame, no need to compute it again.
+                if ticker_currency.upper()==currency_to.upper():
+                    self.native_data[ticker]=computed
+                else:
+                    self.native_data[ticker]=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
                 progress_callback()
@@ -211,51 +231,97 @@ class Stock:
         data=all_days.join(ticker_data).ffill()
         data[self.CLOSE_COLUMN]=data[self.CLOSE_COLUMN]*currency.data[self.CLOSE_COLUMN]
 
-        data[self.MONEY_INVESTED_COLUMN]=0.0
-        data[self.DIVIDEND_COLUMN]=0.0
-        data[self.UNITS_COLUMN]=0.0
-        data[self.REALIZED_PROFIT_COLUMN]=0.0
-
         # Transactions must be walked in date order (not CSV/file order) since a sell needs
-        # the running average cost basis built up by every buy that precedes it in time.
+        # the running average cost basis built up by every buy that precedes it in time -
+        # inherently sequential, so unlike the rest of this method it can't be reduced to a
+        # single vectorized expression. What's vectorized instead: pulling every column (and
+        # each transaction's same-day FX rate) out as plain numpy arrays once up front, and
+        # accumulating into numpy arrays by integer position instead of repeated
+        # .iterrows()/.loc[label] calls inside the loop - .iterrows() rebuilds a pandas Series
+        # per row and .loc[label] does a label lookup per call, both far more expensive than a
+        # numpy array index. The arithmetic, rounding, and iteration order are unchanged.
+        sorted_df=dataframe.sort_index(kind='stable')
+        n=len(sorted_df)
+
+        def column_or_nan(column: str) -> np.ndarray:
+            # A source directory doesn't have to carry every CSV (e.g. buy.csv alone, no
+            # sells/dividends yet) - a column only absent because its CSV never existed is
+            # never actually read below (each is only used under its own state branch), same
+            # as when the original per-row code simply never reached that branch.
+            if column in sorted_df.columns:
+                return sorted_df[column].to_numpy(dtype=float)
+            return np.full(n, np.nan)
+
+        state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
+        amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
+        price=column_or_nan(self.CSV_PRICE_OF_UNIT_COLUMN)
+        penalty=column_or_nan(self.CSV_PENALTY_COLUMN)
+        sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
+        dividend=column_or_nan(self.CSV_DIVIDEND_COLUMN)
+        dividend_tax=column_or_nan(self.CSV_DIVIDEND_TAX_COLUMN)
+        # One vectorized lookup for every transaction's same-day FX rate, instead of one
+        # currency.data.loc[idx, ...] call per row.
+        fx=currency.data.loc[sorted_df.index, self.CLOSE_COLUMN].to_numpy(dtype=float)
+
+        # Each transaction's integer position in data's (continuous, daily) index, so the loop
+        # below can write by position instead of by date label.
+        position=data.index.get_indexer(sorted_df.index)
+        if (position<0).any():
+            missing=sorted_df.index[position<0]
+            raise KeyError(f"Transaction date(s) {list(missing)} for {ticker_name} fall outside the computed daily range.")
+
+        money_invested_by_day=np.zeros(len(data))
+        units_by_day=np.zeros(len(data))
+        dividend_by_day=np.zeros(len(data))
+        realized_profit_by_day=np.zeros(len(data))
+
         running_units=0.0
         running_money_invested=0.0
 
-        for idx, rows in dataframe.sort_index(kind='stable').iterrows():
-            if rows[self.SOURCE_TYPE_COLUMN]=='buy':
-                units=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 4)
-                raw_money_invested=rows[self.CSV_AMOUNT_OF_UNITS_COLUMN]*rows[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN]
-                money_invested=round((rows[self.CSV_PENALTY_COLUMN]+1.0)*raw_money_invested, 2)
+        for i in range(n):
+            pos=position[i]
+            row_state=state[i]
+            row_fx=fx[i]
 
-                data.loc[idx, self.MONEY_INVESTED_COLUMN]+=money_invested
-                data.loc[idx, self.UNITS_COLUMN]+=units
+            if row_state=='buy':
+                units=round(amount[i], 4)
+                raw_money_invested=amount[i]*price[i]*row_fx
+                money_invested=round((penalty[i]+1.0)*raw_money_invested, 2)
+
+                money_invested_by_day[pos]+=money_invested
+                units_by_day[pos]+=units
 
                 running_units+=units
                 running_money_invested+=money_invested
-            elif rows[self.SOURCE_TYPE_COLUMN]=='sell':
-                units_sold=round(rows[self.CSV_AMOUNT_OF_UNITS_COLUMN], 4)
+            elif row_state=='sell':
+                units_sold=round(amount[i], 4)
                 if units_sold>running_units+1e-9:
-                    raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {idx.date()}: only {running_units} units held.")
+                    raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {sorted_df.index[i].date()}: only {running_units} units held.")
 
                 # Remove cost basis in proportion to the units sold so the average price of the
                 # remaining position (Money_invested/Units) is unchanged by a partial sell.
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 
-                proceeds=rows[self.CSV_AMOUNT_OF_UNITS_COLUMN]*rows[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN]
+                proceeds=amount[i]*price[i]*row_fx
 
-                data.loc[idx, self.UNITS_COLUMN]-=units_sold
-                data.loc[idx, self.MONEY_INVESTED_COLUMN]-=money_invested_removed
-                data.loc[idx, self.REALIZED_PROFIT_COLUMN]+=round(proceeds-money_invested_removed, 2)
+                units_by_day[pos]-=units_sold
+                money_invested_by_day[pos]-=money_invested_removed
+                realized_profit_by_day[pos]+=round(proceeds-money_invested_removed, 2)
 
                 running_units-=units_sold
                 running_money_invested-=money_invested_removed
-            elif rows[self.SOURCE_TYPE_COLUMN]=='sell_tax':
-                data.loc[idx, self.REALIZED_PROFIT_COLUMN]-=round(rows[self.CSV_SELL_TAX_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
-            elif rows[self.SOURCE_TYPE_COLUMN]=='dividend':
-                data.loc[idx, self.DIVIDEND_COLUMN]+=round(rows[self.CSV_DIVIDEND_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
-            elif rows[self.SOURCE_TYPE_COLUMN]=='dividend_tax':
-                data.loc[idx, self.DIVIDEND_COLUMN]-=round(rows[self.CSV_DIVIDEND_TAX_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
+            elif row_state=='sell_tax':
+                realized_profit_by_day[pos]-=round(sell_tax[i]*row_fx, 2)
+            elif row_state=='dividend':
+                dividend_by_day[pos]+=round(dividend[i]*row_fx, 2)
+            elif row_state=='dividend_tax':
+                dividend_by_day[pos]-=round(dividend_tax[i]*row_fx, 2)
+
+        data[self.MONEY_INVESTED_COLUMN]=money_invested_by_day
+        data[self.UNITS_COLUMN]=units_by_day
+        data[self.DIVIDEND_COLUMN]=dividend_by_day
+        data[self.REALIZED_PROFIT_COLUMN]=realized_profit_by_day
 
         data[self.MONEY_INVESTED_COLUMN]=data[self.MONEY_INVESTED_COLUMN].cumsum()
         data[self.UNITS_COLUMN]=data[self.UNITS_COLUMN].cumsum()

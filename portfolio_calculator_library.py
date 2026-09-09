@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
-from .bonds_calculator_library import Bonds
+from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .cache_library import DiskCache
@@ -46,7 +46,7 @@ class Portfolio:
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
         'commodities', 'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
@@ -65,19 +65,29 @@ class Portfolio:
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
-        loaded, __init__ also sweeps cache_dir once via DiskCache.evict_stale() — reclaiming
-        orphaned entries (see README Roadmap) automatically on every Portfolio construction,
-        rather than requiring a manual DiskCache(cache_dir).clear().
+        loaded, __init__ also sweeps cache_dir via DiskCache.evict_stale_if_due() — reclaiming
+        orphaned entries automatically, at most once per calendar day regardless of how many
+        times Portfolio is constructed that day, rather than requiring a manual
+        DiskCache(cache_dir).clear().
 
         force_refresh: when True (and cache_dir is set), every source ignores its cached
         entry and recomputes/re-fetches from scratch, then overwrites the cache with the
-        fresh result — a one-off "cold start" without deleting cache_dir yourself."""
+        fresh result — a one-off "cold start" without deleting cache_dir yourself.
+
+        include_native_currency: when True, Stock/Commodity/Crypto sources also compute each
+        ticker/symbol's DataFrame in its own native currency, isolated from FX movement
+        against currency — collected into self.native_data/self.native_currency (keyed by
+        ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
+        of this: they're already denominated in a single native currency (PLN) with no
+        conversion step to begin with, so there's nothing to opt into."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.native_data=dict()
+        self.native_currency=dict()
         self.total_invested_money=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -86,8 +96,9 @@ class Portfolio:
         # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
         # one progress bar span the whole portfolio, tracking the unit of work that's actually
         # slow: one yfinance fetch per ticker. A whole bonds directory only counts as a single
-        # unit — Bonds computation is fast, local work with no per-row network calls, and its
-        # progress_callback now fires once per Bonds instance rather than once per bond row.
+        # unit — PolishRetailBonds computation is fast, local work with no per-row network
+        # calls, and its progress_callback now fires once per instance rather than once per
+        # bond row.
         total_units=0
         for dir, type in sources.items():
             if type=='stock':
@@ -102,7 +113,7 @@ class Portfolio:
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=stock.total_money_invested
                     self.distribution_by_directory_current_value[dir]=stock.total_current_value
                     self.distribution_by_directory_revenue[dir]=stock.total_revenue
@@ -115,9 +126,12 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*stock.total_current_value, 2)
                     for key, value in stock.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*stock.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(stock.native_data)
+                        self.native_currency.update(stock.native_currency)
                     portfolio_list.append(stock)
                 elif type=='bonds':
-                    bonds=Bonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    bonds=PolishRetailBonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
                     self.distribution_by_directory_revenue[dir]=bonds.total_revenue
@@ -132,7 +146,7 @@ class Portfolio:
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*bonds.total_revenue, 2)
                     portfolio_list.append(bonds)
                 elif type=='commodities':
-                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=commodity.total_money_invested
                     self.distribution_by_directory_current_value[dir]=commodity.total_current_value
                     self.distribution_by_directory_revenue[dir]=commodity.total_revenue
@@ -145,9 +159,12 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*commodity.total_current_value, 2)
                     for key, value in commodity.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*commodity.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(commodity.native_data)
+                        self.native_currency.update(commodity.native_currency)
                     portfolio_list.append(commodity)
                 elif type=='crypto':
-                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=crypto.total_money_invested
                     self.distribution_by_directory_current_value[dir]=crypto.total_current_value
                     self.distribution_by_directory_revenue[dir]=crypto.total_revenue
@@ -160,6 +177,9 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*crypto.total_current_value, 2)
                     for key, value in crypto.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*crypto.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(crypto.native_data)
+                        self.native_currency.update(crypto.native_currency)
                     portfolio_list.append(crypto)
 
         for key, value in self.distribution_by_directory.items():
@@ -183,12 +203,12 @@ class Portfolio:
         self.data=self.merge(portfolio_list)
 
         if cache_dir is not None:
-            DiskCache(cache_dir).evict_stale()
+            DiskCache(cache_dir).evict_stale_if_due()
 
     @classmethod
-    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> 'Portfolio':
+    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
-        return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh)
+        return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
 
     def _replace_isin_with_ticker(self):
         """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
@@ -319,12 +339,28 @@ class Portfolio:
         dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
         dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
 
-        irr=np.full(len(dataframe[self.CASHFLOW_COLUMN]), np.nan)
+        n=len(dataframe[self.CASHFLOW_COLUMN])
+        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
+        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
+
+        irr=np.full(n, np.nan)
         guess=0.1
         irr[0]=0.0
 
-        for i in range(len(dataframe[self.CASHFLOW_COLUMN])):
-            guess=self._irr_newton(dataframe[self.CASHFLOW_COLUMN].iloc[:i+1].to_list()+[dataframe[self.TOTAL_MONEY_COLUMN].iloc[i]], guess=guess)
+        # Day i's IRR input is every cashflow through day i, plus day i's total money as a
+        # closing/terminal value - dataframe[CASHFLOW_COLUMN].iloc[:i+1].to_list()+[...] used to
+        # rebuild that (i+2)-element list from scratch on every iteration (an O(n) copy each
+        # time, so O(n^2) total over the full loop). Since only the last two slots actually
+        # change between iterations - the newly-added cashflow term and the terminal value - a
+        # single preallocated buffer can be extended by two O(1) writes per iteration instead:
+        # position i gets this day's cashflow (permanently, matching what the list-rebuild
+        # would have had there), position i+1 gets this day's terminal value (overwriting the
+        # previous iteration's terminal value, which was never anything but scratch space).
+        buffer=np.empty(n+1, dtype=np.float64)
+        for i in range(n):
+            buffer[i]=cashflow_values[i]
+            buffer[i+1]=total_money_values[i]
+            guess=self._irr_newton(buffer[:i+2], guess=guess)
             irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
             if np.isnan(guess):
                 guess=0.1
@@ -357,13 +393,19 @@ class Portfolio:
     def calculate_money_earned_between_dates_column(self, days_between: int=0, offset: int=0) -> pd.DataFrame:
         dataframe=self.portfolio
 
-        dataframe[self.DAILY_RETURN_COLUMN]=0.0
         if days_between==0:
             days_between=(dataframe.index[-1]-dataframe.index[0]).days
-        for idx, _ in dataframe.iterrows():
-            dataframe.loc[idx, self.DAILY_RETURN_COLUMN]=round(
-                self.calculate_money_earned_between_dates(idx-pd.DateOffset(days=days_between+offset), idx-pd.DateOffset(days=offset))/days_between, 2
-            )
+
+        # Same formula as calculate_money_earned_between_dates (Profit `offset` days ago minus
+        # Profit `days_between+offset` days ago, 0.0 wherever that date falls outside the
+        # index), but for every row at once via .shift() instead of calling it in a per-row
+        # Python loop. .shift(N) moving N *rows* is calendar-day-offset-equivalent to
+        # idx-pd.DateOffset(days=N) only when the index is a continuous daily range - true here
+        # before resample() (see its own use in the README/example), not after, since resample()
+        # produces a weekly/monthly/etc. index where shifting by rows and by days diverge.
+        recent_profit=dataframe[self.PROFIT_COLUMN].shift(offset).fillna(0.0)
+        older_profit=dataframe[self.PROFIT_COLUMN].shift(days_between+offset).fillna(0.0)
+        dataframe[self.DAILY_RETURN_COLUMN]=round((recent_profit-older_profit)/days_between, 2)
 
         self.portfolio=dataframe
         return self.portfolio
