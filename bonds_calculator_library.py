@@ -104,9 +104,10 @@ class PolishRetailBonds:
         directory) — pass an absolute path instead to point elsewhere. progress_callback:
         optional zero-arg callback invoked once, after all bond rows have been computed, for a
         caller (e.g. Portfolio) tracking overall progress.
-        cache_dir: optional directory to cache the fully computed bonds DataFrame in, keyed by
-        the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the day it
-        was written — see cache_library.DiskCache.
+        cache_dir: optional directory to cache the fully computed bonds data in (both self.data
+        and the per-bond-type breakdown behind distribution_by_ticker — see _compute_data),
+        keyed by the content of buy.csv/interest_rate_file/inflation_rate_file and valid for the
+        day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
         today=datetime.today()
@@ -129,19 +130,32 @@ class PolishRetailBonds:
                 cached=cache.get(cache_key)
 
         if cached is not None:
-            self.data=cached
+            self.data, type_dataframes=cached
             if progress_callback is not None:
                 progress_callback()
         else:
-            self.data=self._compute_data(today, progress_callback)
+            self.data, type_dataframes=self._compute_data(today, progress_callback)
             if cache is not None:
-                cache.set(cache_key, self.data)
+                cache.set(cache_key, (self.data, type_dataframes))
         self.total_money_invested=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]
         self.total_current_value=self.total_money_invested+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
-        self.distribution_by_ticker={'Polish bonds': 100.0}
-        self.distribution_by_ticker_current_value={'Polish bonds': 100.0}
-        self.distribution_by_ticker_revenue={'Polish bonds': 100.0}
+
+        # Broken down by bond type (its three-letter code, e.g. 'ROR') rather than one flat
+        # 'Polish bonds' bucket, the same way Stock/Commodity/Crypto break distribution_by_ticker
+        # down by ticker/symbol - merging per type first (type_dataframes below), not per holding,
+        # so two separate holdings of the same type (e.g. two different ROR issues) land in one
+        # slice instead of two.
+        self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_current_value=dict()
+        self.distribution_by_ticker_revenue=dict()
+        for code, type_dataframe in type_dataframes.items():
+            money_invested=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]
+            current_value=money_invested+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
+            revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
+            self.distribution_by_ticker[code]=(money_invested/self.total_money_invested)*100.0
+            self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0
+            self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0
 
     @staticmethod
     def count_bonds(directory_path: str) -> int:
@@ -157,7 +171,12 @@ class PolishRetailBonds:
         all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=today, freq='D'))
         return all_days.join(rate_df).ffill()
 
-    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
+    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> tuple:
+        """Returns (merged_dataframe, type_dataframes) — the whole-portfolio DataFrame (self.data)
+        plus a dict of {bond-type code: merged DataFrame} for that type alone, one entry per
+        distinct type actually held, used to compute distribution_by_ticker(_current_value/
+        _revenue) in __init__. Both are cached together (see __init__) so a cache hit doesn't
+        lose the per-type breakdown."""
         # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
         # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
         # handful, not hundreds), and the real per-iteration cost is the vectorized-per-period
@@ -170,17 +189,19 @@ class PolishRetailBonds:
         initial_coupons=self.dataframe[self.CSV_INITIAL_COUPON_COLUMN].to_numpy()
         dates=self.dataframe.index
 
-        bonds=list()
+        bonds_by_type=dict()
         for i in range(len(self.dataframe)):
             code=codes[i]
             if code not in self.BOND_TYPES:
                 raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.BOND_TYPES)}.")
-            bonds.append(self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, bool(is_swapped_values[i])))
+            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, bool(is_swapped_values[i]))
+            bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
             progress_callback()
 
-        return self._merge(bonds)
+        type_dataframes={code: self._merge(holdings) for code, holdings in bonds_by_type.items()}
+        return self._merge(list(type_dataframes.values())), type_dataframes
 
     @staticmethod
     def _merge(dataframes: list) -> pd.DataFrame:

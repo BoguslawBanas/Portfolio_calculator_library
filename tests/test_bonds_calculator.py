@@ -234,6 +234,56 @@ def test_swap_has_no_effect_for_par_priced_or_non_exchangeable_types(make_source
     assert swapped[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(not_swapped[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
 
 
+def test_distribution_by_ticker_splits_by_bond_type(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    # No swap discount on either holding, so money invested is purely amount_of_units*NOMINAL_VALUE
+    # -> a clean 3:1 split between the two types, regardless of their different accrued interest.
+    assert set(bonds.distribution_by_ticker)=={'TOS', 'ROR'}
+    assert bonds.distribution_by_ticker['TOS']==pytest.approx(75.0)
+    assert bonds.distribution_by_ticker['ROR']==pytest.approx(25.0)
+    assert sum(bonds.distribution_by_ticker.values())==pytest.approx(100.0)
+    assert sum(bonds.distribution_by_ticker_current_value.values())==pytest.approx(100.0)
+    assert sum(bonds.distribution_by_ticker_revenue.values())==pytest.approx(100.0)
+
+
+def test_distribution_by_ticker_merges_multiple_holdings_of_the_same_type(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        f"{start.isoformat()},ROR0125,2,0.0,3.5,False\n"  # a second, distinct ROR holding
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    # The two ROR holdings (amount 1 and 2) land in one 'ROR' slice, not two separate ones.
+    assert set(bonds.distribution_by_ticker)=={'TOS', 'ROR'}
+    assert bonds.distribution_by_ticker['ROR']==pytest.approx(50.0)  # (1+2)*100 vs 3*100
+    assert bonds.distribution_by_ticker['TOS']==pytest.approx(50.0)
+
+
+def test_distribution_by_ticker_survives_a_cache_hit(make_source_dir, cache_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+    ))
+
+    cold=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)
+    warm=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # second construction - cache hit
+
+    assert warm.distribution_by_ticker==cold.distribution_by_ticker
+    assert set(warm.distribution_by_ticker)=={'TOS', 'ROR'}
+
+
 def test_unknown_bond_code_raises_value_error(make_source_dir):
     start=date.today()-timedelta(days=1)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
