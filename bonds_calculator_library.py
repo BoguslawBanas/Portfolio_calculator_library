@@ -111,20 +111,35 @@ class PolishRetailBonds:
         return all_days.join(rate_df).ffill()
 
     def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> pd.DataFrame:
+        # Note on scope: unlike Stock/Commodity/Crypto's per-transaction loops (which walk
+        # potentially hundreds of rows doing per-row pandas .loc[] scatter-writes), this loop
+        # runs once per bond HOLDING - typically a handful, not hundreds - and each iteration's
+        # real cost is the vectorized pandas work inside _fixed_rate_bond/_variable_rate_bond/
+        # _inflationary_rate_bond (already vectorized over that bond's full date range), not the
+        # row access itself. Swapping itertuples() (which builds a namedtuple per row) for plain
+        # numpy arrays still avoids that overhead, so it's worth doing, but the payoff here is
+        # much smaller than the transaction-walking loops' - see the Roadmap discussion.
+        codes=self.dataframe[self.CSV_TICKER_COLUMN].str[0].to_numpy()
+        amounts=self.dataframe[self.CSV_AMOUNT_OF_UNITS_COLUMN].to_numpy()
+        is_swapped_values=self.dataframe[self.CSV_IS_SWAPPED_COLUMN].to_numpy()
+        additional_coupons=self.dataframe[self.CSV_ADDITIONAL_COUPON_COLUMN].to_numpy()
+        initial_coupons=self.dataframe[self.CSV_INITIAL_COUPON_COLUMN].to_numpy()
+        dates=self.dataframe.index
+
         bonds=list()
-        for row in self.dataframe.itertuples():
-            idx=row.Index
-            code=getattr(row, self.CSV_TICKER_COLUMN)[0]
-            amount_of_units=getattr(row, self.CSV_AMOUNT_OF_UNITS_COLUMN)
-            is_swapped=getattr(row, self.CSV_IS_SWAPPED_COLUMN)
+        for i in range(len(self.dataframe)):
+            idx=dates[i]
+            code=codes[i]
+            amount_of_units=amounts[i]
+            is_swapped=is_swapped_values[i]
             if code=='R':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=1)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='D':
-                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
+                bonds.append(self._variable_rate_bond(amount_of_units, 100.0, additional_coupons[i], idx, idx+pd.DateOffset(years=2)-pd.DateOffset(days=1), 19.0, today, is_swapped))
             elif code=='T':
-                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_INITIAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
+                bonds.append(self._fixed_rate_bond(amount_of_units, 100.0, initial_coupons[i], idx, idx+pd.DateOffset(years=3)-pd.DateOffset(days=1), 0.0, today, is_swapped))
             elif code=='E':
-                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, getattr(row, self.CSV_INITIAL_COUPON_COLUMN), getattr(row, self.CSV_ADDITIONAL_COUPON_COLUMN), idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
+                bonds.append(self._inflationary_rate_bond(amount_of_units, 100.0, initial_coupons[i], additional_coupons[i], idx, idx+pd.DateOffset(years=10)-pd.DateOffset(days=1), 0.0, today, is_swapped))
 
         if progress_callback is not None:
             progress_callback()
