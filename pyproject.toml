@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 charts-export = ["kaleido>=0.2.1"]
+test = ["pytest>=7.4"]
 
 # The package's modules currently live at the repo root (not in a Portfolio_calculator_library/
 # subdirectory) and use relative imports, so they're only importable as a package named
@@ -31,3 +32,6 @@ packages = ["Portfolio_calculator_library"]
 
 [tool.setuptools.package-dir]
 Portfolio_calculator_library = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
