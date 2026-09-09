@@ -210,6 +210,7 @@ plot.allocation_comparison_plot(by="ticker")
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
+- ship official Polish retail treasury bond rate data (`interest_rate.csv`/`inflation_rate.csv`) with the library instead of requiring each user to source and hand-maintain it themselves, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
 
 ## License
 
