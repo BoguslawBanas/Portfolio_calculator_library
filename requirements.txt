@@ -1,0 +1,9 @@
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2.28
+plotly>=5.18
+tqdm>=4.65
+
+# Optional - only needed for Plot's path_to_save_fig (saving a chart to a file instead of
+# displaying it). Install separately if you use that: pip install kaleido
+# kaleido>=0.2.1

@@ -109,19 +109,7 @@ Portfolio_calculator_library/
 
 ## Installation
 
-There's no `requirements.txt`/`pyproject.toml` yet — install the dependencies directly:
-
-```bash
-pip install pandas numpy yfinance plotly tqdm
-```
-
-`Plot`'s `path_to_save_fig` option (saving a chart to a file instead of displaying it) additionally needs `kaleido`:
-
-```bash
-pip install kaleido
-```
-
-The modules use relative imports (`from .module import ...`), so they're meant to be used as a package. There's currently no `__init__.py` in the repo — add an empty one at the project root before importing:
+The modules use relative imports (`from .module import ...`), so they're meant to be used as a package. There's currently no `__init__.py` tracked in the repo — add an empty one at the project root first, before installing or importing:
 
 ```
 Portfolio_calculator_library/
@@ -129,6 +117,21 @@ Portfolio_calculator_library/
 ├── stock_calculator_library.py
 └── ...
 ```
+
+With that in place, either:
+
+- **Just the dependencies** — install from `requirements.txt` and keep using the sys.path setup the Usage example below relies on:
+  ```bash
+  pip install -r requirements.txt
+  ```
+- **Install the package itself** — from one directory above the repo, so it installs as the `Portfolio_calculator_library` package (matches `pyproject.toml`'s packaging config):
+  ```bash
+  pip install ./Portfolio_calculator_library
+  ```
+
+`Plot`'s `path_to_save_fig` option (saving a chart to a file instead of displaying it) additionally needs `kaleido` — `pip install kaleido`, or `pip install ".[charts-export]"` if you installed the package itself.
+
+If you installed the package itself, that's it — `Portfolio_calculator_library` is importable like any other installed package. If you only installed the dependencies, the Usage example below still needs the repo's *parent* directory on `sys.path` (see `example_data/example.py` for a working example of that setup) so `Portfolio_calculator_library` resolves as a package.
 
 ## Usage example
 
@@ -200,6 +203,8 @@ plot.allocation_comparison_plot(by="ticker")
 - tqdm
 - kaleido (optional — only needed to save charts to a file)
 
+See `requirements.txt`/`pyproject.toml` for exact version bounds.
+
 ## Use cases
 
 - tracking your own investment portfolio across stocks, ETFs, and treasury bonds
@@ -215,7 +220,6 @@ plot.allocation_comparison_plot(by="ticker")
 - add an automated test suite (e.g. `pytest`, one module per calculator plus integration tests against fixed synthetic data) — there are currently no committed tests, so regressions like the EDO accrual bug above can ship unnoticed
 - apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
-- add a `requirements.txt`/`pyproject.toml` (already noted as missing in Installation, but never tracked here)
 - add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists
 
 ## License
