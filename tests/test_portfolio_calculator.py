@@ -69,6 +69,45 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
 
 
+def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_basis(make_source_dir, make_tickers_json):
+    """Portfolio-level check of PROFIT_COLUMN/MONEY_INVESTED_COLUMN once a bond has matured: its
+    interest was realized at redemption and must persist in the merged Profit column forever
+    after, while its cost basis (Money_invested) must drop out entirely, since nothing is still
+    held from it — see bonds_calculator_library.PolishRetailBonds._bond_dataframe. Compares
+    against a stock-only portfolio built from the exact same stock data, so the bond's isolated
+    contribution can be read off as a plain difference rather than hardcoded expected totals."""
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    bonds_dir=make_source_dir('bonds', {
+        'buy.csv': "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+                   f"{matured_start.isoformat()},OTS0826,5,0.0,2.0,False\n",
+        'interest_rate.csv': "date,rate\n01-2020,5.0\n",
+        'inflation_rate.csv': "date,inflation\n01-2020,4.0\n",
+    })
+
+    stock_only=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd')
+    mixed=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
+
+    from Portfolio_calculator_library import PolishRetailBonds
+    bonds_only=PolishRetailBonds(bonds_dir)
+    matured_bond_revenue=bonds_only.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
+    assert matured_bond_revenue>0.0  # sanity check: the bond actually earned something before maturing
+
+    # Cost basis: the matured bond contributes nothing - identical to the stock-only portfolio.
+    assert mixed.data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1])
+
+    # Profit: the bond's realized gain is still added on top, even though it matured before today.
+    assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
+
+    # total_invested_money is lifetime (like Stock's own), so it still counts the matured bond.
+    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+500.0)
+
+
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"

@@ -85,6 +85,29 @@ def test_bond_type_registry_matches_documented_taxonomy():
         assert config['period_months']*config['num_periods']==months, code
 
 
+def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir):
+    start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,2,0.0,2.0,False\n"
+    ))
+    data=PolishRetailBonds(bonds_dir).data
+
+    maturity_date=(pd.Timestamp(start)+pd.DateOffset(months=3)-pd.DateOffset(days=1))
+    at_maturity=data.loc[maturity_date, PolishRetailBonds.PROFIT_COLUMN]
+    assert at_maturity>0.0
+
+    # Index still reaches today (unlike before this was fixed), not just the maturity date.
+    assert data.index[-1]==pd.Timestamp(date.today())
+    last_row=data.iloc[-1]
+    assert last_row[PolishRetailBonds.MONEY_INVESTED_COLUMN]==pytest.approx(0.0)
+    assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]==pytest.approx(0.0)
+    # Profit (realized at redemption) freezes at exactly its at-maturity value, forever after.
+    assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(at_maturity)
+    day_after_maturity=data.loc[maturity_date+pd.DateOffset(days=1), PolishRetailBonds.PROFIT_COLUMN]
+    assert day_after_maturity==pytest.approx(at_maturity)
+
+
 def test_ots_single_period_uses_initial_coupon(make_source_dir):
     start=date.today()-timedelta(days=2)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
@@ -287,7 +310,11 @@ def test_distribution_by_ticker_survives_a_cache_hit(make_source_dir, cache_dir)
     assert set(warm.distribution_by_ticker)=={'TOS', 'ROR'}
 
 
-def test_expired_bond_type_is_excluded_from_distribution(make_source_dir):
+def test_matured_bond_type_stays_in_lifetime_invested_but_drops_from_current_value(make_source_dir):
+    """A matured holding's Money_invested/unrealized profit both go to 0 (nothing is left held -
+    see _bond_dataframe), but the amount that was, historically, put into it doesn't disappear -
+    same as a fully-sold Stock ticker still counting toward distribution_by_ticker (lifetime
+    invested) while showing 0% in distribution_by_ticker_current_value (nothing currently held)."""
     matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     active_start=date.today()-timedelta(days=2)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
@@ -297,29 +324,40 @@ def test_expired_bond_type_is_excluded_from_distribution(make_source_dir):
     ))
     bonds=PolishRetailBonds(bonds_dir)
 
-    # The matured OTS holding no longer contributes to the portfolio total at all (its own
-    # DataFrame stops at its maturity date - see _bond_dataframe), so it must not show up in the
-    # distribution either, stale maturity-day value and all.
-    assert bonds.total_money_invested==pytest.approx(300.0)  # only the still-active TOS holding
-    assert set(bonds.distribution_by_ticker)=={'TOS'}
-    assert set(bonds.distribution_by_ticker_current_value)=={'TOS'}
-    assert set(bonds.distribution_by_ticker_revenue)=={'TOS'}
-    assert bonds.distribution_by_ticker['TOS']==pytest.approx(100.0)
+    assert bonds.total_money_invested==pytest.approx(100.0+300.0)
+    assert set(bonds.distribution_by_ticker)=={'OTS', 'TOS'}
+    assert bonds.distribution_by_ticker['OTS']==pytest.approx(25.0)
+    assert bonds.distribution_by_ticker['TOS']==pytest.approx(75.0)
+
+    # Both types still appear (matches Stock: 0%, not omitted) - OTS's matured holding no longer
+    # holds anything, TOS's is still fully held.
+    assert bonds.distribution_by_ticker_current_value==pytest.approx({'OTS': 0.0, 'TOS': 100.0})
+
+    # OTS's interest was realized at maturity and persists in revenue forever after.
+    expected_ots_revenue=_expected_profit(matured_start, date.today(), 'OTS', initial_coupon=2.0, additional_coupon=0.0)
+    assert expected_ots_revenue>0.0
+    assert set(bonds.distribution_by_ticker_revenue)=={'OTS', 'TOS'}
+    assert bonds.distribution_by_ticker_revenue['OTS']>0.0
 
 
-def test_expired_holding_does_not_inflate_a_still_active_holding_of_the_same_type(make_source_dir):
+def test_matured_holding_still_counts_toward_lifetime_invested_but_not_currently_held(make_source_dir):
     matured_start=date.today()-timedelta(days=100)
     active_start=date.today()-timedelta(days=10)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
         "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
-        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"  # matured - shouldn't count
-        f"{active_start.isoformat()},OTS0125,2,0.0,2.5,False\n"   # still active - should count alone
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"  # matured
+        f"{active_start.isoformat()},OTS0125,2,0.0,2.5,False\n"   # still active
     ))
     bonds=PolishRetailBonds(bonds_dir)
 
-    assert bonds.total_money_invested==pytest.approx(200.0)  # 2 units * 100, not 3 units
+    # Lifetime invested counts both holdings (1+2 units) even though only one is still held.
+    assert bonds.total_money_invested==pytest.approx(300.0)
     assert set(bonds.distribution_by_ticker)=={'OTS'}
     assert bonds.distribution_by_ticker['OTS']==pytest.approx(100.0)
+
+    # Only the still-active holding (2 units) contributes to what's currently held.
+    assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(200.0)
+    assert bonds.total_current_value==pytest.approx(200.0+bonds.data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
 
 
 def test_stale_incompatible_cache_entry_is_recomputed_not_crashed(make_source_dir, cache_dir):
