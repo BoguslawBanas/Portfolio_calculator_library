@@ -287,6 +287,41 @@ def test_distribution_by_ticker_survives_a_cache_hit(make_source_dir, cache_dir)
     assert set(warm.distribution_by_ticker)=={'TOS', 'ROR'}
 
 
+def test_expired_bond_type_is_excluded_from_distribution(make_source_dir):
+    matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    active_start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"
+        f"{active_start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    # The matured OTS holding no longer contributes to the portfolio total at all (its own
+    # DataFrame stops at its maturity date - see _bond_dataframe), so it must not show up in the
+    # distribution either, stale maturity-day value and all.
+    assert bonds.total_money_invested==pytest.approx(300.0)  # only the still-active TOS holding
+    assert set(bonds.distribution_by_ticker)=={'TOS'}
+    assert set(bonds.distribution_by_ticker_current_value)=={'TOS'}
+    assert set(bonds.distribution_by_ticker_revenue)=={'TOS'}
+    assert bonds.distribution_by_ticker['TOS']==pytest.approx(100.0)
+
+
+def test_expired_holding_does_not_inflate_a_still_active_holding_of_the_same_type(make_source_dir):
+    matured_start=date.today()-timedelta(days=100)
+    active_start=date.today()-timedelta(days=10)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"  # matured - shouldn't count
+        f"{active_start.isoformat()},OTS0125,2,0.0,2.5,False\n"   # still active - should count alone
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    assert bonds.total_money_invested==pytest.approx(200.0)  # 2 units * 100, not 3 units
+    assert set(bonds.distribution_by_ticker)=={'OTS'}
+    assert bonds.distribution_by_ticker['OTS']==pytest.approx(100.0)
+
+
 def test_stale_incompatible_cache_entry_is_recomputed_not_crashed(make_source_dir, cache_dir):
     """Regression test: a same-day cache entry whose payload predates the (dataframe,
     type_dataframes) tuple __init__ now expects — e.g. left over from before

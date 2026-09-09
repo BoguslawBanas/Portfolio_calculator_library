@@ -161,7 +161,17 @@ class PolishRetailBonds:
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        # A bond's own DataFrame only ever runs through its own maturity date (see
+        # _bond_dataframe's index=...end=min(end_date, today)) - once every holding of a type has
+        # matured, that type's merged type_dataframe simply stops too, short of self.data's last
+        # date (still extended by whatever other types/holdings are still active). Its .iloc[-1]
+        # would then be a stale maturity-day snapshot, not '0 held today' - skip any type whose
+        # last row isn't actually on the same date as self.data's, so an expired bond type drops
+        # out of the distribution entirely instead of still counting as if still held.
+        last_date=self.data.index[-1]
         for code, type_dataframe in type_dataframes.items():
+            if type_dataframe.index[-1]<last_date:
+                continue
             money_invested=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]
             current_value=money_invested+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
