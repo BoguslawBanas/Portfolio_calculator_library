@@ -211,6 +211,12 @@ plot.allocation_comparison_plot(by="ticker")
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - ship official Polish retail treasury bond rate data (`interest_rate.csv`/`inflation_rate.csv`) with the library instead of requiring each user to source and hand-maintain it themselves, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
+- fix `_inflationary_rate_bond`'s year-2-onward interest accrual: its `for i in range(9)` loop breaks on its very first iteration for every real (10-year) EDO bond, so `Profit` only ever reflects the first year's `initial_coupon` and silently stops growing for the rest of the holding period
+- add an automated test suite (e.g. `pytest`, one module per calculator plus integration tests against fixed synthetic data) — there are currently no committed tests, so regressions like the EDO accrual bug above can ship unnoticed
+- apply currency conversion to `Bonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
+- pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
+- add a `requirements.txt`/`pyproject.toml` (already noted as missing in Installation, but never tracked here)
+- add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists
 
 ## License
 
