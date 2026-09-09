@@ -13,7 +13,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - historical prices via `yfinance`, forward-filled to a continuous daily calendar
 - foreign-currency instruments converted to a target currency via `Currency`
 - full or partial sells, tracked against a running average cost basis
-- dividends and dividend/sell tax tracked separately from price gains
+- dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (`tickers.json`'s `currency` field, the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 
@@ -150,6 +150,10 @@ sources = {
 
 # tickers.json maps each ISIN to its yfinance ticker and native currency, e.g.
 # {"US78462F1030": {"ticker": "SPY", "currency": "usd"}}
+# Every buy/sell/dividend/dividend_tax/sell_tax row for that ISIN is assumed to already be in
+# this same declared currency — e.g. a US stock's dividend.csv entries are assumed to be in USD,
+# regardless of what currency your broker actually deposited the dividend in; convert it
+# yourself first if the two differ, there's no separate per-row currency field.
 # cache_dir is optional: when given, every source's computed DataFrame is cached to disk for
 # the day, so re-running later today skips both the yfinance calls and the recomputation.
 # force_refresh=True ignores the cache for this one run and refreshes it with fresh data —
