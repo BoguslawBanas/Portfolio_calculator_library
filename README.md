@@ -17,9 +17,9 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 
-### 🏦 `bonds_calculator_library.Bonds`
+### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
-Computes the value over time of Polish retail treasury bonds, given a directory of holdings plus two rate CSVs (`interest_rate.csv`, `inflation_rate.csv`).
+Computes the value over time of Polish retail treasury bonds (*obligacje detaliczne*), given a directory of holdings plus two rate CSVs (`interest_rate.csv`, `inflation_rate.csv`). Named for what it actually models — unlike a market-traded bond (a Treasury ETF, a corporate bond, anything with a `yfinance`-fetchable price, which fits `Stock`'s existing model as-is), these aren't traded on any exchange: bought directly from the Treasury, no secondary market or observable price, only redeemable early at a fixed penalty (`is_swapped` below).
 
 - fixed-rate (`T`, 3-year), variable-rate (`R`/`D`, 1-/2-year), and inflation-indexed (`E`, 10-year, EDO) bonds
 - daily accrued interest, compounded per bond type's own rules
@@ -96,7 +96,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 Portfolio_calculator_library/
 │
 ├── stock_calculator_library.py          # Stock
-├── bonds_calculator_library.py          # Bonds
+├── bonds_calculator_library.py          # PolishRetailBonds
 ├── commodity_calculator_library.py      # Commodity
 ├── crypto_calculator_library.py         # Crypto
 ├── currency_calculator_library.py       # Currency
@@ -213,7 +213,7 @@ plot.allocation_comparison_plot(by="ticker")
 - ship official Polish retail treasury bond rate data (`interest_rate.csv`/`inflation_rate.csv`) with the library instead of requiring each user to source and hand-maintain it themselves, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
 - fix `_inflationary_rate_bond`'s year-2-onward interest accrual: its `for i in range(9)` loop breaks on its very first iteration for every real (10-year) EDO bond, so `Profit` only ever reflects the first year's `initial_coupon` and silently stops growing for the rest of the holding period
 - add an automated test suite (e.g. `pytest`, one module per calculator plus integration tests against fixed synthetic data) — there are currently no committed tests, so regressions like the EDO accrual bug above can ship unnoticed
-- apply currency conversion to `Bonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
+- apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
 - add a `requirements.txt`/`pyproject.toml` (already noted as missing in Installation, but never tracked here)
 - add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists

@@ -2,9 +2,20 @@
 Class-based version of bonds_calculator_library.py, following the same pattern as
 portfolio_calculator_library.py's Portfolio class: the free functions
 (create_dataframe_and_get_data, get_data_from_dataframe, fixed_rate_bond,
-variable_rate_bond, inflationary_rate_bond) become a Bonds class whose constructor
-plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
+variable_rate_bond, inflationary_rate_bond) become a PolishRetailBonds class whose
+constructor plays the role of create_dataframe_and_get_data — it loads the two rate CSVs,
 computes one DataFrame per bond row, and merges them into self.data right away.
+
+Named PolishRetailBonds, not just Bonds, because these are specifically Polish retail
+treasury bonds (obligacje detaliczne) — unlike a market-traded bond (a Treasury ETF, a
+corporate bond, anything with a yfinance-fetchable price), they aren't traded on any
+exchange: they're bought directly from the Treasury, have no secondary market or observable
+price, and can only be redeemed early (at a fixed penalty via is_swapped below), not sold.
+That's also why this class looks nothing like Stock/Commodity/Crypto: there's no yfinance
+fetch and no Currency conversion, only a closed-form accrual formula keyed off the bond-type
+code (R/D/T/E) and the government-published rate CSVs. A market-traded bond needs none of
+that — it fits Stock's existing buy/sell/dividend model as-is, a coupon payment being
+structurally identical to a dividend one.
 """
 
 import os
@@ -15,7 +26,7 @@ from datetime import datetime
 from .cache_library import DiskCache
 
 
-class Bonds:
+class PolishRetailBonds:
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'

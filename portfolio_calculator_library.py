@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
-from .bonds_calculator_library import Bonds
+from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .cache_library import DiskCache
@@ -96,8 +96,9 @@ class Portfolio:
         # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
         # one progress bar span the whole portfolio, tracking the unit of work that's actually
         # slow: one yfinance fetch per ticker. A whole bonds directory only counts as a single
-        # unit — Bonds computation is fast, local work with no per-row network calls, and its
-        # progress_callback now fires once per Bonds instance rather than once per bond row.
+        # unit — PolishRetailBonds computation is fast, local work with no per-row network
+        # calls, and its progress_callback now fires once per instance rather than once per
+        # bond row.
         total_units=0
         for dir, type in sources.items():
             if type=='stock':
@@ -130,7 +131,7 @@ class Portfolio:
                         self.native_currency.update(stock.native_currency)
                     portfolio_list.append(stock)
                 elif type=='bonds':
-                    bonds=Bonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    bonds=PolishRetailBonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
                     self.distribution_by_directory_revenue[dir]=bonds.total_revenue
