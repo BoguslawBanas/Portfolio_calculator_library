@@ -196,6 +196,7 @@ plot.allocation_comparison_plot(by="ticker")
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
+- throttle `Portfolio`'s automatic `DiskCache.evict_stale()` sweep to once per day instead of once per construction — right now every `Portfolio(...)` call does a full `cache_dir` scan (open + unpickle every entry to check its date), so repeated construction in the same run (a loop, a notebook cell re-run) re-scans the whole cache each time for no benefit after the first sweep of the day. Not a problem at the cache sizes this library expects, but would need a remembered "last swept" date (e.g. a sentinel file in `cache_dir`) to fix
 
 ## License
 
