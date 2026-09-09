@@ -30,7 +30,7 @@ Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone
 
 ### 📊 `portfolio_calculator_library.Portfolio`
 
-Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataFrame.
+Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccount` sources into a single portfolio-level DataFrame.
 
 - builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
 - allocation by ticker/directory, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
@@ -40,11 +40,11 @@ Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataF
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
 - optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
-- optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `Bonds` are left out — they're already single-currency (PLN) with no conversion step to opt out of
+- optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `PolishRetailBonds`/`BankAccount` are left out — both are already single-currency with no conversion step to opt out of
 
 ### 💾 `cache_library.DiskCache`
 
-Disk cache backing the optional `cache_dir`/`force_refresh` arguments on `Stock`/`Bonds`/`Commodity`/`Crypto`/`Currency`/`Portfolio` — opt-in, off by default.
+Disk cache backing the optional `cache_dir`/`force_refresh` arguments on `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`Currency`/`BankAccount`/`Portfolio` — opt-in, off by default.
 
 - caches each source's fully computed DataFrame (price history already fetched, transactions already walked), so a same-day re-run skips both the `yfinance` calls and the recomputation entirely
 - a cache entry is valid only for the day it was written — every calculator fetches price/rate history up to "today", so entries auto-invalidate the next calendar day
@@ -86,9 +86,15 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
 
-### 🚧 In progress
+### 🏛️ `bank_account_calculator_library.BankAccount`
 
-`bank_account_calculator_library.py` is an early, function-based prototype that predates `Stock`/`Bonds`/`Commodity`/`Crypto`'s class-based design and isn't wired into `Portfolio` yet.
+Turns a set of deposit/withdrawal transactions into a daily balance/interest DataFrame. Like `PolishRetailBonds`, there's no `yfinance` fetch and no `Currency` conversion — a bank balance isn't traded or quoted, and (same known limitation as `PolishRetailBonds`, see Roadmap) everything is assumed to already be in one currency.
+
+- fixed-rate accounts (a flat annual %) or variable-rate accounts (a spread added to a rate history CSV, same `interest_rate.csv` format `PolishRetailBonds` uses)
+- interest compounds via periodic capitalization (`capitalization_months`) — accrued-but-not-yet-capitalized interest earns no further interest until it's folded into the balance, so this is a genuinely sequential day-by-day accrual, unlike every other calculator's mostly-vectorized computation
+- multiple accounts can share one source directory (`account` column), same as `Stock`'s per-ticker/`Commodity`'s per-symbol split
+- tax on interest defaults to 19% (`BankAccount.DEFAULT_TAX`), overridable per account via an optional `tax` column
+- optional progress-bar hook, driven by `Portfolio` (see below)
 
 ## Project structure
 
@@ -103,7 +109,7 @@ Portfolio_calculator_library/
 ├── portfolio_calculator_library.py      # Portfolio
 ├── plot_library.py                      # Plot
 ├── cache_library.py                     # DiskCache
-├── bank_account_calculator_library.py   # prototype, not yet integrated
+├── bank_account_calculator_library.py   # BankAccount
 ├── __init__.py                          # re-exports the classes above at the package root
 ├── tests/                               # pytest suite — see Testing below
 └── LICENSE
@@ -133,13 +139,17 @@ from Portfolio_calculator_library import Portfolio, Plot
 # sell_tax.csv, dividend.csv, dividend_tax.csv (stocks), buy.csv, sell.csv, sell_tax.csv
 # (commodities — symbol column must be one of Commodity.TICKERS's keys, e.g. "gold";
 # crypto — same shape, symbol column must be one of Crypto.TICKERS's keys, e.g. "bitcoin"),
-# or buy.csv plus interest_rate.csv/inflation_rate.csv (bonds — the two rate CSVs are
-# read from the bonds directory itself, not the working directory).
+# buy.csv plus interest_rate.csv/inflation_rate.csv (bonds — the two rate CSVs are read from
+# the bonds directory itself, not the working directory), or deposit.csv plus an optional
+# withdrawal.csv (bank_account — deposit.csv also carries each account's rate_type/rate/
+# capitalization_months/tax; interest_rate.csv is only read for a "variable" rate_type account,
+# same format as bonds' interest_rate.csv).
 sources = {
     "data/stocks": "stock",
     "data/bonds": "bonds",
     "data/commodities": "commodities",
     "data/crypto": "crypto",
+    "data/bank_accounts": "bank_account",
 }
 
 # tickers.json maps each ISIN to its yfinance ticker and native currency, e.g.
@@ -215,10 +225,9 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 ## Roadmap
 
-- bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - validate `PolishRetailBonds` against real historical Polish retail bond rate data (supplied for review, not bundled with the library) to catch further correctness bugs like the EDO accrual issue below, and refactor `bonds_calculator_library.py`'s `_fixed_rate_bond`/`_variable_rate_bond`/`_inflationary_rate_bond` — which duplicate the same DataFrame-skeleton/accrual/tax/`is_swapped`-bonus pattern three times over — to share that logic instead
 - fix `_inflationary_rate_bond`'s year-2-onward interest accrual: its `for i in range(9)` loop breaks on its very first iteration for every real (10-year) EDO bond, so `Profit` only ever reflects the first year's `initial_coupon` and silently stops growing for the rest of the holding period
-- apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
+- apply currency conversion to `PolishRetailBonds`/`BankAccount` — unlike `Stock`/`Commodity`/`Crypto`, neither imports `Currency`, so their values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency differs from what they're actually denominated in
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 

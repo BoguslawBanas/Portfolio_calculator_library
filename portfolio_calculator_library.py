@@ -17,6 +17,7 @@ from .stock_calculator_library import Stock
 from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
+from .bank_account_calculator_library import BankAccount
 from .cache_library import DiskCache
 
 
@@ -109,6 +110,8 @@ class Portfolio:
                 total_units+=Commodity.count_tickers(dir)
             elif type=='crypto':
                 total_units+=Crypto.count_tickers(dir)
+            elif type=='bank_account':
+                total_units+=BankAccount.count_accounts(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
@@ -181,6 +184,21 @@ class Portfolio:
                         self.native_data.update(crypto.native_data)
                         self.native_currency.update(crypto.native_currency)
                     portfolio_list.append(crypto)
+                elif type=='bank_account':
+                    bank_account=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    self.distribution_by_directory[dir]=bank_account.total_money_invested
+                    self.distribution_by_directory_current_value[dir]=bank_account.total_current_value
+                    self.distribution_by_directory_revenue[dir]=bank_account.total_revenue
+                    self.total_invested_money+=bank_account.total_money_invested
+                    self.total_current_value+=bank_account.total_current_value
+                    self.total_revenue+=bank_account.total_revenue
+                    for key, value in bank_account.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*bank_account.total_money_invested, 2)
+                    for key, value in bank_account.distribution_by_ticker_current_value.items():
+                        self.distribution_by_ticker_current_value[key]=round(value/100.0*bank_account.total_current_value, 2)
+                    for key, value in bank_account.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*bank_account.total_revenue, 2)
+                    portfolio_list.append(bank_account)
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money

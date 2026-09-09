@@ -69,6 +69,18 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
 
 
+def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
+    start=date.today()-timedelta(days=5)
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n",
+    })
+    portfolio=Portfolio({account_dir: 'bank_account'})
+    assert portfolio.total_invested_money==pytest.approx(1000.0)
+    assert 'savings' in portfolio.distribution_by_ticker
+    assert portfolio.distribution_by_directory[account_dir]==pytest.approx(100.0)
+
+
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
