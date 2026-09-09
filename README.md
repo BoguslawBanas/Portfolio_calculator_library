@@ -210,7 +210,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - apply currency conversion to `PolishRetailBonds` — unlike `Stock`/`Commodity`/`Crypto`, it never imports `Currency`, so a bond's PLN values get summed straight into `Portfolio`'s totals with no FX applied whenever `Portfolio`'s target currency isn't PLN
 - pull the bond formulas' hardcoded magic numbers (19% tax on `R`/`D` bonds vs. 0% on `T`/`E`, the `amount_of_bonds*0.1` `is_swapped` bonus) into documented, named constants, and double-check the `T`-bond 0% tax rate is actually correct
 - add a CI workflow (e.g. GitHub Actions) running the test suite above on push, once it exists
-- vectorize `Commodity._compute_data`'s per-row `.iterrows()` transaction-walking loop the same way
 - vectorize `Crypto._compute_data`'s per-row `.iterrows()` transaction-walking loop the same way
 - vectorize `PolishRetailBonds._compute_data`'s per-row `.itertuples()` bond-walking loop the same way
 - fix `Portfolio.calculate_irr()`'s per-day loop: it rebuilds a growing Python list (`.iloc[:i+1].to_list()`) on every iteration, which is effectively O(n²) for a long date range — replace with a vectorized or incremental (non-list-rebuilding) approach
