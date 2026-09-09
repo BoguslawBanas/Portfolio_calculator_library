@@ -45,7 +45,7 @@ class Stock:
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """progress_callback: optional zero-arg callback invoked once per ticker, right after that
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes time.
@@ -53,13 +53,22 @@ class Stock:
         ticker/currency/transactions and valid for the day it was written — see
         cache_library.DiskCache. Also passed down to every Currency this Stock constructs.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes/re-fetches everything, then overwrites the cache with the fresh result."""
+        recomputes/re-fetches everything, then overwrites the cache with the fresh result.
+        include_native_currency: when True, also computes each ticker's DataFrame in its own
+        native currency (self.native_data[ticker], self.native_currency[ticker]) alongside the
+        currency_to-converted one in self.data — isolates that ticker's own performance from
+        FX movement against currency_to. Off by default: for a foreign-currency ticker this is
+        a second yfinance fetch/computation (the price history itself doesn't depend on
+        currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
+        already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.native_data=dict()
+        self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
         self.tickers=self._load_tickers_json(stock_data)
         self._cache_dir=cache_dir
@@ -86,7 +95,8 @@ class Stock:
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
-            computed=self._compute_data(df, self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, cache_dir, force_refresh)
+            ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
+            computed=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
@@ -97,6 +107,15 @@ class Stock:
             # can be negative for a losing position.
             revenue_by_ticker[ticker]=computed[self.PROFIT_COLUMN].iloc[-1]
             self.total_revenue+=revenue_by_ticker[ticker]
+
+            if include_native_currency:
+                # Already the same currency -> computed is already this ticker's native-currency
+                # DataFrame, no need to compute it again.
+                if ticker_currency.upper()==currency_to.upper():
+                    self.native_data[ticker]=computed
+                else:
+                    self.native_data[ticker]=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
                 progress_callback()

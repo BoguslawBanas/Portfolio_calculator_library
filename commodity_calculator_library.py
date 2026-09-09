@@ -49,7 +49,7 @@ class Commodity:
     }
     QUOTE_CURRENCY='usd'
 
-    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
         CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
@@ -62,13 +62,20 @@ class Commodity:
         symbol/currency/transactions and valid for the day it was written — see
         cache_library.DiskCache. Also passed down to every Currency this Commodity constructs.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes/re-fetches everything, then overwrites the cache with the fresh result."""
+        recomputes/re-fetches everything, then overwrites the cache with the fresh result.
+        include_native_currency: when True, also computes each symbol's DataFrame in
+        QUOTE_CURRENCY (self.native_data[symbol], self.native_currency[symbol]) alongside the
+        currency_to-converted one in self.data — isolates that symbol's own performance from
+        FX movement against currency_to. Free when currency_to is already QUOTE_CURRENCY (the
+        already-computed DataFrame is reused); otherwise a second fetch/computation."""
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.native_data=dict()
+        self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
 
         dataframes=self._split_by_symbol(self.dataframe)
@@ -103,6 +110,13 @@ class Commodity:
             # Revenue: this symbol's all-time gain (unrealized + realized), which can be negative.
             revenue_by_symbol[symbol]=computed[self.PROFIT_COLUMN].iloc[-1]
             self.total_revenue+=revenue_by_symbol[symbol]
+
+            if include_native_currency:
+                if self.QUOTE_CURRENCY.upper()==currency_to.upper():
+                    self.native_data[symbol]=computed
+                else:
+                    self.native_data[symbol]=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh)
+                self.native_currency[symbol]=self.QUOTE_CURRENCY
 
             if progress_callback is not None:
                 progress_callback()

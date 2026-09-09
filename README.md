@@ -15,6 +15,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - full or partial sells, tracked against a running average cost basis
 - dividends and dividend/sell tax tracked separately from price gains
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 
 ### 🏦 `bonds_calculator_library.Bonds`
 
@@ -39,6 +40,7 @@ Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataF
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
 - optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
+- optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `Bonds` are left out — they're already single-currency (PLN) with no conversion step to opt out of
 
 ### 💾 `cache_library.DiskCache`
 
@@ -70,6 +72,7 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - full or partial sells, tracked against a running average cost basis, same as `Stock`
 - no dividends — `Profit` is unrealized plus realized gain
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`
 
 ### ₿ `crypto_calculator_library.Crypto`
 
@@ -80,6 +83,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - no dividends — `Profit` is unrealized plus realized gain
 - units rounded to 8 decimal places (vs. `Commodity`'s 4) for fractional holdings
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
 
 ### 🚧 In progress
 
@@ -164,6 +168,12 @@ print(portfolio.distribution_by_ticker)                # allocation by amount in
 print(portfolio.distribution_by_ticker_current_value)  # allocation by current market value
 print(portfolio.distribution_by_ticker_revenue)         # allocation by share of total gains
 
+# include_native_currency=True (pass it to Portfolio(...) above) additionally populates
+# portfolio.native_data/native_currency per Stock/Commodity/Crypto ticker or symbol, isolating
+# that instrument's own performance from FX movement against currency="usd" above:
+# print(portfolio.native_currency["SPY"])                  # e.g. "usd"
+# print(portfolio.native_data["SPY"][Portfolio.PROFIT_COLUMN].iloc[-1])
+
 portfolio.calculate_irr()
 
 plot = Plot(portfolio)
@@ -195,7 +205,6 @@ plot.allocation_comparison_plot(by="ticker")
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- option to compute revenue in each instrument's native currency, instead of always converting to the portfolio's target currency
 
 ## License
 
