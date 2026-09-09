@@ -46,7 +46,7 @@ class Portfolio:
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
         'commodities', 'bank_account', 'crypto'). Each path is either
         - a directory of per-state CSVs (state inferred from filename, as in
@@ -71,13 +71,22 @@ class Portfolio:
 
         force_refresh: when True (and cache_dir is set), every source ignores its cached
         entry and recomputes/re-fetches from scratch, then overwrites the cache with the
-        fresh result — a one-off "cold start" without deleting cache_dir yourself."""
+        fresh result — a one-off "cold start" without deleting cache_dir yourself.
+
+        include_native_currency: when True, Stock/Commodity/Crypto sources also compute each
+        ticker/symbol's DataFrame in its own native currency, isolated from FX movement
+        against currency — collected into self.native_data/self.native_currency (keyed by
+        ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
+        of this: they're already denominated in a single native currency (PLN) with no
+        conversion step to begin with, so there's nothing to opt into."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.native_data=dict()
+        self.native_currency=dict()
         self.total_invested_money=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -102,7 +111,7 @@ class Portfolio:
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    stock=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=stock.total_money_invested
                     self.distribution_by_directory_current_value[dir]=stock.total_current_value
                     self.distribution_by_directory_revenue[dir]=stock.total_revenue
@@ -115,6 +124,9 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*stock.total_current_value, 2)
                     for key, value in stock.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*stock.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(stock.native_data)
+                        self.native_currency.update(stock.native_currency)
                     portfolio_list.append(stock)
                 elif type=='bonds':
                     bonds=Bonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -132,7 +144,7 @@ class Portfolio:
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*bonds.total_revenue, 2)
                     portfolio_list.append(bonds)
                 elif type=='commodities':
-                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=commodity.total_money_invested
                     self.distribution_by_directory_current_value[dir]=commodity.total_current_value
                     self.distribution_by_directory_revenue[dir]=commodity.total_revenue
@@ -145,9 +157,12 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*commodity.total_current_value, 2)
                     for key, value in commodity.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*commodity.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(commodity.native_data)
+                        self.native_currency.update(commodity.native_currency)
                     portfolio_list.append(commodity)
                 elif type=='crypto':
-                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    crypto=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self.distribution_by_directory[dir]=crypto.total_money_invested
                     self.distribution_by_directory_current_value[dir]=crypto.total_current_value
                     self.distribution_by_directory_revenue[dir]=crypto.total_revenue
@@ -160,6 +175,9 @@ class Portfolio:
                         self.distribution_by_ticker_current_value[key]=round(value/100.0*crypto.total_current_value, 2)
                     for key, value in crypto.distribution_by_ticker_revenue.items():
                         self.distribution_by_ticker_revenue[key]=round(value/100.0*crypto.total_revenue, 2)
+                    if include_native_currency:
+                        self.native_data.update(crypto.native_data)
+                        self.native_currency.update(crypto.native_currency)
                     portfolio_list.append(crypto)
 
         for key, value in self.distribution_by_directory.items():
@@ -186,9 +204,9 @@ class Portfolio:
             DiskCache(cache_dir).evict_stale()
 
     @classmethod
-    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> 'Portfolio':
+    def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
-        return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh)
+        return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
 
     def _replace_isin_with_ticker(self):
         """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
