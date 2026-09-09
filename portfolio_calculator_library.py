@@ -65,9 +65,10 @@ class Portfolio:
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
-        loaded, __init__ also sweeps cache_dir once via DiskCache.evict_stale() — reclaiming
-        orphaned entries (see README Roadmap) automatically on every Portfolio construction,
-        rather than requiring a manual DiskCache(cache_dir).clear().
+        loaded, __init__ also sweeps cache_dir via DiskCache.evict_stale_if_due() — reclaiming
+        orphaned entries automatically, at most once per calendar day regardless of how many
+        times Portfolio is constructed that day, rather than requiring a manual
+        DiskCache(cache_dir).clear().
 
         force_refresh: when True (and cache_dir is set), every source ignores its cached
         entry and recomputes/re-fetches from scratch, then overwrites the cache with the
@@ -201,7 +202,7 @@ class Portfolio:
         self.data=self.merge(portfolio_list)
 
         if cache_dir is not None:
-            DiskCache(cache_dir).evict_stale()
+            DiskCache(cache_dir).evict_stale_if_due()
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
