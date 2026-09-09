@@ -50,8 +50,9 @@ Disk cache backing the optional `cache_dir`/`force_refresh` arguments on `Stock`
 - a cache entry is valid only for the day it was written — every calculator fetches price/rate history up to "today", so entries auto-invalidate the next calendar day
 - also invalidates on any change to the underlying inputs (an edited/added/removed transaction, a different ticker/currency pair) by folding a hash of them into the cache key, independent of the day-based expiry
 - `force_refresh=True` bypasses a cache read for one run without touching disk — a per-call cold start
-- `DiskCache(cache_dir).clear()` deletes every cached entry (the directory itself is left in place) — use it to force a clean slate by hand
-- `DiskCache(cache_dir).evict_stale()` deletes only entries not computed today (already worthless to `get()` — an entry either gets recomputed today, in which case `set()` overwrites it anyway, or nothing ever recomputes that key again, in which case it was orphaned and this reclaims its space). `Portfolio` calls this automatically once at the end of construction whenever `cache_dir` is set, so orphaned entries (a removed ticker, an edited transaction) get swept up on every normal run without any manual cleanup step.
+- `DiskCache(cache_dir).clear()` deletes every cached entry, plus `evict_stale_if_due()`'s marker file if present (the directory itself is left in place) — use it to force a clean slate by hand
+- `DiskCache(cache_dir).evict_stale()` deletes only entries not computed today (already worthless to `get()` — an entry either gets recomputed today, in which case `set()` overwrites it anyway, or nothing ever recomputes that key again, in which case it was orphaned and this reclaims its space). An unconditional, full `cache_dir` scan (open + unpickle every entry) every time it's called
+- `DiskCache(cache_dir).evict_stale_if_due()` — the throttled version of `evict_stale()`: skips the scan entirely if it already ran today, remembered via a small marker file in `cache_dir`, so repeated calls the same day cost an O(1) marker check instead of an O(cache size) scan. `Portfolio` calls this automatically once (at most) per calendar day at the end of construction whenever `cache_dir` is set, so orphaned entries (a removed ticker, an edited transaction) get swept up without any manual cleanup step or per-construction scan overhead
 
 ### 📉 `plot_library.Plot`
 
@@ -209,7 +210,6 @@ plot.allocation_comparison_plot(by="ticker")
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- throttle `Portfolio`'s automatic `DiskCache.evict_stale()` sweep to once per day instead of once per construction — right now every `Portfolio(...)` call does a full `cache_dir` scan (open + unpickle every entry to check its date), so repeated construction in the same run (a loop, a notebook cell re-run) re-scans the whole cache each time for no benefit after the first sweep of the day. Not a problem at the cache sizes this library expects, but would need a remembered "last swept" date (e.g. a sentinel file in `cache_dir`) to fix
 
 ## License
 
