@@ -62,7 +62,12 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
 
     portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
 
-    assert portfolio.total_invested_money==pytest.approx(1000.0+100.0)
+    # Portfolio now passes its own currency down to PolishRetailBonds (Roadmap: apply currency
+    # conversion to PolishRetailBonds) - read the bond's own USD-converted total directly instead
+    # of hardcoding 100.0 PLN, so this test doesn't depend on the fake FX rate's exact value.
+    from Portfolio_calculator_library import PolishRetailBonds
+    bonds_alone=PolishRetailBonds(bonds_dir, 'usd')
+    assert portfolio.total_invested_money==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
     # Dividend column only exists because the stock source contributed one.
@@ -94,7 +99,10 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     mixed=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
 
     from Portfolio_calculator_library import PolishRetailBonds
-    bonds_only=PolishRetailBonds(bonds_dir)
+    # 'usd', matching currency='usd' above - Portfolio now converts bonds through its own
+    # currency (Roadmap: apply currency conversion to PolishRetailBonds), so the standalone
+    # comparison value must be converted the same way to still be comparable.
+    bonds_only=PolishRetailBonds(bonds_dir, 'usd')
     matured_bond_revenue=bonds_only.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
     assert matured_bond_revenue>0.0  # sanity check: the bond actually earned something before maturing
 
@@ -105,7 +113,7 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
     # total_invested_money is lifetime (like Stock's own), so it still counts the matured bond.
-    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+500.0)
+    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+bonds_only.total_money_invested)
 
 
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):

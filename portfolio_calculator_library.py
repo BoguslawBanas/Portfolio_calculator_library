@@ -78,8 +78,10 @@ class Portfolio:
         ticker/symbol's DataFrame in its own native currency, isolated from FX movement
         against currency — collected into self.native_data/self.native_currency (keyed by
         ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
-        of this: they're already denominated in a single native currency (PLN) with no
-        conversion step to begin with, so there's nothing to opt into."""
+        of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
+        currency above — see README Roadmap), but doesn't yet expose an include_native_currency
+        of its own the way Stock/Commodity/Crypto do, so there's no per-holding native-currency
+        DataFrame for Portfolio to collect here."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
@@ -131,7 +133,7 @@ class Portfolio:
                         self.native_currency.update(stock.native_currency)
                     portfolio_list.append(stock)
                 elif type=='bonds':
-                    bonds=PolishRetailBonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    bonds=PolishRetailBonds(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
                     self.distribution_by_directory_revenue[dir]=bonds.total_revenue

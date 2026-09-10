@@ -2,8 +2,16 @@
 PolishRetailBonds models Polish retail treasury bonds (obligacje detaliczne) — bought directly
 from the Treasury, no secondary market or observable price, only redeemable early at a fixed
 penalty rather than sold. That's why this class looks nothing like Stock/Commodity/Crypto: no
-yfinance fetch, no Currency conversion (see README Roadmap), just each bond type's own accrual
-formula keyed off the bond code's three-letter prefix.
+yfinance fetch, just each bond type's own accrual formula keyed off the bond code's three-letter
+prefix. Every bond is issued in PLN (NOMINAL_VALUE), but — unlike the pre-rework version, which
+never imported Currency at all (see README Roadmap) — currency_to converts every PLN amount via
+Currency, the same way Stock/Commodity/Crypto convert their own native-currency prices.
+
+Each day's own accrued interest is converted at THAT day's own FX rate before accumulating (see
+_bond_dataframe), not re-marked to today's rate afterward — the same convention Stock uses for
+dividends/realized profit (row_fx baked in once, at the time of the event). That's what makes a
+matured bond's frozen Profit stay frozen in currency_to terms too, instead of drifting with FX
+after redemption despite nothing further actually happening to it.
 
 The accrual rules below (period length/count, compounding vs. flat payout, rate source, and the
 'cena zamiany' exchange discount) are transcribed from the Ministry of Finance's own listy
@@ -44,6 +52,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from .currency_calculator_library import Currency
 from .cache_library import DiskCache
 
 
@@ -70,6 +79,7 @@ class PolishRetailBonds:
     CSV_INFLATION_COLUMN='inflation'
 
     NOMINAL_VALUE=100.0  # zł per bond, every type (every list emisyjny's ust. 2)
+    NATIVE_CURRENCY='PLN'  # every bond is issued in PLN — see module docstring
     TAX_RATE=19.0  # % 'podatek Belki' on interest income — see module docstring: not sourced from
                    # the listy emisyjne (they don't set tax law), asserted as one uniform rate
 
@@ -98,10 +108,15 @@ class PolishRetailBonds:
         'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0),
     }
 
-    def __init__(self, dataframe: str, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, dataframe: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
         date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
         BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
+        currency_to: target currency every bond's PLN values are converted to via Currency —
+        defaults to NATIVE_CURRENCY ('PLN'), a no-op (Currency's own same-currency short-circuit
+        makes every conversion below a flat 1.0-rate multiply), so existing callers that never
+        pass this keep getting exactly the PLN values they always did. See the module docstring
+        for how/when each value is converted.
         interest_rate_file/inflation_rate_file: CSVs used respectively by 'interest'/'inflation'
         rate_source types (see BOND_TYPES), resolved relative to dataframe (the bonds source
         directory) — pass an absolute path instead to point elsewhere. progress_callback:
@@ -109,7 +124,7 @@ class PolishRetailBonds:
         caller (e.g. Portfolio) tracking overall progress.
         cache_dir: optional directory to cache the fully computed bonds data in (self.data plus
         the per-bond-type breakdown behind distribution_by_ticker/_current_value/_revenue — see
-        _compute_data's return value), keyed by the content of
+        _compute_data's return value), keyed by currency_to plus the content of
         buy.csv/interest_rate_file/inflation_rate_file and valid for the
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
@@ -129,13 +144,16 @@ class PolishRetailBonds:
         cache_key=None
         cached=None
         if cache is not None:
-            # 'bonds-v3': the cached value's shape has changed twice now (a bare DataFrame, then a
-            # (dataframe, type_dataframes) pair, now a 3-tuple adding invested_by_type) as
-            # distribution_by_ticker's semantics were fixed up. buy.csv/the rate files aren't
-            # necessarily what changed between versions, so their content hash alone wouldn't
-            # invalidate an old-shaped, same-day entry already on disk - bump this tag again if
-            # the cached shape ever changes again.
-            cache_key=DiskCache.make_key('bonds-v3', DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
+            # 'bonds-v4': the cached value's shape/semantics have changed three times now (a bare
+            # DataFrame, then a (dataframe, type_dataframes) pair, then a 3-tuple adding
+            # invested_by_type, now the same 3-tuple but currency-converted per currency_to
+            # instead of always PLN) - buy.csv/the rate files aren't necessarily what changed
+            # between versions, so their content hash alone wouldn't invalidate an old-shaped/
+            # wrong-currency, same-day entry already on disk - bump this tag again if the cached
+            # shape/semantics ever change again. currency_to is folded into the key itself (not
+            # just this tag) since two different target currencies are both otherwise-valid,
+            # simultaneously-live cache entries for the same buy.csv - not a stale-vs-fresh case.
+            cache_key=DiskCache.make_key('bonds-v4', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
@@ -155,7 +173,13 @@ class PolishRetailBonds:
                         cached=None
 
         if cached is None:
-            self.data, type_dataframes, invested_by_type=self._compute_data(today, progress_callback)
+            # One shared FX history for every holding, spanning the earliest holding's start date
+            # through today - Currency's own same-currency short-circuit makes this a flat
+            # 1.0-rate no-op when currency_to is already NATIVE_CURRENCY, so _compute_data/
+            # _bond_dataframe apply every conversion below unconditionally rather than
+            # special-casing the no-conversion case.
+            currency=Currency(self.NATIVE_CURRENCY, currency_to, self.dataframe.index.min(), today, cache_dir=cache_dir, force_refresh=force_refresh)
+            self.data, type_dataframes, invested_by_type=self._compute_data(today, currency, progress_callback)
             if cache is not None:
                 cache.set(cache_key, (self.data, type_dataframes, invested_by_type))
         elif progress_callback is not None:
@@ -204,19 +228,19 @@ class PolishRetailBonds:
         all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=today, freq='D'))
         return all_days.join(rate_df).ffill()
 
-    def _compute_data(self, today: datetime, progress_callback: Callable[[], None]=None) -> tuple:
+    def _compute_data(self, today: datetime, currency: Currency, progress_callback: Callable[[], None]=None) -> tuple:
         """Returns (merged_dataframe, type_dataframes, invested_by_type):
         - merged_dataframe: the whole-portfolio DataFrame (self.data).
         - type_dataframes: {bond-type code: merged DataFrame} for that type alone, one entry per
           distinct type actually held, used for distribution_by_ticker_current_value/_revenue.
         - invested_by_type: {bond-type code: lifetime amount ever invested in that type}, summed
-          from every holding's own cost basis regardless of whether it's since matured - the same
-          "gross amount ever bought, unreduced by later realization" concept Stock's
-          distribution_by_ticker/total_money_invested use (see CLAUDE.md), as opposed to
-          MONEY_INVESTED_COLUMN's "currently held" one. Needed because a matured holding's
-          MONEY_INVESTED_COLUMN is 0 (see _bond_dataframe), which would make distribution_by_ticker
-          misreport a type as 0% the moment its last holding matures, rather than reflecting how
-          much was ever put into it.
+          from every holding's own cost basis (converted at that holding's own purchase-date FX
+          rate — see below) regardless of whether it's since matured - the same "gross amount
+          ever bought, unreduced by later realization" concept Stock's distribution_by_ticker/
+          total_money_invested use (see CLAUDE.md), as opposed to MONEY_INVESTED_COLUMN's
+          "currently held" one. Needed because a matured holding's MONEY_INVESTED_COLUMN is 0
+          (see _bond_dataframe), which would make distribution_by_ticker misreport a type as 0%
+          the moment its last holding matures, rather than reflecting how much was ever put into it.
         All three are cached together (see __init__) so a cache hit doesn't lose any of them."""
         # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
         # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
@@ -238,9 +262,10 @@ class PolishRetailBonds:
                 raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.BOND_TYPES)}.")
             is_swapped=bool(is_swapped_values[i])
             price_per_bond=self.NOMINAL_VALUE-(self.BOND_TYPES[code]['swap_discount'] if is_swapped else 0.0)
-            invested_by_type[code]=invested_by_type.get(code, 0.0)+amounts[i]*price_per_bond
+            fx_at_purchase=currency.data.loc[dates[i], Currency.CLOSE_COLUMN]
+            invested_by_type[code]=invested_by_type.get(code, 0.0)+amounts[i]*price_per_bond*fx_at_purchase
 
-            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped)
+            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency)
             bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
@@ -270,7 +295,7 @@ class PolishRetailBonds:
             raw=self.inflation_rate_data.loc[lookup_date, self.CSV_INFLATION_COLUMN]
         return max(raw, 0.0)
 
-    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool) -> pd.DataFrame:
+    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency) -> pd.DataFrame:
         config=self.BOND_TYPES[code]
         period_months=config['period_months']
         num_periods=config['num_periods']
@@ -305,13 +330,26 @@ class PolishRetailBonds:
 
         discount=config['swap_discount'] if is_swapped else 0.0
         price_per_bond=self.NOMINAL_VALUE-discount
+        # Frozen at the historical rate on this holding's own purchase date, same as Stock's own
+        # Money_invested - a cost basis converted once, at acquisition, not re-marked to today's
+        # rate afterward (unlike a mark-to-market price, which Stock's Close *does* re-apply
+        # every day, but a bond has no such observable price to begin with - see module docstring).
+        fx_at_purchase=currency.data.loc[start_date, Currency.CLOSE_COLUMN]
+
+        # Convert each day's own PLN interest to currency_to at THAT day's own FX rate, before
+        # accumulating - same convention Stock uses for dividends/realized profit (that event's
+        # own row_fx baked in once, not re-applied later). This is what makes a matured bond's
+        # frozen accrued_profit below stay frozen in currency_to terms too, rather than silently
+        # drifting with FX after redemption despite nothing further actually happening to it.
+        daily_interest=daily_interest*currency.data.loc[daily_interest.index, Currency.CLOSE_COLUMN]
 
         # Redemption value is always based on NOMINAL_VALUE regardless of what was actually paid
         # (see base above), so a lower cost basis (money_invested, below) needs a matching credit
         # here to keep this contract's Money_invested + Profit = current total value true up to
         # maturity - not just a lump sum tacked onto the final day, as the pre-rework version did
-        # it. Untaxed: it's a purchase-price discount, not interest income.
-        accrued_profit=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount
+        # it. Untaxed: it's a purchase-price discount, not interest income. Converted at
+        # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
+        accrued_profit=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
 
         # Extend to today - a no-op if the bond hasn't matured yet, since maturity_index already
         # reaches today in that case. Past maturity, the bond has been redeemed: Money_invested
@@ -323,7 +361,7 @@ class PolishRetailBonds:
         # realized profit persists in PROFIT_COLUMN.
         full_index=pd.date_range(start=start_date, end=today)
         dataframe=pd.DataFrame(index=full_index)
-        dataframe[self.MONEY_INVESTED_COLUMN]=pd.Series(amount_of_bonds*price_per_bond, index=maturity_index).reindex(full_index, fill_value=0.0)
+        dataframe[self.MONEY_INVESTED_COLUMN]=pd.Series(amount_of_bonds*price_per_bond*fx_at_purchase, index=maturity_index).reindex(full_index, fill_value=0.0)
         dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=accrued_profit.reindex(full_index, fill_value=0.0)
         dataframe[self.PROFIT_COLUMN]=accrued_profit.reindex(full_index).ffill()
         return dataframe
