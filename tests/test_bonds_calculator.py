@@ -20,7 +20,7 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
-from Portfolio_calculator_library import PolishRetailBonds
+from Portfolio_calculator_library import PolishRetailBonds, Currency
 
 
 def make_bonds_dir(make_source_dir, buy_csv: str, rate_row: str="01-2020,5.0\n", inflation_row: str="01-2020,4.0\n"):
@@ -392,6 +392,78 @@ def test_unknown_bond_code_raises_value_error(make_source_dir):
     ))
     with pytest.raises(ValueError, match='XYZ'):
         PolishRetailBonds(bonds_dir)
+
+
+def test_currency_to_defaults_to_native_pln_with_no_fx_call(make_source_dir, mock_yfinance):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    PolishRetailBonds(bonds_dir)
+    # PLN -> PLN is Currency's own same-currency short-circuit - no yfinance call at all, so
+    # existing callers that never pass currency_to get exactly the old PLN-only behavior for free.
+    assert mock_yfinance.call_log==[]
+
+
+def test_currency_to_converts_money_invested_at_the_purchase_date_rate(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir, currency_to='usd')
+
+    # Independent Currency instance, same start_date as the single holding above -> its FX
+    # series lines up position-for-position with the one PolishRetailBonds builds internally.
+    fx=Currency('PLN', 'usd', pd.Timestamp(start))
+    fx_at_purchase=fx.data.loc[pd.Timestamp(start), Currency.CLOSE_COLUMN]
+
+    assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(300.0*fx_at_purchase)
+    # Frozen at the purchase-date rate specifically, not today's - the two only coincide by
+    # accident, so assert against the deliberately non-flat fake rate rather than 1.0.
+    assert fx_at_purchase!=pytest.approx(1.0)
+
+
+def test_currency_to_bakes_in_each_days_own_fx_rate_before_accumulating(make_source_dir):
+    # OTS: a single flat (non-compounding) period, so its daily PLN interest is one constant
+    # value every day - isolates the day-by-day FX conversion from any compounding interaction.
+    start=date.today()-timedelta(days=5)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,1,0.0,3.0,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir, currency_to='usd')
+
+    fx=Currency('PLN', 'usd', pd.Timestamp(start))
+    n_days=(date.today()-start).days+1
+    period_days=(pd.Timestamp(start)+pd.DateOffset(months=3)-pd.Timestamp(start)).days
+    payments_per_year=12//3
+    daily_interest_pln=PolishRetailBonds.NOMINAL_VALUE*1*3.0/100.0/(period_days*payments_per_year)
+
+    gross_converted=sum(daily_interest_pln*fx.data[Currency.CLOSE_COLUMN].iloc[j] for j in range(n_days))
+    expected=round(gross_converted*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
+    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+
+    # If every day had instead been converted at a single flat (e.g. today's) rate, the result
+    # would differ from the day-by-day sum above, since the fake FX rate genuinely isn't flat.
+    flat_at_today=round(daily_interest_pln*n_days*fx.data[Currency.CLOSE_COLUMN].iloc[-1]*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
+    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]!=pytest.approx(flat_at_today)
+
+
+def test_currency_to_is_folded_into_the_cache_key(make_source_dir, cache_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+
+    pln=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)
+    usd=PolishRetailBonds(bonds_dir, currency_to='usd', cache_dir=cache_dir)
+    pln_again=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # cache hit - must not read usd's entry
+
+    assert pln.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(usd.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+    assert pln_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(pln.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
 
 
 def test_count_bonds_reads_row_count_without_computing(make_source_dir):
