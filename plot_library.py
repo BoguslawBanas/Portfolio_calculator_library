@@ -90,6 +90,8 @@ class Plot:
                     high=open_close_low_high['max']
                 )
             ])
+            fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)")
+            fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)
         else:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected 'plot' or 'candlestick')")
