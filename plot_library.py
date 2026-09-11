@@ -176,10 +176,7 @@ class Plot:
                 # pull 'Other' out of last place (and away from COLOR_OTHER's slice) whenever the
                 # smaller tickers it lumps together outweigh some single kept ticker - keep the
                 # order already built above (largest ticker first, 'Other' always last) instead.
-                # rotation=0: already go.Pie's own default (the first slice - the largest ticker,
-                # per the sort above - starts at 12 o'clock), pinned explicitly so that stays true
-                # regardless of a future plotly default change, rather than relying on it silently.
-                go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent', sort=False, rotation=0)
+                go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent', sort=False)
             ])
             self._render(fig, path_to_save_fig)
         elif kind=='histogram':
