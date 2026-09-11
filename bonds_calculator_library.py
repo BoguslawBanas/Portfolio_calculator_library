@@ -45,6 +45,15 @@ None of the eight letters mention withholding tax at all — that's tax law, not
 so it's asserted here as one TAX_RATE constant applied uniformly, rather than inferred per type
 (the prior version of this class applied 19% to variable-rate bonds and 0% to fixed-rate ones,
 a split that had no documented basis and is not carried forward — see README Roadmap on this).
+
+cancel.csv (optional) records that a holding was ACTUALLY redeemed early in real life — a holding
+is identified by its own (date, isin) pair, the same values as its buy.csv row. Once recorded,
+that holding stops accruing after cancel_date and behaves exactly like a naturally-matured one
+from then on (Money_invested/PROFIT_WITHOUT_DIVIDEND_COLUMN drop to 0, PROFIT_COLUMN freezes at
+its cancel_date value) — see _bond_dataframe. This only records THAT a redemption happened; it
+doesn't (yet) apply the lower early-redemption payout formula every list emisyjny separately
+defines for cashing out before maturity (a different, still-open Roadmap item) — accrual up to
+cancel_date still uses the same held-to-maturity formula as every other day.
 """
 
 import os
@@ -68,7 +77,7 @@ class PolishRetailBonds:
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
 
-    # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv. ---
+    # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
@@ -77,6 +86,7 @@ class PolishRetailBonds:
     CSV_IS_SWAPPED_COLUMN='is_swapped'
     CSV_INTEREST_RATE_COLUMN='rate'
     CSV_INFLATION_COLUMN='inflation'
+    CSV_CANCEL_DATE_COLUMN='cancel_date'
 
     NOMINAL_VALUE=100.0  # zł per bond, every type (every list emisyjny's ust. 2)
     NATIVE_CURRENCY='PLN'  # every bond is issued in PLN — see module docstring
@@ -122,10 +132,13 @@ class PolishRetailBonds:
         directory) — pass an absolute path instead to point elsewhere. progress_callback:
         optional zero-arg callback invoked once, after all bond rows have been computed, for a
         caller (e.g. Portfolio) tracking overall progress.
+        cancel.csv (optional, resolved relative to dataframe): records that a holding was
+        actually redeemed early — see the module docstring for its (date, isin, cancel_date)
+        shape and exactly what recording a cancellation does/doesn't change.
         cache_dir: optional directory to cache the fully computed bonds data in (self.data plus
         the per-bond-type breakdown behind distribution_by_ticker/_current_value/_revenue — see
         _compute_data's return value), keyed by currency_to plus the content of
-        buy.csv/interest_rate_file/inflation_rate_file and valid for the
+        buy.csv/interest_rate_file/inflation_rate_file/cancel.csv and valid for the
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
@@ -133,12 +146,14 @@ class PolishRetailBonds:
         interest_rate_path=os.path.join(dataframe, interest_rate_file)
         inflation_rate_path=os.path.join(dataframe, inflation_rate_file)
         buy_path=os.path.join(dataframe, "buy.csv")
+        cancel_path=os.path.join(dataframe, "cancel.csv")
 
         self.dataframe=pd.read_csv(buy_path)
         self.dataframe.index=pd.to_datetime(self.dataframe[self.CSV_DATE_COLUMN], format='%Y-%m-%d')
         self.dataframe.drop([self.CSV_DATE_COLUMN], axis=1, inplace=True)
         self.interest_rate_data=self._load_rate_file(interest_rate_path, '%m-%Y', today)
         self.inflation_rate_data=self._load_rate_file(inflation_rate_path, '%m-%Y', today)
+        self.cancellations=self._load_cancellations(cancel_path) if os.path.exists(cancel_path) else dict()
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
@@ -153,7 +168,11 @@ class PolishRetailBonds:
             # shape/semantics ever change again. currency_to is folded into the key itself (not
             # just this tag) since two different target currencies are both otherwise-valid,
             # simultaneously-live cache entries for the same buy.csv - not a stale-vs-fresh case.
-            cache_key=DiskCache.make_key('bonds-v4', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path))
+            # cancel.csv is folded in the same way (a sentinel string when absent, since there's
+            # nothing to hash_file) - adding/editing/removing it must invalidate a same-day entry
+            # computed before that change, exactly like editing buy.csv itself would.
+            cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
+            cache_key=DiskCache.make_key('bonds-v4', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
@@ -232,6 +251,20 @@ class PolishRetailBonds:
         all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=today, freq='D'))
         return all_days.join(rate_df).ffill()
 
+    @classmethod
+    def _load_cancellations(cls, path: str) -> dict:
+        """{(purchase_date, isin): cancel_date} for every row in cancel.csv - a holding is
+        identified by its own (date, isin) pair, the same values as its buy.csv row (two
+        identical (date, isin) rows in buy.csv - an edge case real data is unlikely to have -
+        would both match the same cancellation here, since nothing else distinguishes them)."""
+        cancel_df=pd.read_csv(path)
+        cancel_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
+        cancel_df[cls.CSV_CANCEL_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_CANCEL_DATE_COLUMN], format='%Y-%m-%d')
+        return {
+            (row[cls.CSV_DATE_COLUMN], row[cls.CSV_TICKER_COLUMN]): row[cls.CSV_CANCEL_DATE_COLUMN]
+            for _, row in cancel_df.iterrows()
+        }
+
     def _compute_data(self, today: datetime, currency: Currency, progress_callback: Callable[[], None]=None) -> tuple:
         """Returns (merged_dataframe, type_dataframes, invested_by_type):
         - merged_dataframe: the whole-portfolio DataFrame (self.data).
@@ -269,7 +302,11 @@ class PolishRetailBonds:
             fx_at_purchase=currency.data.loc[dates[i], Currency.CLOSE_COLUMN]
             invested_by_type[code]=invested_by_type.get(code, 0.0)+amounts[i]*price_per_bond*fx_at_purchase
 
-            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency)
+            cancel_date=self.cancellations.get((dates[i], raw_codes[i]))
+            if cancel_date is not None and cancel_date<dates[i]:
+                raise ValueError(f"Cancellation date {cancel_date.date()} for {raw_codes[i]!r} is before its own purchase date {dates[i].date()}.")
+
+            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, cancel_date)
             bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
@@ -299,7 +336,7 @@ class PolishRetailBonds:
             raw=self.inflation_rate_data.loc[lookup_date, self.CSV_INFLATION_COLUMN]
         return max(raw, 0.0)
 
-    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency) -> pd.DataFrame:
+    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency, cancel_date: pd.Timestamp=None) -> pd.DataFrame:
         config=self.BOND_TYPES[code]
         period_months=config['period_months']
         num_periods=config['num_periods']
@@ -307,8 +344,16 @@ class PolishRetailBonds:
         rate_source=config['rate_source']
         payments_per_year=12//period_months
 
+        # accrual_cutoff, not today, bounds how far this holding has actually accrued - the two
+        # differ only when it was cancelled (recorded in cancel.csv) before today, in which case
+        # accrual simply stops at cancel_date instead of continuing to natural maturity/today.
+        # full_index below still spans to the real today regardless, so a cancelled holding's
+        # post-cancellation days zero out/freeze via the same reindex/ffill mechanics that
+        # already handle natural maturity - cancellation is just an earlier "effective maturity".
+        accrual_cutoff=min(today, cancel_date) if cancel_date is not None else today
+
         end_date=start_date+pd.DateOffset(months=period_months*num_periods)-pd.DateOffset(days=1)
-        maturity_index=pd.date_range(start=start_date, end=min(end_date, today))
+        maturity_index=pd.date_range(start=start_date, end=min(end_date, accrual_cutoff))
 
         # Interest always accrues on the bond's full NOMINAL_VALUE, whether bought for cash or
         # (at a discount) by exchange — only the cost basis below differs.
@@ -317,14 +362,14 @@ class PolishRetailBonds:
 
         for period in range(num_periods):
             period_start=start_date+pd.DateOffset(months=period_months*period)
-            if period_start>today:
+            if period_start>accrual_cutoff:
                 break
             period_end=start_date+pd.DateOffset(months=period_months*(period+1))
             period_days=(period_end-period_start).days
 
             rate=initial_coupon if period==0 or rate_source is None else self._external_rate(rate_source, period_start)+additional_coupon
 
-            period_index=pd.date_range(start=period_start, end=min(period_end-pd.DateOffset(days=1), today))
+            period_index=pd.date_range(start=period_start, end=min(period_end-pd.DateOffset(days=1), accrual_cutoff))
             if len(period_index)==0:
                 break
             daily_interest.loc[period_index]=base*rate/100.0/(period_days*payments_per_year)
@@ -355,14 +400,16 @@ class PolishRetailBonds:
         # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
         accrued_profit=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
 
-        # Extend to today - a no-op if the bond hasn't matured yet, since maturity_index already
-        # reaches today in that case. Past maturity, the bond has been redeemed: Money_invested
-        # and the unrealized component (PROFIT_WITHOUT_DIVIDEND_COLUMN) drop to 0 - nothing is
-        # left held, the proceeds became cash, which this library doesn't separately track - while
-        # total Profit freezes at its final accrued value forever, since it was realized at
-        # redemption and doesn't disappear from historical totals. Mirrors how a fully-sold Stock
-        # position's running cost basis and unrealized profit both go to 0 while its cumulative
-        # realized profit persists in PROFIT_COLUMN.
+        # Extend to today - a no-op if the bond hasn't matured/been cancelled yet, since
+        # maturity_index already reaches today in that case. Past accrual_cutoff (natural
+        # maturity OR an earlier recorded cancellation - both handled identically from here on),
+        # the bond has been redeemed: Money_invested and the unrealized component
+        # (PROFIT_WITHOUT_DIVIDEND_COLUMN) drop to 0 - nothing is left held, the proceeds became
+        # cash, which this library doesn't separately track - while total Profit freezes at its
+        # final accrued value forever, since it was realized at redemption and doesn't disappear
+        # from historical totals. Mirrors how a fully-sold Stock position's running cost basis and
+        # unrealized profit both go to 0 while its cumulative realized profit persists in
+        # PROFIT_COLUMN.
         full_index=pd.date_range(start=start_date, end=today)
         dataframe=pd.DataFrame(index=full_index)
         dataframe[self.MONEY_INVESTED_COLUMN]=pd.Series(amount_of_bonds*price_per_bond*fx_at_purchase, index=maturity_index).reindex(full_index, fill_value=0.0)

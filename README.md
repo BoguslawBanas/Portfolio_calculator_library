@@ -27,6 +27,7 @@ Computes the value over time of Polish retail treasury bonds (*obligacje detalic
 - once a bond matures, its cost basis and unrealized value both drop to 0 — nothing is left held, the redemption proceeds became cash, which this library doesn't separately track — while its accrued interest freezes at the final value and persists in `Profit`/`total_revenue`/`distribution_by_ticker_revenue` forever after, since it was realized at redemption rather than lost; `total_money_invested`/`distribution_by_ticker` track the lifetime amount ever put into each bond/type, unreduced by since-matured holdings — the same split `Stock`'s own `total_money_invested` (lifetime) vs. `data[Money_invested]` (currently held) draws for a fully-sold ticker
 - interest always accrues on each bond's full nominal value (100 zł) regardless of `is_swapped`'s discount, and a flat 19% tax (`PolishRetailBonds.TAX_RATE`) is applied uniformly — neither the exact tax treatment nor the discount amount is stated in the *listy emisyjne* themselves (tax law and bank-quoted exchange pricing aren't issuance terms), so both are asserted as named constants rather than sourced per type
 - optional `currency_to` — every bond is issued in PLN (`PolishRetailBonds.NATIVE_CURRENCY`), converted via `Currency` the same way `Stock`/`Commodity`/`Crypto` convert their own native-currency prices; defaults to `'PLN'`, a no-op. Each day's own accrued interest is converted at *that day's own* FX rate before accumulating (the same convention `Stock` uses for dividends/realized profit — that event's own rate baked in once, not re-marked later), so a matured bond's frozen `Profit` stays frozen in `currency_to` terms too, instead of drifting with FX after redemption despite nothing further actually happening to it. `Portfolio` passes its own `currency` through automatically
+- optional `cancel.csv` — records that a holding (identified by its own `date`/`isin` pair, matching its `buy.csv` row) was *actually* redeemed early in real life; once recorded, it stops accruing after `cancel_date` and behaves exactly like a naturally-matured holding from then on. Only records that a redemption happened — doesn't (yet) apply the lower early-redemption payout formula every *list emisyjny* separately defines for cashing out before maturity, so accrual up to `cancel_date` still uses the same held-to-maturity formula as any other day (see Roadmap)
 
 ### 💱 `currency_calculator_library.Currency`
 
@@ -139,7 +140,8 @@ from Portfolio_calculator_library import Portfolio, Plot
 # (commodities — symbol column must be one of Commodity.TICKERS's keys, e.g. "gold";
 # crypto — same shape, symbol column must be one of Crypto.TICKERS's keys, e.g. "bitcoin"),
 # or buy.csv plus interest_rate.csv/inflation_rate.csv (bonds — the two rate CSVs are
-# read from the bonds directory itself, not the working directory).
+# read from the bonds directory itself, not the working directory; an optional cancel.csv
+# there too records any holding actually redeemed early - see PolishRetailBonds' Features entry).
 sources = {
     "data/stocks": "stock",
     "data/bonds": "bonds",
@@ -228,8 +230,7 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
 - `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types) and the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*) are both asserted, not derived from the *listy emisyjne* — neither withholding tax nor bank-quoted exchange pricing is an issuance term, so neither appears in them; double-check both against a current, authoritative source before relying on this for real tax reporting
-- model early redemption (*przedterminowy wykup*) — every list emisyjny defines a separate, lower payout formula for cashing out before maturity (the *cena zamiany* discount notwithstanding); `PolishRetailBonds` only ever reports the held-to-maturity accrued value, consistent with the library's "value over time" framing, but a caller wanting a realistic today-if-I-cashed-out number has no way to get one yet
-- record an *actual* early redemption/cancellation — `PolishRetailBonds` only ever reads `buy.csv`, with no `sell.csv`/`cancel.csv` counterpart the way `Stock`/`Commodity`/`Crypto` each have one; a bond genuinely redeemed early in real life has no way to be reflected here, so it keeps silently accruing (and counting toward totals/`distribution_by_ticker`) all the way to its natural maturity date regardless of what actually happened to it — a different gap from the item above, which is about computing a hypothetical mark-to-market redemption value, not recording that a redemption actually took place
+- model early redemption (*przedterminowy wykup*) — every list emisyjny defines a separate, lower payout formula for cashing out before maturity (the *cena zamiany* discount notwithstanding); `cancel.csv` (see Features above) now records THAT a holding was redeemed early, but accrual up to `cancel_date` still uses the same held-to-maturity formula as any other day — a caller wanting a realistic today-if-I-cashed-out number still has no way to get one
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 
 ## License

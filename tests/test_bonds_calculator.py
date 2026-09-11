@@ -23,12 +23,15 @@ import pytest
 from Portfolio_calculator_library import PolishRetailBonds, Currency
 
 
-def make_bonds_dir(make_source_dir, buy_csv: str, rate_row: str="01-2020,5.0\n", inflation_row: str="01-2020,4.0\n"):
-    return make_source_dir('bonds', {
+def make_bonds_dir(make_source_dir, buy_csv: str, rate_row: str="01-2020,5.0\n", inflation_row: str="01-2020,4.0\n", cancel_csv: str=None):
+    files={
         'buy.csv': buy_csv,
         'interest_rate.csv': "date,rate\n"+rate_row,
         'inflation_rate.csv': "date,inflation\n"+inflation_row,
-    })
+    }
+    if cancel_csv is not None:
+        files['cancel.csv']=cancel_csv
+    return make_source_dir('bonds', files)
 
 
 def _expected_profit(start, today, code, initial_coupon, additional_coupon, external_rate=0.0, amount=1.0, is_swapped=False):
@@ -106,6 +109,112 @@ def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir
     assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(at_maturity)
     day_after_maturity=data.loc[maturity_date+pd.DateOffset(days=1), PolishRetailBonds.PROFIT_COLUMN]
     assert day_after_maturity==pytest.approx(at_maturity)
+
+
+def test_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source_dir):
+    """A holding recorded in cancel.csv as redeemed early stops accruing at cancel_date and
+    behaves exactly like a naturally-matured holding from then on - see the module docstring."""
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)  # well before ROR's natural 12-month term ends
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        cancel_csv=(
+            "date,isin,cancel_date\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()}\n"
+        ),
+    )
+    data=PolishRetailBonds(bonds_dir).data
+
+    expected_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    assert expected_at_cancellation>0.0
+
+    at_cancel_date=data.loc[pd.Timestamp(cancel_date), PolishRetailBonds.PROFIT_COLUMN]
+    assert at_cancel_date==pytest.approx(expected_at_cancellation)
+
+    last_row=data.iloc[-1]
+    assert data.index[-1]==pd.Timestamp(date.today())  # index still reaches today, not just cancel_date
+    assert last_row[PolishRetailBonds.MONEY_INVESTED_COLUMN]==pytest.approx(0.0)
+    assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]==pytest.approx(0.0)
+    assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(expected_at_cancellation)
+
+    # Never reached ROR's natural ~12-month maturity, so without the cancellation Profit today
+    # would have kept growing well past what it was on cancel_date.
+    uncancelled=PolishRetailBonds(make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+    )).data
+    assert uncancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>expected_at_cancellation
+
+
+def test_cancellation_after_natural_maturity_is_a_no_op(make_source_dir):
+    start=date.today()-timedelta(days=200)  # OTS's 3-month term has long since ended
+    cancel_date=date.today()-timedelta(days=1)  # recorded long after OTS actually matured
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},OTS0826,2,0.0,2.0,False\n"
+        ),
+        cancel_csv=(
+            "date,isin,cancel_date\n"
+            f"{start.isoformat()},OTS0826,{cancel_date.isoformat()}\n"
+        ),
+    )
+    cancelled=PolishRetailBonds(bonds_dir).data
+
+    uncancelled=PolishRetailBonds(make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,2,0.0,2.0,False\n"
+    ))).data
+
+    assert cancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(uncancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
+
+
+def test_cancellation_before_purchase_date_raises(make_source_dir):
+    start=date.today()-timedelta(days=10)
+    invalid_cancel_date=start-timedelta(days=1)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+        ),
+        cancel_csv=(
+            "date,isin,cancel_date\n"
+            f"{start.isoformat()},TOS0929,{invalid_cancel_date.isoformat()}\n"
+        ),
+    )
+    with pytest.raises(ValueError, match="before its own purchase date"):
+        PolishRetailBonds(bonds_dir)
+
+
+def test_cache_key_is_scoped_by_cancel_csv_presence(make_source_dir, cache_dir):
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)
+    buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+    )
+
+    no_cancel_dir=make_bonds_dir(make_source_dir, buy_csv=buy_csv, rate_row="01-2020,6.0\n")
+    without_cancellation=PolishRetailBonds(no_cancel_dir, cache_dir=cache_dir).data
+
+    # Same directory, now with cancel.csv added - a same-day cache hit for the old (no-cancel.csv)
+    # key must not be silently reused for this different input.
+    with open(os.path.join(no_cancel_dir, 'cancel.csv'), 'w') as f:
+        f.write("date,isin,cancel_date\n"+f"{start.isoformat()},ROR0927,{cancel_date.isoformat()}\n")
+    with_cancellation=PolishRetailBonds(no_cancel_dir, cache_dir=cache_dir).data
+
+    assert with_cancellation[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]!=pytest.approx(without_cancellation[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
 
 
 def test_ots_single_period_uses_initial_coupon(make_source_dir):
