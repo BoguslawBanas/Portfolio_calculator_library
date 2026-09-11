@@ -75,6 +75,10 @@ class Commodity:
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        # Every symbol here quotes in QUOTE_CURRENCY, so this is trivial (unlike Stock's, which
+        # varies per ticker) — kept as a per-symbol dict anyway so Portfolio's
+        # distribution_by_currency aggregation has one uniform shape to read across every source.
+        self.currency_by_ticker=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
@@ -101,6 +105,7 @@ class Commodity:
         for df in dataframes:
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[symbol]=(money_invested_by_symbol[symbol]/self.total_money_invested)*100.0
+            self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
             computed=self._compute_data(df, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 

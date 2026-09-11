@@ -206,6 +206,10 @@ class PolishRetailBonds:
         self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_invested else dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        # Every bond type here is issued in NATIVE_CURRENCY, so this is trivial (unlike Stock's,
+        # which varies per ticker) — kept as a per-type dict anyway so Portfolio's
+        # distribution_by_currency aggregation has one uniform shape to read across every source.
+        self.currency_by_ticker={code: self.NATIVE_CURRENCY for code in invested_by_type}
         for code, type_dataframe in type_dataframes.items():
             current_value=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]

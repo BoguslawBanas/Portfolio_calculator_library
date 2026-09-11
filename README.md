@@ -37,7 +37,8 @@ Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone
 Combines one or more `Stock`/`Bonds` sources into a single portfolio-level DataFrame.
 
 - builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
-- allocation by ticker/directory, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
+- allocation by ticker/directory/currency, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
+- `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency` (the single currency `self.data`/totals are already converted to and summed in)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
@@ -169,6 +170,12 @@ print(f"Total revenue: {portfolio.total_revenue:.2f}")
 print(portfolio.distribution_by_ticker)                # allocation by amount invested
 print(portfolio.distribution_by_ticker_current_value)  # allocation by current market value
 print(portfolio.distribution_by_ticker_revenue)         # allocation by share of total gains
+
+# distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
+# position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by
+# ticker - always populated, no flag needed. Independent of currency="usd" above, which is only
+# what everything gets CONVERTED to for self.data/totals, not what it natively IS.
+print(portfolio.distribution_by_currency)
 
 # include_native_currency=True (pass it to Portfolio(...) above) additionally populates
 # portfolio.native_data/native_currency per Stock/Commodity/Crypto ticker or symbol, isolating
