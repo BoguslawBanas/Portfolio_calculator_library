@@ -172,7 +172,11 @@ class Plot:
 
         if kind=='pie':
             fig=go.Figure(data=[
-                go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent')
+                # sort=False: go.Pie defaults to re-sorting its own slices by value, which would
+                # pull 'Other' out of last place (and away from COLOR_OTHER's slice) whenever the
+                # smaller tickers it lumps together outweigh some single kept ticker - keep the
+                # order already built above (largest ticker first, 'Other' always last) instead.
+                go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent', sort=False)
             ])
             self._render(fig, path_to_save_fig)
         elif kind=='histogram':
