@@ -17,6 +17,7 @@ from .stock_calculator_library import Stock
 from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
+from .bank_account_calculator_library import BankAccount
 from .cache_library import DiskCache
 
 
@@ -62,6 +63,12 @@ class Portfolio:
         mapping each ISIN to {"ticker": <yfinance symbol>, "currency": <instrument currency>}.
         When given, get_currency()/get_dataframe_currency() become available.
 
+        self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
+        allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
+        a Polish bond's 'PLN', ...) rather than by ticker/directory - answers "how much of my
+        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency below
+        (the single currency self.data itself is already converted to and summed in).
+
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
@@ -78,14 +85,26 @@ class Portfolio:
         ticker/symbol's DataFrame in its own native currency, isolated from FX movement
         against currency — collected into self.native_data/self.native_currency (keyed by
         ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
-        of this: they're already denominated in a single native currency (PLN) with no
-        conversion step to begin with, so there's nothing to opt into."""
+        of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
+        currency above — see README Roadmap), but doesn't yet expose an include_native_currency
+        of its own the way Stock/Commodity/Crypto do, so there's no per-holding native-currency
+        DataFrame for Portfolio to collect here."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
+        # currency field for Stock, each source's fixed QUOTE_CURRENCY/NATIVE_CURRENCY for
+        # Commodity/Crypto/PolishRetailBonds) - not by currency (this constructor's target
+        # currency, what self.data is already summed in), so this answers "how much of my
+        # portfolio is actually USD-denominated vs. EUR vs. PLN" regardless of what everything
+        # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
+        # (a differently-cased source) land in the same bucket.
+        self.distribution_by_currency=dict()
+        self.distribution_by_currency_current_value=dict()
+        self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.total_invested_money=0.0
@@ -109,6 +128,8 @@ class Portfolio:
                 total_units+=Commodity.count_tickers(dir)
             elif type=='crypto':
                 total_units+=Crypto.count_tickers(dir)
+            elif type=='bank_account':
+                total_units+=BankAccount.count_accounts(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
@@ -121,17 +142,23 @@ class Portfolio:
                     self.total_current_value+=stock.total_current_value
                     self.total_revenue+=stock.total_revenue
                     for key, value in stock.distribution_by_ticker.items():
-                        self.distribution_by_ticker[key]=round(value/100.0*stock.total_money_invested, 2)
+                        amount=round(value/100.0*stock.total_money_invested, 2)
+                        self.distribution_by_ticker[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency, stock.currency_by_ticker, key, amount)
                     for key, value in stock.distribution_by_ticker_current_value.items():
-                        self.distribution_by_ticker_current_value[key]=round(value/100.0*stock.total_current_value, 2)
+                        amount=round(value/100.0*stock.total_current_value, 2)
+                        self.distribution_by_ticker_current_value[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_current_value, stock.currency_by_ticker, key, amount)
                     for key, value in stock.distribution_by_ticker_revenue.items():
-                        self.distribution_by_ticker_revenue[key]=round(value/100.0*stock.total_revenue, 2)
+                        amount=round(value/100.0*stock.total_revenue, 2)
+                        self.distribution_by_ticker_revenue[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_revenue, stock.currency_by_ticker, key, amount)
                     if include_native_currency:
                         self.native_data.update(stock.native_data)
                         self.native_currency.update(stock.native_currency)
                     portfolio_list.append(stock)
                 elif type=='bonds':
-                    bonds=PolishRetailBonds(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    bonds=PolishRetailBonds(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self.distribution_by_directory[dir]=bonds.total_money_invested
                     self.distribution_by_directory_current_value[dir]=bonds.total_current_value
                     self.distribution_by_directory_revenue[dir]=bonds.total_revenue
@@ -139,11 +166,17 @@ class Portfolio:
                     self.total_current_value+=bonds.total_current_value
                     self.total_revenue+=bonds.total_revenue
                     for key, value in bonds.distribution_by_ticker.items():
-                        self.distribution_by_ticker[key]=round(value/100.0*bonds.total_money_invested, 2)
+                        amount=round(value/100.0*bonds.total_money_invested, 2)
+                        self.distribution_by_ticker[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency, bonds.currency_by_ticker, key, amount)
                     for key, value in bonds.distribution_by_ticker_current_value.items():
-                        self.distribution_by_ticker_current_value[key]=round(value/100.0*bonds.total_current_value, 2)
+                        amount=round(value/100.0*bonds.total_current_value, 2)
+                        self.distribution_by_ticker_current_value[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_current_value, bonds.currency_by_ticker, key, amount)
                     for key, value in bonds.distribution_by_ticker_revenue.items():
-                        self.distribution_by_ticker_revenue[key]=round(value/100.0*bonds.total_revenue, 2)
+                        amount=round(value/100.0*bonds.total_revenue, 2)
+                        self.distribution_by_ticker_revenue[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_revenue, bonds.currency_by_ticker, key, amount)
                     portfolio_list.append(bonds)
                 elif type=='commodities':
                     commodity=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
@@ -154,11 +187,17 @@ class Portfolio:
                     self.total_current_value+=commodity.total_current_value
                     self.total_revenue+=commodity.total_revenue
                     for key, value in commodity.distribution_by_ticker.items():
-                        self.distribution_by_ticker[key]=round(value/100.0*commodity.total_money_invested, 2)
+                        amount=round(value/100.0*commodity.total_money_invested, 2)
+                        self.distribution_by_ticker[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency, commodity.currency_by_ticker, key, amount)
                     for key, value in commodity.distribution_by_ticker_current_value.items():
-                        self.distribution_by_ticker_current_value[key]=round(value/100.0*commodity.total_current_value, 2)
+                        amount=round(value/100.0*commodity.total_current_value, 2)
+                        self.distribution_by_ticker_current_value[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_current_value, commodity.currency_by_ticker, key, amount)
                     for key, value in commodity.distribution_by_ticker_revenue.items():
-                        self.distribution_by_ticker_revenue[key]=round(value/100.0*commodity.total_revenue, 2)
+                        amount=round(value/100.0*commodity.total_revenue, 2)
+                        self.distribution_by_ticker_revenue[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_revenue, commodity.currency_by_ticker, key, amount)
                     if include_native_currency:
                         self.native_data.update(commodity.native_data)
                         self.native_currency.update(commodity.native_currency)
@@ -172,15 +211,36 @@ class Portfolio:
                     self.total_current_value+=crypto.total_current_value
                     self.total_revenue+=crypto.total_revenue
                     for key, value in crypto.distribution_by_ticker.items():
-                        self.distribution_by_ticker[key]=round(value/100.0*crypto.total_money_invested, 2)
+                        amount=round(value/100.0*crypto.total_money_invested, 2)
+                        self.distribution_by_ticker[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency, crypto.currency_by_ticker, key, amount)
                     for key, value in crypto.distribution_by_ticker_current_value.items():
-                        self.distribution_by_ticker_current_value[key]=round(value/100.0*crypto.total_current_value, 2)
+                        amount=round(value/100.0*crypto.total_current_value, 2)
+                        self.distribution_by_ticker_current_value[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_current_value, crypto.currency_by_ticker, key, amount)
                     for key, value in crypto.distribution_by_ticker_revenue.items():
-                        self.distribution_by_ticker_revenue[key]=round(value/100.0*crypto.total_revenue, 2)
+                        amount=round(value/100.0*crypto.total_revenue, 2)
+                        self.distribution_by_ticker_revenue[key]=amount
+                        self._accumulate_by_currency(self.distribution_by_currency_revenue, crypto.currency_by_ticker, key, amount)
                     if include_native_currency:
                         self.native_data.update(crypto.native_data)
                         self.native_currency.update(crypto.native_currency)
                     portfolio_list.append(crypto)
+                elif type=='bank_account':
+                    bank_account=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    self.distribution_by_directory[dir]=bank_account.total_money_invested
+                    self.distribution_by_directory_current_value[dir]=bank_account.total_current_value
+                    self.distribution_by_directory_revenue[dir]=bank_account.total_revenue
+                    self.total_invested_money+=bank_account.total_money_invested
+                    self.total_current_value+=bank_account.total_current_value
+                    self.total_revenue+=bank_account.total_revenue
+                    for key, value in bank_account.distribution_by_ticker.items():
+                        self.distribution_by_ticker[key]=round(value/100.0*bank_account.total_money_invested, 2)
+                    for key, value in bank_account.distribution_by_ticker_current_value.items():
+                        self.distribution_by_ticker_current_value[key]=round(value/100.0*bank_account.total_current_value, 2)
+                    for key, value in bank_account.distribution_by_ticker_revenue.items():
+                        self.distribution_by_ticker_revenue[key]=round(value/100.0*bank_account.total_revenue, 2)
+                    portfolio_list.append(bank_account)
 
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_invested_money
@@ -200,6 +260,15 @@ class Portfolio:
         for key, value in self.distribution_by_ticker_revenue.items():
             self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue
 
+        for key, value in self.distribution_by_currency.items():
+            self.distribution_by_currency[key]=100.0*value/self.total_invested_money
+
+        for key, value in self.distribution_by_currency_current_value.items():
+            self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value
+
+        for key, value in self.distribution_by_currency_revenue.items():
+            self.distribution_by_currency_revenue[key]=100.0*value/self.total_revenue
+
         self.data=self.merge(portfolio_list)
 
         if cache_dir is not None:
@@ -209,6 +278,16 @@ class Portfolio:
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""
         return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+
+    @staticmethod
+    def _accumulate_by_currency(target: dict, currency_by_ticker: dict, key, amount: float):
+        """Adds amount into target's bucket for currency_by_ticker[key]'s currency (uppercased,
+        so differently-cased sources land in the same bucket), used by __init__ to build
+        distribution_by_currency/_current_value/_revenue from each source's per-ticker figures
+        (still in absolute terms at that point - see __init__'s own distribution_by_ticker loops,
+        which normalize to percentages only after every source has been folded in)."""
+        currency_code=currency_by_ticker[key].upper()
+        target[currency_code]=target.get(currency_code, 0.0)+amount
 
     def _replace_isin_with_ticker(self):
         """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place

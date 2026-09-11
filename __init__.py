@@ -18,6 +18,7 @@ from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .currency_calculator_library import Currency
 from .cache_library import DiskCache
+from .bank_account_calculator_library import BankAccount
 
 __all__=[
     'Portfolio',
@@ -28,4 +29,5 @@ __all__=[
     'Crypto',
     'Currency',
     'DiskCache',
+    'BankAccount',
 ]

@@ -45,6 +45,82 @@ def test_zero_day_row_is_prepended_before_the_first_transaction(make_source_dir,
     assert (first_row==0.0).all()
 
 
+def test_distribution_by_currency_single_stock_source(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    # The single ticker's own native currency ('usd'), uppercased - not the ticker/isin, and not
+    # currency='usd' (the target everything's converted to) by coincidence, but by definition.
+    assert portfolio.distribution_by_currency==pytest.approx({'USD': 100.0})
+    assert portfolio.distribution_by_currency_current_value==pytest.approx({'USD': 100.0})
+    assert portfolio.distribution_by_currency_revenue==pytest.approx({'USD': 100.0})
+
+
+def test_distribution_by_currency_splits_across_two_stock_native_currencies(make_source_dir, make_tickers_json):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,5,100.0,0.0\n"   # 500, native usd
+                   "2024-01-20,DE0000000002,2,150.0,0.0\n",  # 300, native eur
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd')
+
+    # distribution_by_ticker is keyed by isin (two entries); distribution_by_currency instead
+    # groups those same two positions into just 'USD'/'EUR' - fewer keys than distribution_by_ticker
+    # whenever two tickers share a native currency, though not exercised by this particular case.
+    assert set(portfolio.distribution_by_currency)=={'USD', 'EUR'}
+    assert sum(portfolio.distribution_by_currency.values())==pytest.approx(100.0)
+    # Matches distribution_by_ticker's own split for each single-currency ticker exactly, since
+    # each currency bucket here holds only one position.
+    assert portfolio.distribution_by_currency['USD']==pytest.approx(portfolio.distribution_by_ticker['US0000000001'])
+    assert portfolio.distribution_by_currency['EUR']==pytest.approx(portfolio.distribution_by_ticker['DE0000000002'])
+
+
+def test_distribution_by_currency_groups_same_currency_tickers_together(make_source_dir, make_tickers_json):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,5,100.0,0.0\n"
+                   "2024-01-20,US0000000003,2,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "US0000000003": {"ticker": "FAKEUSD2", "currency": "usd"},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency='usd')
+
+    # Two distinct tickers, both native-usd - distribution_by_ticker has two entries,
+    # distribution_by_currency collapses them into one 'USD': 100.0 bucket.
+    assert len(portfolio.distribution_by_ticker)==2
+    assert portfolio.distribution_by_currency==pytest.approx({'USD': 100.0})
+
+
+def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, make_tickers_json):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    start=date.today()-timedelta(days=3)
+    bonds_dir=make_source_dir('bonds', {
+        'buy.csv': "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+                   f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n",
+        'interest_rate.csv': "date,rate\n01-2020,5.0\n",
+        'inflation_rate.csv': "date,inflation\n01-2020,4.0\n",
+    })
+
+    portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
+
+    # Every Polish retail bond is natively PLN (PolishRetailBonds.NATIVE_CURRENCY) regardless of
+    # currency='usd' above - self.data/totals are converted to usd, but distribution_by_currency
+    # tracks what each position actually IS denominated in, so PLN still shows up here.
+    assert set(portfolio.distribution_by_currency)=={'USD', 'PLN'}
+    assert sum(portfolio.distribution_by_currency.values())==pytest.approx(100.0)
+    assert sum(portfolio.distribution_by_currency_current_value.values())==pytest.approx(100.0)
+    assert sum(portfolio.distribution_by_currency_revenue.values())==pytest.approx(100.0)
+
+
 def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
@@ -62,7 +138,12 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
 
     portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
 
-    assert portfolio.total_invested_money==pytest.approx(1000.0+100.0)
+    # Portfolio now passes its own currency down to PolishRetailBonds (Roadmap: apply currency
+    # conversion to PolishRetailBonds) - read the bond's own USD-converted total directly instead
+    # of hardcoding 100.0 PLN, so this test doesn't depend on the fake FX rate's exact value.
+    from Portfolio_calculator_library import PolishRetailBonds
+    bonds_alone=PolishRetailBonds(bonds_dir, 'usd')
+    assert portfolio.total_invested_money==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
     # Dividend column only exists because the stock source contributed one.
@@ -94,7 +175,10 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     mixed=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
 
     from Portfolio_calculator_library import PolishRetailBonds
-    bonds_only=PolishRetailBonds(bonds_dir)
+    # 'usd', matching currency='usd' above - Portfolio now converts bonds through its own
+    # currency (Roadmap: apply currency conversion to PolishRetailBonds), so the standalone
+    # comparison value must be converted the same way to still be comparable.
+    bonds_only=PolishRetailBonds(bonds_dir, 'usd')
     matured_bond_revenue=bonds_only.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
     assert matured_bond_revenue>0.0  # sanity check: the bond actually earned something before maturing
 
@@ -105,7 +189,19 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
     # total_invested_money is lifetime (like Stock's own), so it still counts the matured bond.
-    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+500.0)
+    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+bonds_only.total_money_invested)
+
+
+def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
+    start=date.today()-timedelta(days=5)
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n",
+    })
+    portfolio=Portfolio({account_dir: 'bank_account'})
+    assert portfolio.total_invested_money==pytest.approx(1000.0)
+    assert 'savings' in portfolio.distribution_by_ticker
+    assert portfolio.distribution_by_directory[account_dir]==pytest.approx(100.0)
 
 
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):

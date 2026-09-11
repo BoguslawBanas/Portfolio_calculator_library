@@ -105,6 +105,24 @@ def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json
     assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]>0.0
 
 
+def test_currency_by_ticker_is_always_populated_regardless_of_include_native_currency(make_source_dir, make_tickers_json):
+    stock=build_stock(
+        make_source_dir, make_tickers_json,
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                    "2024-01-15,US0000000001,5,100.0,0.0\n"
+                    "2024-01-20,DE0000000002,2,150.0,0.0\n"},
+        {
+            "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+            "DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+        },
+        currency_to='usd',
+        # include_native_currency deliberately left at its default (False) - currency_by_ticker
+        # (unlike native_data/native_currency) isn't gated behind that flag, since Portfolio's
+        # distribution_by_currency needs it unconditionally.
+    )
+    assert stock.currency_by_ticker=={'US0000000001': 'usd', 'DE0000000002': 'eur'}
+
+
 def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
