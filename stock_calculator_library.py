@@ -68,6 +68,10 @@ class Stock:
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        # Each ticker's own native currency (tickers.json's currency field) — always populated,
+        # unlike native_data/native_currency below which are opt-in, since Portfolio needs this
+        # for distribution_by_currency regardless of whether include_native_currency is set.
+        self.currency_by_ticker=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
@@ -97,6 +101,7 @@ class Stock:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
             ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
+            self.currency_by_ticker[ticker]=ticker_currency
             computed=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
