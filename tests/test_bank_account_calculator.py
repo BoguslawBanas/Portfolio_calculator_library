@@ -77,7 +77,7 @@ def test_variable_rate_account_reads_interest_rate_csv_plus_spread(make_source_d
     account_dir=make_source_dir('bank_account', {
         'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
                        f"{start.isoformat()},savings,1000.0,variable,0.5,12,0.0\n",
-        'interest_rate.csv': "date,rate\n01-2020,5.0\n",
+        'interest_rate.csv': "date,rate\n2020-01-01,5.0\n",
     })
     account=BankAccount(account_dir)
     data=account.data
@@ -85,6 +85,28 @@ def test_variable_rate_account_reads_interest_rate_csv_plus_spread(make_source_d
     n_days=(date.today()-start).days+1
     daily_rate=1000.0*((5.0+0.5)/100.0)/365.0
     expected_profit=round(daily_rate*n_days, 2)
+    assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
+
+
+def test_variable_rate_account_reads_interest_rate_csv_at_daily_granularity(make_source_dir):
+    # interest_rate.csv uses daily YYYY-MM-DD rows (unlike PolishRetailBonds' monthly %m-%Y
+    # rows) - this proves a rate change takes effect on its own exact date, mid-month, not just
+    # at the start of a calendar month the way a monthly-rows format would be limited to.
+    start=date.today()-timedelta(days=6)
+    rate_change_date=date.today()-timedelta(days=3)
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       f"{start.isoformat()},savings,1000.0,variable,0.0,12,0.0\n",
+        'interest_rate.csv': "date,rate\n"
+                              f"{start.isoformat()},4.0\n"
+                              f"{rate_change_date.isoformat()},6.0\n",
+    })
+    account=BankAccount(account_dir)
+    data=account.data
+
+    days_at_4=(rate_change_date-start).days
+    days_at_6=(date.today()-rate_change_date).days+1
+    expected_profit=round(1000.0*(4.0/100.0)/365.0*days_at_4+1000.0*(6.0/100.0)/365.0*days_at_6, 2)
     assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
 
 

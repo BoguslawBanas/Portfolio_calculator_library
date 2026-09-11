@@ -53,10 +53,11 @@ class BankAccount:
         interest is folded into the interest-bearing balance), and optional tax (%, defaults to
         DEFAULT_TAX) — read once per account from its first deposit row, the same convention
         Stock uses for a ticker's per-row penalty column.
-        interest_rate_file: CSV of a variable base rate over time (date,rate — %m-%Y monthly
-        rows, forward-filled to daily, same format as PolishRetailBonds' interest_rate.csv),
-        resolved relative to directory_path. Only ever read if at least one account in this
-        directory uses rate_type='variable'.
+        interest_rate_file: CSV of a variable base rate over time (date,rate — daily YYYY-MM-DD
+        rows, forward-filled for any gaps so a row is only needed on days the rate actually
+        changes; a finer-grained format than PolishRetailBonds' interest_rate.csv, which uses
+        monthly %m-%Y rows instead), resolved relative to directory_path. Only ever read if at
+        least one account in this directory uses rate_type='variable'.
         progress_callback: optional zero-arg callback invoked once per account, right after
         that account's interest has been computed — the unit of work a caller (e.g. Portfolio)
         would want to track progress by.
@@ -164,7 +165,7 @@ class BankAccount:
     def _load_interest_rate_data(self, end_date: datetime) -> pd.DataFrame:
         if self._interest_rate_data is None:
             rate_df=pd.read_csv(self._interest_rate_path)
-            rate_df[self.CSV_DATE_COLUMN]=pd.to_datetime(rate_df[self.CSV_DATE_COLUMN], format='%m-%Y')
+            rate_df[self.CSV_DATE_COLUMN]=pd.to_datetime(rate_df[self.CSV_DATE_COLUMN], format='%Y-%m-%d')
             rate_df=rate_df.set_index(self.CSV_DATE_COLUMN)
             all_days=pd.DataFrame({}, index=pd.date_range(start=rate_df.index.min(), end=end_date, freq='D'))
             self._interest_rate_data=all_days.join(rate_df).ffill()

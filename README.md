@@ -96,7 +96,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 
 Turns a set of deposit/withdrawal transactions into a daily balance/interest DataFrame. Like `PolishRetailBonds`, there's no `yfinance` fetch and no `Currency` conversion — a bank balance isn't traded or quoted, and (same known limitation as `PolishRetailBonds`, see Roadmap) everything is assumed to already be in one currency.
 
-- fixed-rate accounts (a flat annual %) or variable-rate accounts (a spread added to a rate history CSV, same `interest_rate.csv` format `PolishRetailBonds` uses)
+- fixed-rate accounts (a flat annual %) or variable-rate accounts (a spread added to a rate history CSV, `interest_rate.csv` — daily `date,rate` rows, forward-filled for any gaps, a finer-grained format than `PolishRetailBonds`' monthly one)
 - interest compounds via periodic capitalization (`capitalization_months`) — accrued-but-not-yet-capitalized interest earns no further interest until it's folded into the balance, so this is a genuinely sequential day-by-day accrual, unlike every other calculator's mostly-vectorized computation
 - multiple accounts can share one source directory (`account` column), same as `Stock`'s per-ticker/`Commodity`'s per-symbol split
 - tax on interest defaults to 19% (`BankAccount.DEFAULT_TAX`), overridable per account via an optional `tax` column
@@ -150,7 +150,7 @@ from Portfolio_calculator_library import Portfolio, Plot
 # there too records any holding actually redeemed early - see PolishRetailBonds' Features entry),
 # or deposit.csv plus an optional withdrawal.csv (bank_account — deposit.csv also carries each
 # account's rate_type/rate/capitalization_months/tax; interest_rate.csv is only read for a
-# "variable" rate_type account, same format as bonds' interest_rate.csv).
+# "variable" rate_type account, daily date,rate rows rather than bonds' monthly ones).
 sources = {
     "data/stocks": "stock",
     "data/bonds": "bonds",
