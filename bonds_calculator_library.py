@@ -46,14 +46,20 @@ so it's asserted here as one TAX_RATE constant applied uniformly, rather than in
 (the prior version of this class applied 19% to variable-rate bonds and 0% to fixed-rate ones,
 a split that had no documented basis and is not carried forward — see README Roadmap on this).
 
-cancel.csv (optional) records that a holding was ACTUALLY redeemed early in real life — a holding
-is identified by its own (date, isin) pair, the same values as its buy.csv row. Once recorded,
-that holding stops accruing after cancel_date and behaves exactly like a naturally-matured one
-from then on (Money_invested/PROFIT_WITHOUT_DIVIDEND_COLUMN drop to 0, PROFIT_COLUMN freezes at
-its cancel_date value) — see _bond_dataframe. This only records THAT a redemption happened; it
-doesn't (yet) apply the lower early-redemption payout formula every list emisyjny separately
-defines for cashing out before maturity (a different, still-open Roadmap item) — accrual up to
-cancel_date still uses the same held-to-maturity formula as every other day.
+cancel.csv (optional) records that some or all of a holding was ACTUALLY redeemed early in real
+life — a holding is identified by its own (date, isin) pair, the same values as its buy.csv row,
+and each cancel.csv row also carries amount_of_units: how many of that holding's bonds were
+redeemed on cancel_date (not necessarily all of them - see _build_tranches). Every unit accrues
+identically regardless of how many units are in play (the accrual formulas below are linear in
+amount_of_bonds), so a partial cancellation is modeled by splitting a holding into tranches - one
+per cancellation (each stopping at its own cancel_date) plus a final tranche for whatever was
+never cancelled (still accruing to natural maturity) - and summing their independently-computed
+DataFrames back together. A holding can also appear more than once in cancel.csv (multiple
+partial cancellations over time); tranches are built in cancel_date order regardless of file
+order. This only records THAT a redemption happened; it doesn't (yet) apply the lower
+early-redemption payout formula every list emisyjny separately defines for cashing out before
+maturity (a different, still-open Roadmap item) — accrual up to each cancel_date still uses the
+same held-to-maturity formula as every other day.
 """
 
 import os
@@ -132,9 +138,10 @@ class PolishRetailBonds:
         directory) — pass an absolute path instead to point elsewhere. progress_callback:
         optional zero-arg callback invoked once, after all bond rows have been computed, for a
         caller (e.g. Portfolio) tracking overall progress.
-        cancel.csv (optional, resolved relative to dataframe): records that a holding was
-        actually redeemed early — see the module docstring for its (date, isin, cancel_date)
-        shape and exactly what recording a cancellation does/doesn't change.
+        cancel.csv (optional, resolved relative to dataframe): records that some or all of a
+        holding was actually redeemed early — see the module docstring for its
+        (date, isin, cancel_date, amount_of_units) shape, how a partial cancellation is modeled,
+        and exactly what recording a cancellation does/doesn't change.
         cache_dir: optional directory to cache the fully computed bonds data in (self.data plus
         the per-bond-type breakdown behind distribution_by_ticker/_current_value/_revenue — see
         _compute_data's return value), keyed by currency_to plus the content of
@@ -253,17 +260,46 @@ class PolishRetailBonds:
 
     @classmethod
     def _load_cancellations(cls, path: str) -> dict:
-        """{(purchase_date, isin): cancel_date} for every row in cancel.csv - a holding is
-        identified by its own (date, isin) pair, the same values as its buy.csv row (two
-        identical (date, isin) rows in buy.csv - an edge case real data is unlikely to have -
-        would both match the same cancellation here, since nothing else distinguishes them)."""
+        """{(purchase_date, isin): [(cancel_date, amount_of_units), ...]}, sorted by cancel_date -
+        every row in cancel.csv, grouped by the holding it applies to (its own (date, isin) pair,
+        the same values as its buy.csv row - two identical (date, isin) rows in buy.csv, an edge
+        case real data is unlikely to have, would both match every cancellation recorded against
+        that pair here, since nothing else distinguishes them). A holding can have more than one
+        row (several partial cancellations over time) - see _build_tranches for how these turn
+        into per-tranche accrual."""
         cancel_df=pd.read_csv(path)
         cancel_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
         cancel_df[cls.CSV_CANCEL_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_CANCEL_DATE_COLUMN], format='%Y-%m-%d')
-        return {
-            (row[cls.CSV_DATE_COLUMN], row[cls.CSV_TICKER_COLUMN]): row[cls.CSV_CANCEL_DATE_COLUMN]
-            for _, row in cancel_df.iterrows()
-        }
+        cancellations=dict()
+        for _, row in cancel_df.iterrows():
+            key=(row[cls.CSV_DATE_COLUMN], row[cls.CSV_TICKER_COLUMN])
+            cancellations.setdefault(key, list()).append((row[cls.CSV_CANCEL_DATE_COLUMN], float(row[cls.CSV_AMOUNT_OF_UNITS_COLUMN])))
+        for key, entries in cancellations.items():
+            entries.sort(key=lambda entry: entry[0])
+        return cancellations
+
+    @classmethod
+    def _build_tranches(cls, total_amount: float, cancellations: list, start_date: pd.Timestamp, isin: str) -> list:
+        """Splits a holding's total_amount into (tranche_amount, tranche_cancel_date) pairs: one
+        per cancellation (in cancel_date order), each stopping accrual at its own cancel_date,
+        plus a final (remaining_amount, None) tranche for whatever was never cancelled - omitted
+        if the holding was cancelled in full. Every unit within a tranche accrues identically
+        (see module docstring), so summing each tranche's own _bond_dataframe reproduces exactly
+        what a holding with one or more partial early redemptions actually earns."""
+        remaining=total_amount
+        cumulative_cancelled=0.0
+        tranches=list()
+        for cancel_date, amount in cancellations:
+            if cancel_date<start_date:
+                raise ValueError(f"Cancellation date {cancel_date.date()} for {isin!r} is before its own purchase date {start_date.date()}.")
+            cumulative_cancelled+=amount
+            if cumulative_cancelled>total_amount+1e-9:
+                raise ValueError(f"cancel.csv cancels {cumulative_cancelled} units of {isin!r} (purchased {start_date.date()}), more than the {total_amount} actually held.")
+            tranches.append((amount, cancel_date))
+            remaining-=amount
+        if remaining>1e-9:
+            tranches.append((remaining, None))
+        return tranches
 
     def _compute_data(self, today: datetime, currency: Currency, progress_callback: Callable[[], None]=None) -> tuple:
         """Returns (merged_dataframe, type_dataframes, invested_by_type):
@@ -302,11 +338,13 @@ class PolishRetailBonds:
             fx_at_purchase=currency.data.loc[dates[i], Currency.CLOSE_COLUMN]
             invested_by_type[code]=invested_by_type.get(code, 0.0)+amounts[i]*price_per_bond*fx_at_purchase
 
-            cancel_date=self.cancellations.get((dates[i], raw_codes[i]))
-            if cancel_date is not None and cancel_date<dates[i]:
-                raise ValueError(f"Cancellation date {cancel_date.date()} for {raw_codes[i]!r} is before its own purchase date {dates[i].date()}.")
-
-            bond=self._bond_dataframe(code, amounts[i], initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, cancel_date)
+            cancellations=self.cancellations.get((dates[i], raw_codes[i]), [])
+            tranches=self._build_tranches(amounts[i], cancellations, dates[i], raw_codes[i])
+            tranche_dataframes=[
+                self._bond_dataframe(code, tranche_amount, initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, tranche_cancel_date)
+                for tranche_amount, tranche_cancel_date in tranches
+            ]
+            bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self._merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:

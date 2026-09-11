@@ -111,9 +111,10 @@ def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir
     assert day_after_maturity==pytest.approx(at_maturity)
 
 
-def test_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source_dir):
-    """A holding recorded in cancel.csv as redeemed early stops accruing at cancel_date and
-    behaves exactly like a naturally-matured holding from then on - see the module docstring."""
+def test_full_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source_dir):
+    """A holding fully cancelled in cancel.csv (amount_of_units matching everything held) stops
+    accruing at cancel_date and behaves exactly like a naturally-matured holding from then on -
+    see the module docstring."""
     start=date.today()-timedelta(days=200)
     cancel_date=start+timedelta(days=80)  # well before ROR's natural 12-month term ends
     bonds_dir=make_bonds_dir(
@@ -124,8 +125,8 @@ def test_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source
         ),
         rate_row="01-2020,6.0\n",
         cancel_csv=(
-            "date,isin,cancel_date\n"
-            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()}\n"
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},1\n"
         ),
     )
     data=PolishRetailBonds(bonds_dir).data
@@ -155,6 +156,79 @@ def test_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source
     assert uncancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>expected_at_cancellation
 
 
+def test_partial_cancellation_splits_the_holding_into_tranches(make_source_dir):
+    """Cancelling 5 of 10 held bonds: the cancelled 5 stop accruing at cancel_date (and their
+    cost basis/unrealized profit zero out), while the remaining 5 keep accruing normally - so
+    today's totals should sit strictly between 'nothing cancelled' and 'all cancelled'."""
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,10,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},5\n"
+        ),
+    )
+    partial=PolishRetailBonds(bonds_dir).data
+
+    # Cost basis: half the original 10-unit cost basis is still held (the other half zeroed out).
+    full_money_invested=PolishRetailBonds.NOMINAL_VALUE*10
+    assert partial[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(full_money_invested/2)
+
+    # Profit: 5 units' worth froze at cancel_date, the other 5 units' worth kept accruing to
+    # today - so total Profit should be strictly between "all 10 froze at cancel_date" and
+    # "all 10 kept accruing to today".
+    all_frozen=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=10.0)
+    all_kept=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=10.0)
+    actual=partial[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
+    assert all_frozen<actual<all_kept
+
+    # Exactly the sum of two independent 5-unit tranches: one frozen at cancel_date, one still
+    # accruing to today.
+    half_frozen=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
+    half_kept=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
+    assert actual==pytest.approx(half_frozen+half_kept)
+
+
+def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source_dir):
+    """Two separate cancel.csv rows against the same holding (3 units, then 2 more units, out of
+    10 total) - each cancellation freezes only its own tranche at its own cancel_date, and the
+    remaining 5 units keep accruing."""
+    start=date.today()-timedelta(days=200)
+    first_cancel=start+timedelta(days=40)
+    second_cancel=start+timedelta(days=90)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,10,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        # Deliberately out of chronological order - _build_tranches must sort by cancel_date.
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{second_cancel.isoformat()},2\n"
+            f"{start.isoformat()},ROR0927,{first_cancel.isoformat()},3\n"
+        ),
+    )
+    data=PolishRetailBonds(bonds_dir).data
+
+    # 10-3-2=5 units still held -> half the original cost basis.
+    assert data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(PolishRetailBonds.NOMINAL_VALUE*5)
+
+    expected=(
+        _expected_profit(start, first_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=3.0)
+        + _expected_profit(start, second_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=2.0)
+        + _expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
+    )
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
 def test_cancellation_after_natural_maturity_is_a_no_op(make_source_dir):
     start=date.today()-timedelta(days=200)  # OTS's 3-month term has long since ended
     cancel_date=date.today()-timedelta(days=1)  # recorded long after OTS actually matured
@@ -165,8 +239,8 @@ def test_cancellation_after_natural_maturity_is_a_no_op(make_source_dir):
             f"{start.isoformat()},OTS0826,2,0.0,2.0,False\n"
         ),
         cancel_csv=(
-            "date,isin,cancel_date\n"
-            f"{start.isoformat()},OTS0826,{cancel_date.isoformat()}\n"
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},OTS0826,{cancel_date.isoformat()},2\n"
         ),
     )
     cancelled=PolishRetailBonds(bonds_dir).data
@@ -189,11 +263,29 @@ def test_cancellation_before_purchase_date_raises(make_source_dir):
             f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
         ),
         cancel_csv=(
-            "date,isin,cancel_date\n"
-            f"{start.isoformat()},TOS0929,{invalid_cancel_date.isoformat()}\n"
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},TOS0929,{invalid_cancel_date.isoformat()},1\n"
         ),
     )
     with pytest.raises(ValueError, match="before its own purchase date"):
+        PolishRetailBonds(bonds_dir)
+
+
+def test_cancelling_more_than_held_raises(make_source_dir):
+    start=date.today()-timedelta(days=10)
+    cancel_date=start+timedelta(days=1)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},TOS0929,5,0.0,4.4,False\n"
+        ),
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},TOS0929,{cancel_date.isoformat()},6\n"
+        ),
+    )
+    with pytest.raises(ValueError, match="more than the"):
         PolishRetailBonds(bonds_dir)
 
 
@@ -211,7 +303,7 @@ def test_cache_key_is_scoped_by_cancel_csv_presence(make_source_dir, cache_dir):
     # Same directory, now with cancel.csv added - a same-day cache hit for the old (no-cancel.csv)
     # key must not be silently reused for this different input.
     with open(os.path.join(no_cancel_dir, 'cancel.csv'), 'w') as f:
-        f.write("date,isin,cancel_date\n"+f"{start.isoformat()},ROR0927,{cancel_date.isoformat()}\n")
+        f.write("date,isin,cancel_date,amount_of_units\n"+f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},1\n")
     with_cancellation=PolishRetailBonds(no_cancel_dir, cache_dir=cache_dir).data
 
     assert with_cancellation[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]!=pytest.approx(without_cancellation[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
