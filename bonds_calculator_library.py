@@ -56,10 +56,19 @@ per cancellation (each stopping at its own cancel_date) plus a final tranche for
 never cancelled (still accruing to natural maturity) - and summing their independently-computed
 DataFrames back together. A holding can also appear more than once in cancel.csv (multiple
 partial cancellations over time); tranches are built in cancel_date order regardless of file
-order. This only records THAT a redemption happened; it doesn't (yet) apply the lower
-early-redemption payout formula every list emisyjny separately defines for cashing out before
-maturity (a different, still-open Roadmap item) — accrual up to each cancel_date still uses the
-same held-to-maturity formula as every other day.
+order.
+
+A cancelled tranche's frozen Profit isn't just the plain held-to-maturity accrual, either - real
+early redemption (przedterminowy wykup) pays out gross accrued interest minus a per-bond
+redemption fee (BOND_TYPES' early_redemption_fee), applied once on cancel_date itself, floored at
+0 so redeeming early never returns less than what was originally paid in (the fee only ever eats
+into interest, never principal). OTS is a special case: its fee isn't a flat zł amount but
+forfeiting ALL interest accrued in the then-current period - modeled as early_redemption_fee=inf,
+which the same floor-at-0 formula reduces to correctly with no separate branch needed. Every
+other type's fee is a flat zł/bond figure - these are typical values, not transcribed from one
+specific real issuance's own list emisyjny the way the rest of BOND_TYPES is (early-redemption
+fees have varied somewhat across issuances/years), so treat them the same as TAX_RATE/
+swap_discount: asserted, worth double-checking against a current, authoritative source.
 """
 
 import os
@@ -113,15 +122,19 @@ class PolishRetailBonds:
     # that exchange at par (OTS) or doesn't offer one at all (ROS/ROD — family bonds restricted
     # to child-benefit recipients, not tradable or exchangeable; see their own list emisyjny's
     # absence of a 'zamiana' section, unlike every other type here).
+    # early_redemption_fee: zł/bond subtracted from a cancelled tranche's gross accrued interest
+    # on its own cancel_date (see module docstring and _bond_dataframe) — float('inf') for OTS
+    # encodes "forfeit all interest accrued this period" via the same floor-at-0 formula every
+    # other type uses, rather than a separate branch.
     BOND_TYPES={
-        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0),
-        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10),
-        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10),
-        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10),
-        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10),
-        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0),
-        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10),
-        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0),
+        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0,  early_redemption_fee=float('inf')),
+        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10, early_redemption_fee=0.50),
+        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10, early_redemption_fee=0.70),
+        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10, early_redemption_fee=1.00),
+        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10, early_redemption_fee=2.00),
+        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=2.00),
+        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10, early_redemption_fee=3.00),
+        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=3.00),
     }
 
     def __init__(self, dataframe: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
@@ -437,6 +450,19 @@ class PolishRetailBonds:
         # it. Untaxed: it's a purchase-price discount, not interest income. Converted at
         # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
         accrued_profit=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
+
+        # A genuine early redemption pays out gross accrued interest minus early_redemption_fee,
+        # not the plain held-to-maturity accrual — applied once, to the single frozen value every
+        # day from cancel_date onward inherits (every day BEFORE cancel_date still shows the
+        # gross value, since no redemption has happened on those days yet). Floored at 0, so this
+        # only ever reduces interest, never principal. accrued_profit.index[-1]==cancel_date (not
+        # just "cancel_date is not None") is what actually confirms the cancellation governed
+        # this tranche's cutoff, rather than natural maturity/today (see accrual_cutoff above) -
+        # a cancel_date recorded well after natural maturity, or not yet reached, is a no-op here
+        # too, since nothing was actually redeemed early in either case.
+        if cancel_date is not None and accrued_profit.index[-1]==cancel_date:
+            fee=config['early_redemption_fee']*amount_of_bonds*currency.data.loc[cancel_date, Currency.CLOSE_COLUMN]
+            accrued_profit.iloc[-1]=round(max(0.0, accrued_profit.iloc[-1]-fee), 2)
 
         # Extend to today - a no-op if the bond hasn't matured/been cancelled yet, since
         # maturity_index already reaches today in that case. Past accrual_cutoff (natural

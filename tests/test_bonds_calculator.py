@@ -67,18 +67,28 @@ def _expected_profit(start, today, code, initial_coupon, additional_coupon, exte
     return round(gross*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
 
 
+def _apply_early_redemption_fee(profit: float, code: str, amount: float) -> float:
+    """A genuinely-cancelled tranche's frozen Profit isn't the plain gross accrual _expected_profit
+    computes - real early redemption subtracts BOND_TYPES' early_redemption_fee (per bond,
+    floored at 0). Mirrors _bond_dataframe's own formula, so these tests check the MECHANISM
+    (applied once, per tranche, floored, OTS's inf forfeits everything) rather than re-deriving
+    the fee figures themselves, which come from BOND_TYPES directly either way."""
+    fee=PolishRetailBonds.BOND_TYPES[code]['early_redemption_fee']*amount
+    return round(max(0.0, profit-fee), 2)
+
+
 def test_bond_type_registry_matches_documented_taxonomy():
     """Pins the whole taxonomy transcribed from bonds_lists/*.pdf (the official listy emisyjne,
     supplied for review — see README) in one place, independent of any accrual math."""
     assert PolishRetailBonds.BOND_TYPES=={
-        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0),
-        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10),
-        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10),
-        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10),
-        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10),
-        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0),
-        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10),
-        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0),
+        'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0,  early_redemption_fee=float('inf')),
+        'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10, early_redemption_fee=0.50),
+        'DOR': dict(period_months=1,  num_periods=24, compounding=False, rate_source='interest',  swap_discount=0.10, early_redemption_fee=0.70),
+        'TOS': dict(period_months=12, num_periods=3,  compounding=True,  rate_source=None,        swap_discount=0.10, early_redemption_fee=1.00),
+        'COI': dict(period_months=12, num_periods=4,  compounding=False, rate_source='inflation', swap_discount=0.10, early_redemption_fee=2.00),
+        'ROS': dict(period_months=12, num_periods=6,  compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=2.00),
+        'EDO': dict(period_months=12, num_periods=10, compounding=True,  rate_source='inflation', swap_discount=0.10, early_redemption_fee=3.00),
+        'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=3.00),
     }
     # Every type's full term (period_months * num_periods) matches its tenor as named/described
     # in its own list emisyjny.
@@ -131,8 +141,12 @@ def test_full_cancellation_freezes_profit_and_zeroes_money_invested_early(make_s
     )
     data=PolishRetailBonds(bonds_dir).data
 
-    expected_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
-    assert expected_at_cancellation>0.0
+    gross_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    assert gross_at_cancellation>0.0
+    # The frozen value is gross accrual minus ROR's early_redemption_fee (0.50 zl/bond here),
+    # not the plain held-to-maturity accrual - see module docstring.
+    expected_at_cancellation=_apply_early_redemption_fee(gross_at_cancellation, 'ROR', amount=1.0)
+    assert expected_at_cancellation<gross_at_cancellation
 
     at_cancel_date=data.loc[pd.Timestamp(cancel_date), PolishRetailBonds.PROFIT_COLUMN]
     assert at_cancel_date==pytest.approx(expected_at_cancellation)
@@ -188,11 +202,12 @@ def test_partial_cancellation_splits_the_holding_into_tranches(make_source_dir):
     actual=partial[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
     assert all_frozen<actual<all_kept
 
-    # Exactly the sum of two independent 5-unit tranches: one frozen at cancel_date, one still
-    # accruing to today.
+    # Exactly the sum of two independent 5-unit tranches: one frozen at cancel_date (minus
+    # ROR's early_redemption_fee for those 5 units), one still accruing normally to today.
     half_frozen=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
+    half_frozen_after_fee=_apply_early_redemption_fee(half_frozen, 'ROR', amount=5.0)
     half_kept=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
-    assert actual==pytest.approx(half_frozen+half_kept)
+    assert actual==pytest.approx(half_frozen_after_fee+half_kept)
 
 
 def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source_dir):
@@ -221,11 +236,12 @@ def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source
     # 10-3-2=5 units still held -> half the original cost basis.
     assert data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(PolishRetailBonds.NOMINAL_VALUE*5)
 
-    expected=(
-        _expected_profit(start, first_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=3.0)
-        + _expected_profit(start, second_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=2.0)
-        + _expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
-    )
+    first_tranche=_apply_early_redemption_fee(
+        _expected_profit(start, first_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=3.0), 'ROR', amount=3.0)
+    second_tranche=_apply_early_redemption_fee(
+        _expected_profit(start, second_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=2.0), 'ROR', amount=2.0)
+    remaining_tranche=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
+    expected=first_tranche+second_tranche+remaining_tranche
     assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
 
 
@@ -251,6 +267,83 @@ def test_cancellation_after_natural_maturity_is_a_no_op(make_source_dir):
     ))).data
 
     assert cancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(uncancelled[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
+
+
+def test_ots_early_redemption_forfeits_all_accrued_interest(make_source_dir):
+    """OTS's early_redemption_fee is float('inf') (see module docstring): cancelling it early
+    doesn't just discount the accrued interest, it wipes it out entirely - you get back only
+    what you originally paid in, zero profit, even though real (gross) interest had accrued."""
+    start=date.today()-timedelta(days=60)
+    cancel_date=start+timedelta(days=45)  # well before OTS's 3-month natural maturity
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,3,0.0,2.0,False\n"
+    ), cancel_csv=(
+        "date,isin,cancel_date,amount_of_units\n"
+        f"{start.isoformat()},OTS0826,{cancel_date.isoformat()},3\n"
+    ))
+    data=PolishRetailBonds(bonds_dir).data
+
+    gross_at_cancellation=_expected_profit(start, cancel_date, 'OTS', initial_coupon=2.0, additional_coupon=0.0, amount=3.0)
+    assert gross_at_cancellation>0.0  # sanity check: real interest genuinely had accrued
+
+    assert data.loc[pd.Timestamp(cancel_date), PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(0.0)
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(0.0)
+
+
+def test_early_redemption_fee_is_floored_at_zero_not_negative(make_source_dir):
+    """Cancelling almost immediately after purchase - so barely any interest has accrued, less
+    than TOS's 1.00 zl/bond fee - must still floor at 0.0, never go negative (the fee only ever
+    eats into interest, never principal - see module docstring)."""
+    start=date.today()-timedelta(days=1)
+    cancel_date=date.today()
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ), cancel_csv=(
+        "date,isin,cancel_date,amount_of_units\n"
+        f"{start.isoformat()},TOS0929,{cancel_date.isoformat()},1\n"
+    ))
+    data=PolishRetailBonds(bonds_dir).data
+
+    gross_at_cancellation=_expected_profit(start, cancel_date, 'TOS', initial_coupon=4.4, additional_coupon=0.0)
+    assert 0.0<gross_at_cancellation<PolishRetailBonds.BOND_TYPES['TOS']['early_redemption_fee']  # sanity: fee genuinely exceeds it
+
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(0.0)
+
+
+def test_early_redemption_fee_is_converted_to_currency_to_at_cancel_date_rate(make_source_dir):
+    """The fee is quoted in PLN (zl/bond) - when currency_to differs, it must be converted at
+    cancel_date's own FX rate before being subtracted from the (already-converted) accrued
+    profit, the same 'locked in when it happened' convention as everything else in this module.
+    Cancels within ROR's flat first period (initial_coupon, no interest_rate.csv lookup) so its
+    daily PLN interest is one constant value - independently reproducible exactly, unlike a
+    later, rate_source-dependent period."""
+    start=date.today()-timedelta(days=20)
+    cancel_date=start+timedelta(days=15)  # still within ROR's ~1-month first period
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+    ), cancel_csv=(
+        "date,isin,cancel_date,amount_of_units\n"
+        f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},1\n"
+    ))
+    converted=PolishRetailBonds(bonds_dir, 'usd').data
+
+    fx=Currency('PLN', 'usd', pd.Timestamp(start))
+    period_days=(pd.Timestamp(start)+pd.DateOffset(months=1)-pd.Timestamp(start)).days
+    daily_interest_pln=PolishRetailBonds.NOMINAL_VALUE*1*4.0/100.0/(period_days*12)  # payments_per_year=12 for ROR
+    n_days=(cancel_date-start).days+1
+
+    gross_usd=sum(daily_interest_pln*fx.data[Currency.CLOSE_COLUMN].iloc[j] for j in range(n_days))
+    gross_usd_after_tax=round(gross_usd*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
+    fee_usd=PolishRetailBonds.BOND_TYPES['ROR']['early_redemption_fee']*fx.data.loc[pd.Timestamp(cancel_date), Currency.CLOSE_COLUMN]
+    expected=round(max(0.0, gross_usd_after_tax-fee_usd), 2)
+
+    assert converted[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    # Sanity check this test actually exercises a nonzero, FX-converted fee, not a no-op.
+    assert fee_usd>0.0
+    assert fee_usd!=pytest.approx(PolishRetailBonds.BOND_TYPES['ROR']['early_redemption_fee'])  # genuinely converted, not left in raw PLN
 
 
 def test_cancellation_before_purchase_date_raises(make_source_dir):
