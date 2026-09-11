@@ -229,8 +229,7 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 ## Roadmap
 
 - bank account support, following the `Stock`/`Bonds`/`Commodity`/`Crypto` pattern
-- `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types) and the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*) are both asserted, not derived from the *listy emisyjne* — neither withholding tax nor bank-quoted exchange pricing is an issuance term, so neither appears in them; double-check both against a current, authoritative source before relying on this for real tax reporting
-- ~~model early redemption (*przedterminowy wykup*)~~ — done for recorded cancellations: `cancel.csv`'s early-redemption fee (`BOND_TYPES`' `early_redemption_fee`, see Features above) now applies the real, lower early-redemption payout — gross accrued interest minus a per-bond fee (or, for `OTS`, forfeiting all of it), floored at 0 — instead of the plain held-to-maturity accrual. Still missing: a hypothetical "what would I get if I cashed out *today*" query for a holding that hasn't actually been cancelled — the fee only ever applies once a real cancellation is recorded in `cancel.csv`, there's no standalone what-if method yet
+- `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 
 ## License
