@@ -87,10 +87,22 @@ class PolishRetailBonds:
     # held (bonds don't separately track a realized/dividend component day to day), but diverge
     # once it matures: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized, nothing left held) drops to 0,
     # while PROFIT_COLUMN (realized, persists) freezes at its final accrued value - see
-    # _bond_dataframe. ---
+    # _bond_dataframe. DIVIDEND_COLUMN is derived from those two (PROFIT_COLUMN minus
+    # PROFIT_WITHOUT_DIVIDEND_COLUMN), not accrued independently - see _bond_dataframe's own
+    # comment for why that's the only way to add a Dividend column (so PolishRetailBonds merges
+    # cleanly alongside Stock, whose own Dividend/Profit/Profit_without_dividends already relate
+    # this way) without introducing a second, inconsistent notion of "realized". ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
+    # Bond interest/redemption proceeds, recast as Stock's own Dividend column: 0 while a bond is
+    # still held (its accrued interest is entirely embedded in the still-fluctuating
+    # PROFIT_WITHOUT_DIVIDEND_COLUMN, exactly as before this column existed), then - at the same
+    # moment PROFIT_WITHOUT_DIVIDEND_COLUMN drops to 0 (maturity or an early cancellation) - jumps
+    # to and freezes at everything that was ever accrued (interest plus, if is_swapped, the swap
+    # discount), mirroring a bond's real cash flow: nothing is paid out until redemption, then
+    # the whole accrued amount is. See _bond_dataframe.
+    DIVIDEND_COLUMN='Dividend'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
     CSV_TICKER_COLUMN='isin'
@@ -179,20 +191,21 @@ class PolishRetailBonds:
         cache_key=None
         cached=None
         if cache is not None:
-            # 'bonds-v4': the cached value's shape/semantics have changed three times now (a bare
+            # 'bonds-v5': the cached value's shape/semantics have changed four times now (a bare
             # DataFrame, then a (dataframe, type_dataframes) pair, then a 3-tuple adding
-            # invested_by_type, now the same 3-tuple but currency-converted per currency_to
-            # instead of always PLN) - buy.csv/the rate files aren't necessarily what changed
-            # between versions, so their content hash alone wouldn't invalidate an old-shaped/
-            # wrong-currency, same-day entry already on disk - bump this tag again if the cached
-            # shape/semantics ever change again. currency_to is folded into the key itself (not
-            # just this tag) since two different target currencies are both otherwise-valid,
-            # simultaneously-live cache entries for the same buy.csv - not a stale-vs-fresh case.
-            # cancel.csv is folded in the same way (a sentinel string when absent, since there's
-            # nothing to hash_file) - adding/editing/removing it must invalidate a same-day entry
-            # computed before that change, exactly like editing buy.csv itself would.
+            # invested_by_type, then the same 3-tuple currency-converted per currency_to instead
+            # of always PLN, now the same 3-tuple with each DataFrame gaining DIVIDEND_COLUMN) -
+            # buy.csv/the rate files aren't necessarily what changed between versions, so their
+            # content hash alone wouldn't invalidate an old-shaped/wrong-currency/missing-column,
+            # same-day entry already on disk - bump this tag again if the cached shape/semantics
+            # ever change again. currency_to is folded into the key itself (not just this tag)
+            # since two different target currencies are both otherwise-valid, simultaneously-live
+            # cache entries for the same buy.csv - not a stale-vs-fresh case. cancel.csv is folded
+            # in the same way (a sentinel string when absent, since there's nothing to hash_file)
+            # - adding/editing/removing it must invalidate a same-day entry computed before that
+            # change, exactly like editing buy.csv itself would.
             cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
-            cache_key=DiskCache.make_key('bonds-v4', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
+            cache_key=DiskCache.make_key('bonds-v5', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
@@ -479,4 +492,11 @@ class PolishRetailBonds:
         dataframe[self.MONEY_INVESTED_COLUMN]=pd.Series(amount_of_bonds*price_per_bond*fx_at_purchase, index=maturity_index).reindex(full_index, fill_value=0.0)
         dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=accrued_profit.reindex(full_index, fill_value=0.0)
         dataframe[self.PROFIT_COLUMN]=accrued_profit.reindex(full_index).ffill()
+        # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still carries
+        # the (fluctuating-until-redemption) accrued value, then exactly whatever
+        # PROFIT_WITHOUT_DIVIDEND_COLUMN just dropped the moment it drops to 0 - so this is always
+        # consistent with PROFIT_COLUMN=PROFIT_WITHOUT_DIVIDEND_COLUMN+DIVIDEND_COLUMN (matching
+        # Stock's own three-column relationship) without a second, separately-computed accrual
+        # that could drift from the two columns above.
+        dataframe[self.DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         return dataframe

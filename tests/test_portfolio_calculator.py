@@ -146,7 +146,8 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert portfolio.total_invested_money==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
-    # Dividend column only exists because the stock source contributed one.
+    # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
+    # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
 
 

@@ -768,3 +768,141 @@ def test_count_bonds_reads_row_count_without_computing(make_source_dir):
         f"{start.isoformat()},ROR0927,2,0.5,4.0,False\n"
     ))
     assert PolishRetailBonds.count_bonds(bonds_dir)==2
+
+
+def test_dividend_column_is_zero_while_still_held(make_source_dir):
+    """DIVIDEND_COLUMN mirrors a bond's real cash flow: nothing is paid out before redemption,
+    so it must stay at 0 for the whole time a holding is still open - even though real (gross)
+    interest has already accrued into PROFIT_WITHOUT_DIVIDEND_COLUMN/PROFIT_COLUMN by then."""
+    start=date.today()-timedelta(days=100)  # well within ROR's 12-month term - still held
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,True\n"  # is_swapped too, to cover that credit
+    ))
+    data=PolishRetailBonds(bonds_dir).data
+
+    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>0.0  # real interest has accrued
+    assert (data[PolishRetailBonds.DIVIDEND_COLUMN]==0.0).all()
+
+
+def test_dividend_column_captures_full_accrual_at_natural_maturity(make_source_dir):
+    start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,2,0.0,2.0,False\n"
+    ))
+    data=PolishRetailBonds(bonds_dir).data
+
+    last_row=data.iloc[-1]
+    assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]==pytest.approx(0.0)
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]==pytest.approx(last_row[PolishRetailBonds.PROFIT_COLUMN])
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]>0.0
+
+    # Profit = Profit_without_dividends + Dividend holds at every date, not just the last one.
+    reconstructed=data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[PolishRetailBonds.DIVIDEND_COLUMN]
+    assert reconstructed.equals(data[PolishRetailBonds.PROFIT_COLUMN])
+
+
+def test_dividend_column_absorbs_the_swap_discount_at_maturity_too(make_source_dir):
+    """A swapped holding's cost-basis discount lives in PROFIT_WITHOUT_DIVIDEND_COLUMN while
+    held (see test_swap_discount_...), same as accrued interest - so once that column drops to
+    0 at maturity, DIVIDEND_COLUMN must pick up BOTH, not just the interest, or Profit would
+    silently drop by the swap discount the moment the bond matures."""
+    start=date.today()-timedelta(days=400)  # ROR's 12-month term has long since ended
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},ROR0927,1,0.5,4.0,True\n"  # ROR has a nonzero swap_discount, unlike OTS
+    ), rate_row="01-2020,6.0\n")
+    data=PolishRetailBonds(bonds_dir).data
+
+    last_row=data.iloc[-1]
+    assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]==pytest.approx(0.0)
+    # Nothing was lost at the maturity transition: today's Profit is exactly what it was the
+    # instant before Profit_without_dividends dropped to 0.
+    maturity_date=pd.Timestamp(start)+pd.DateOffset(months=12)-pd.DateOffset(days=1)
+    at_maturity=data.loc[maturity_date, PolishRetailBonds.PROFIT_COLUMN]
+    assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(at_maturity)
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]==pytest.approx(at_maturity)
+
+
+def test_dividend_column_reflects_the_early_redemption_fee_at_cancellation(make_source_dir):
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)  # well before ROR's natural 12-month term ends
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},1\n"
+        ),
+    )
+    data=PolishRetailBonds(bonds_dir).data
+
+    gross_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    expected_at_cancellation=_apply_early_redemption_fee(gross_at_cancellation, 'ROR', amount=1.0)
+
+    last_row=data.iloc[-1]
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]==pytest.approx(expected_at_cancellation)
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]==pytest.approx(last_row[PolishRetailBonds.PROFIT_COLUMN])
+
+
+def test_dividend_column_sums_correctly_across_partial_cancellation_tranches(make_source_dir):
+    """Two tranches (one cancelled early, one still held) are summed by _merge - Dividend must
+    come out right for the aggregate, not just for a single-tranche holding."""
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,10,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},5\n"
+        ),
+    )
+    data=PolishRetailBonds(bonds_dir).data
+
+    half_frozen=_apply_early_redemption_fee(
+        _expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0), 'ROR', amount=5.0)
+
+    last_row=data.iloc[-1]
+    # The cancelled tranche's frozen interest is already fully realized (Dividend); the other
+    # tranche is still held (its accrual is still in Profit_without_dividends, not Dividend yet).
+    assert last_row[PolishRetailBonds.DIVIDEND_COLUMN]==pytest.approx(half_frozen)
+    assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]>0.0
+
+
+def test_dividend_column_merges_with_stocks_dividend_column_in_portfolio(make_source_dir, make_tickers_json):
+    from Portfolio_calculator_library import Portfolio
+
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+        'dividend.csv': "date,isin,dividend\n"
+                        "2024-06-01,US0000000001,25.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+
+    matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"
+    ))
+
+    portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
+
+    from Portfolio_calculator_library import PolishRetailBonds as PRB
+    bonds_alone=PRB(bonds_dir, 'usd')
+    bond_dividend=bonds_alone.data[PRB.DIVIDEND_COLUMN].iloc[-1]
+    assert bond_dividend>0.0
+
+    # Portfolio-level Dividend is the plain sum of both sources' own Dividend columns - no source
+    # silently dropped just because it isn't a Stock.
+    assert portfolio.data[Portfolio.DIVIDEND_COLUMN].iloc[-1]==pytest.approx(25.0+bond_dividend)

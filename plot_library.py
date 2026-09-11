@@ -101,7 +101,8 @@ class Plot:
         no prior calculate_irr()/calculate_money_earned_between_dates_column() call.
         include_dividends: True (default) — a single 'Revenue' line, Profit as-is (dividends
         already summed into it); False — two separate lines, revenue with dividends backed out
-        (Profit - Dividend) and dividends on their own."""
+        (Profit - Dividend) and dividends on their own. DIVIDEND_COLUMN defaults to 0 below when
+        absent (no Stock/PolishRetailBonds source, the only two asset types that produce one)."""
         dataframe=self.portfolio.data
         dividends=dataframe.get(self.portfolio.DIVIDEND_COLUMN, pd.Series(0.0, index=dataframe.index))
 
