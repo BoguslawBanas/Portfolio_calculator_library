@@ -362,7 +362,6 @@ class PolishRetailBonds:
             is_swapped=bool(is_swapped_values[i])
             price_per_bond=self.NOMINAL_VALUE-(self.BOND_TYPES[code]['swap_discount'] if is_swapped else 0.0)
             fx_at_purchase=currency.data.loc[dates[i], Currency.CLOSE_COLUMN]
-            invested_by_type[code]=invested_by_type.get(code, 0.0)+amounts[i]*price_per_bond*fx_at_purchase
 
             cancellations=self.cancellations.get((dates[i], raw_codes[i]), [])
             tranches=self._build_tranches(amounts[i], cancellations, dates[i], raw_codes[i])
@@ -377,6 +376,8 @@ class PolishRetailBonds:
             progress_callback()
 
         type_dataframes={code: self._merge(holdings) for code, holdings in bonds_by_type.items()}
+        for code, value in type_dataframes.items():
+            invested_by_type[code]=value[self.MONEY_INVESTED_COLUMN].iloc[-1]
         return self._merge(list(type_dataframes.values())), type_dataframes, invested_by_type
 
     @staticmethod
