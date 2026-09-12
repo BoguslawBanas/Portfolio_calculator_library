@@ -272,7 +272,17 @@ class Portfolio:
         )
         return pd.concat([zero_row, dataframe]).sort_index()
 
+    # pandas deprecated the bare 'M'/'Q'/'Y'/'A' resample offset aliases in favor of 'ME'/'QE'/
+    # 'YE' (FutureWarning as of pandas 2.2, eventual removal) - only remaps an exact match so a
+    # still-valid alias (e.g. 'MS'/month-start, or an already-'ME'-style spelling) passes through
+    # untouched.
+    _DEPRECATED_RESAMPLE_ALIASES={'M': 'ME', 'Q': 'QE', 'Y': 'YE', 'A': 'YE'}
+
     def resample(self, resample_rule: str) -> pd.DataFrame:
+        """resample_rule: a pandas resample offset alias - 'D'/'W' as-is, or 'M'/'Q'/'Y' (also
+        accepted as their non-deprecated 'ME'/'QE'/'YE' spellings, which this normalizes to)."""
+        resample_rule=self._DEPRECATED_RESAMPLE_ALIASES.get(resample_rule, resample_rule)
+
         timedelta_to_subtract: pd.DateOffset
         if resample_rule[0]=='D':
             timedelta_to_subtract=pd.DateOffset(days=1)

@@ -4,6 +4,7 @@ the integration layer on top of the individual Stock/Bonds/Commodity/Crypto suit
 """
 
 from datetime import date, timedelta
+import warnings
 
 import pytest
 
@@ -251,3 +252,21 @@ def test_calculate_money_earned_between_dates_matches_column_version(make_source
     column=portfolio.calculate_money_earned_between_dates_column(days_between=days_between, offset=0)
     row_at_end_date=column.loc['2024-06-01', Portfolio.DAILY_RETURN_COLUMN]
     assert row_at_end_date==pytest.approx(round(single_value/days_between, 2))
+
+
+def test_resample_accepts_deprecated_month_quarter_year_aliases(make_source_dir, make_tickers_json):
+    """pandas deprecated the bare 'M'/'Q'/'Y' resample offset aliases (FutureWarning since
+    pandas 2.2, in favor of 'ME'/'QE'/'YE') - Portfolio.resample() normalizes them internally
+    so the old, still commonly documented single-letter spelling doesn't warn/eventually break."""
+    for old, new in (('M', 'ME'), ('Q', 'QE'), ('Y', 'YE')):
+        portfolio_old=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_old.calculate_irr()
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', FutureWarning)
+            resampled_old=portfolio_old.resample(old)
+
+        portfolio_new=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_new.calculate_irr()
+        resampled_new=portfolio_new.resample(new)
+
+        assert resampled_old.index.equals(resampled_new.index)
