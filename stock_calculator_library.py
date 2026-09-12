@@ -204,12 +204,6 @@ class Stock:
 
         return pd.concat(dataframes)
 
-    def _replace_isin_with_ticker(self, dataframe: pd.DataFrame) -> pd.DataFrame:
-        """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
-        on every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
-        dataframe[self.CSV_TICKER_COLUMN]=dataframe[self.CSV_TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
-        return dataframe
-
     def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
         start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']

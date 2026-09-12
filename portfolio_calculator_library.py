@@ -295,61 +295,11 @@ class Portfolio:
         for dataframe in self.dataframes:
             dataframe[self.CSV_TICKER_COLUMN]=dataframe[self.CSV_TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
 
-    def get_currency(self, isin: str) -> str:
-        return self.tickers[isin]['currency']
-
     def get_dataframe_currency(self, dataframe: pd.DataFrame) -> str:
         """Currency of the instrument a per-instrument dataframe (one of self.dataframes) belongs to.
         Once tickers_json is supplied, CSV_TICKER_COLUMN holds the yfinance ticker (see _replace_isin_with_ticker),
         so this looks the currency up by ticker rather than by the original ISIN."""
         return self._currency_by_ticker[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
-
-    @classmethod
-    def _split_by_isin(cls, dataframe: pd.DataFrame) -> list:
-        dataframes=dict()
-        for _, row in dataframe.iterrows():
-            if dataframes.get(row[cls.CSV_TICKER_COLUMN]) is None:
-                dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.DataFrame()
-            dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.concat([dataframes[row[cls.CSV_TICKER_COLUMN]], row], axis=1)
-
-        list_of_dataframes=list(dataframes.values())
-        for i in range(len(list_of_dataframes)):
-            list_of_dataframes[i]=list_of_dataframes[i].transpose()
-            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
-            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
-
-        return list_of_dataframes
-
-    def _load_sources(self, sources: dict) -> list:
-        dataframes=list()
-        for source, source_type in sources.items():
-            if os.path.isdir(source):
-                source_dataframes=self._read_directory(source)
-            else:
-                source_dataframes=[pd.read_csv(source)]
-
-            for dataframe in source_dataframes:
-                dataframe[self.SOURCE_TYPE_COLUMN]=source_type
-                dataframes.append(dataframe)
-
-        combined_dataframe=pd.concat(dataframes, ignore_index=True)
-        return self._split_by_isin(combined_dataframe)
-
-    def _read_directory(self, directory: str) -> list:
-        dataframes=list()
-        money_invested=0.0
-        for filename in sorted(os.listdir(directory)):
-            if not filename.endswith('.csv'):
-                continue
-            state_value=os.path.splitext(filename)[0]
-            df=pd.read_csv(os.path.join(directory, filename))
-            df[self.TRANSACTION_STATE_COLUMN]=state_value
-            # print(df) #remove
-            # if state_value=='buy':
-            #     money_invested+=df[self.MONEY_INVESTED_COLUMN].cumsum().ffill().iloc[-1]
-            #     self.distribution_by_directory[directory]=money_invested
-            dataframes.append(df)
-        return dataframes
 
     @staticmethod
     def _irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):
