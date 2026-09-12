@@ -32,8 +32,6 @@ class Plot:
     PERFORMANCE_PLOT_KIND_CANDLESTICK='candlestick'
     PERFORMANCE_PLOT_RESAMPLE_RULE='W'
 
-    REVENUE_PLOT_INCLUDE_DIVIDENDS=True
-
     ALLOCATION_PLOT_BY_TICKER='ticker'
     ALLOCATION_PLOT_BY_DIRECTORY='directory'
     ALLOCATION_PLOT_KIND_PIE='pie'
@@ -120,7 +118,7 @@ class Plot:
         else:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected {self.PERFORMANCE_PLOT_KIND_PLOT!r} or {self.PERFORMANCE_PLOT_KIND_CANDLESTICK!r})")
 
-    def revenue_plot(self, include_dividends: bool=REVENUE_PLOT_INCLUDE_DIVIDENDS, path_to_save_fig: str=None):
+    def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
         """Portfolio revenue (total gain) over time — a simpler, non-IRR read of performance
         than performance_plot. Reads self.portfolio.data directly rather than
         self.portfolio.portfolio, so — unlike performance_plot/period_return_bar_plot — it needs
