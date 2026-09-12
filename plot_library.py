@@ -30,7 +30,12 @@ class Plot:
 
     PERFORMANCE_PLOT_KIND_PLOT='plot'
     PERFORMANCE_PLOT_KIND_CANDLESTICK='candlestick'
-    PERFORMANCE_PLOT_RESAMPLE_RULE='W'
+    # Pandas resample offset aliases ('ME'/'QE'/'YE', not 'M'/'Q'/'Y' - deprecated since pandas 2.2).
+    PERFORMANCE_PLOT_RESAMPLE_RULE_DAILY='D'
+    PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY='W'
+    PERFORMANCE_PLOT_RESAMPLE_RULE_MONTHLY='ME'
+    PERFORMANCE_PLOT_RESAMPLE_RULE_QUARTERLY='QE'
+    PERFORMANCE_PLOT_RESAMPLE_RULE_YEARLY='YE'
 
     ALLOCATION_PLOT_BY_TICKER='ticker'
     ALLOCATION_PLOT_BY_DIRECTORY='directory'
@@ -83,7 +88,7 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND_PLOT, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE, path_to_save_fig: str=None):
+    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND_PLOT, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY, path_to_save_fig: str=None):
         """Portfolio performance over time, driven by the Irr column.
         kind: 'plot' — line plot of IRR, or 'candlestick' — candlestick of IRR aggregated
         over resample_rule (min/max/first/last per bucket)."""
