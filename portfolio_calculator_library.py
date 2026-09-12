@@ -149,32 +149,37 @@ class Portfolio:
                     continue
                 portfolio_list.append(source)
 
+        # A portfolio where every holding across every source has fully matured/been fully sold
+        # has a 0 total for one or more of these metrics while its distribution dict is still
+        # non-empty - guard each division so that lands on a correct 0.0 instead of a
+        # ZeroDivisionError (these are plain Python floats, not numpy - an unguarded division
+        # raises rather than silently producing NaN).
         for key, value in self.distribution_by_directory.items():
-            self.distribution_by_directory[key]=100.0*value/self.total_invested_money
+            self.distribution_by_directory[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
 
         for key, value in self.distribution_by_directory_current_value.items():
-            self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value
+            self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_directory_revenue.items():
-            self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue
+            self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_ticker.items():
-            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money
+            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
 
         for key, value in self.distribution_by_ticker_current_value.items():
-            self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value
+            self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_ticker_revenue.items():
-            self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue
+            self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_currency.items():
-            self.distribution_by_currency[key]=100.0*value/self.total_invested_money
+            self.distribution_by_currency[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
-            self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value
+            self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_currency_revenue.items():
-            self.distribution_by_currency_revenue[key]=100.0*value/self.total_revenue
+            self.distribution_by_currency_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         self.data=self.merge(portfolio_list)
 
