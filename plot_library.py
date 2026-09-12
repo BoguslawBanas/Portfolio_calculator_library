@@ -21,6 +21,18 @@ COLOR_BASELINE='#c3c2b7'
 
 
 class Plot:
+    # Default argument values for the plot methods below, exposed as class constants so a
+    # caller can override the library-wide default for a given argument in one place (e.g.
+    # Plot.PERFORMANCE_PLOT_RESAMPLE_RULE='M') instead of passing it explicitly on every call.
+    MONEY_PLOT_KIND='plot'
+    PERFORMANCE_PLOT_KIND='plot'
+    PERFORMANCE_PLOT_RESAMPLE_RULE='W'
+    REVENUE_PLOT_INCLUDE_DIVIDENDS=True
+    ALLOCATION_PLOT_BY='ticker'
+    ALLOCATION_PLOT_KIND='pie'
+    ALLOCATION_PLOT_METRIC='invested'
+    ALLOCATION_COMPARISON_PLOT_BY='ticker'
+
     def __init__(self, portfolio: Portfolio):
         """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py). If it
         hasn't been merged yet (self.portfolio not set), merge it now so every plot method below
@@ -38,7 +50,7 @@ class Plot:
         else:
             fig.show()
 
-    def money_plot(self, kind: str='plot', path_to_save_fig: str=None):
+    def money_plot(self, kind: str=MONEY_PLOT_KIND, path_to_save_fig: str=None):
         """Money invested vs. total revenue over time.
         kind: 'plot' — two overlaid line plots, or 'stacked_plot' — stacked area plot."""
         dataframe=self.portfolio.portfolio
@@ -61,7 +73,7 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def performance_plot(self, kind: str='plot', resample_rule: str='W', path_to_save_fig: str=None):
+    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE, path_to_save_fig: str=None):
         """Portfolio performance over time, driven by the Irr column.
         kind: 'plot' — line plot of IRR, or 'candlestick' — candlestick of IRR aggregated
         over resample_rule (min/max/first/last per bucket)."""
@@ -96,7 +108,7 @@ class Plot:
         else:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected 'plot' or 'candlestick')")
 
-    def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
+    def revenue_plot(self, include_dividends: bool=REVENUE_PLOT_INCLUDE_DIVIDENDS, path_to_save_fig: str=None):
         """Portfolio revenue (total gain) over time — a simpler, non-IRR read of performance
         than performance_plot. Reads self.portfolio.data directly rather than
         self.portfolio.portfolio, so — unlike performance_plot/period_return_bar_plot — it needs
@@ -140,7 +152,7 @@ class Plot:
     # Portfolio attribute backing each allocation_plot metric.
     METRIC_ATTRIBUTE_SUFFIXES={'invested': '', 'current_value': '_current_value', 'revenue': '_revenue'}
 
-    def allocation_plot(self, by: str='ticker', kind: str='pie', metric: str='invested', max_slices: int=7, path_to_save_fig: str=None):
+    def allocation_plot(self, by: str=ALLOCATION_PLOT_BY, kind: str=ALLOCATION_PLOT_KIND, metric: str=ALLOCATION_PLOT_METRIC, max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
         by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value/_revenue), or
         'directory' — self.portfolio.distribution_by_directory(_current_value/_revenue).
@@ -191,7 +203,7 @@ class Plot:
         else:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected 'pie' or 'histogram')")
 
-    def allocation_comparison_plot(self, by: str='ticker', max_slices: int=7, path_to_save_fig: str=None):
+    def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY, max_slices: int=7, path_to_save_fig: str=None):
         """Grouped bar chart comparing each ticker's/directory's allocation by amount invested
         (cost basis, the default allocation_plot metric) against its allocation by current
         market value — lets you see at a glance which positions have grown or shrunk relative
