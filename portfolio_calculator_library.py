@@ -49,12 +49,15 @@ class Portfolio:
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
 
+    VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
+
     def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
-        """sources: a dict mapping each directory path to the asset type it holds ('stock',
-        'bonds', 'commodities', 'crypto', or 'bank_account'). Each directory is handed straight
-        to the matching Stock/PolishRetailBonds/Commodity/Crypto/BankAccount constructor below,
-        which does its own loading/splitting of the CSVs inside it - Portfolio itself never
-        builds a combined raw dataframe to tag/split.
+        """sources: a dict mapping each directory path to the asset type it holds - one of
+        VALID_SOURCE_TYPES ('stock', 'bonds', 'commodities', 'crypto', 'bank_account'); any
+        other value raises ValueError immediately, before any source is constructed. Each
+        directory is handed straight to the matching Stock/PolishRetailBonds/Commodity/Crypto/
+        BankAccount constructor below, which does its own loading/splitting of the CSVs inside
+        it - Portfolio itself never builds a combined raw dataframe to tag/split.
 
         tickers_json: required when sources includes a 'stock' entry - path to the JSON file
         (see CLAUDE.md / stock_calculator_library) mapping each ISIN to {"ticker": <yfinance
@@ -109,6 +112,13 @@ class Portfolio:
         self.total_revenue=0.0
         portfolio_list=list()
 
+        # Validated up front, before any (potentially slow, network-bound) source construction
+        # starts, so a typo in sources (e.g. 'stocks' instead of 'stock') fails loudly right
+        # away instead of silently dropping that source with no error at all.
+        for dir, type in sources.items():
+            if type not in self.VALID_SOURCE_TYPES:
+                raise ValueError(f"Unknown source type {type!r} for {dir!r} (expected one of {sorted(self.VALID_SOURCE_TYPES)}).")
+
         # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
         # one progress bar span the whole portfolio, tracking the unit of work that's actually
         # slow: one yfinance fetch per ticker. A whole bonds directory only counts as a single
@@ -142,11 +152,9 @@ class Portfolio:
                 elif type=='crypto':
                     source=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
-                elif type=='bank_account':
+                else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self._absorb_source(dir, source, supports_currency=False)
-                else:
-                    continue
                 portfolio_list.append(source)
 
         # A portfolio where every holding across every source has fully matured/been fully sold

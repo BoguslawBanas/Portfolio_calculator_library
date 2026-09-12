@@ -270,3 +270,13 @@ def test_resample_accepts_deprecated_month_quarter_year_aliases(make_source_dir,
         resampled_new=portfolio_new.resample(new)
 
         assert resampled_old.index.equals(resampled_new.index)
+
+
+def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_source_dir, make_tickers_json):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    with pytest.raises(ValueError, match="stocks"):
+        Portfolio({stock_dir: 'stocks'}, tickers_json=tickers_json)  # typo: 'stocks', not 'stock'
