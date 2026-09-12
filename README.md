@@ -242,6 +242,10 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - provide to a portfolio condtructor a json file with tax types and values
 - `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
+- `stock_calculator_library.py`, `portfolio_calculator_library.py`, `plot_library.py`, and `currency_calculator_library.py` still open with a module docstring calling themselves "a sketch, not wired into the rest of the codebase" — leftover from an earlier scaffolding phase; all four are the actual production implementation `__init__.py` re-exports, and the docstrings should say so
+- `Commodity`/`Crypto`'s `TICKERS` dicts (5-6 symbols each) are hardcoded class constants — unlike `Stock`'s JSON-driven ticker mapping, there's no way to track another commodity/crypto symbol without editing the library source
+- `Stock`/`Commodity`/`Crypto`/`Currency` don't validate that `yfinance` actually returned price/FX history for a ticker/currency pair — an invalid ticker, or a pair `yfinance` doesn't quote, silently `ffill()`/`bfill()`s into a column of `NaN` instead of raising a clear error at construction time
+- no `__repr__` on `Portfolio`/`Stock`/etc. — printing one in a REPL/notebook gives the default `<...object at 0x...>` instead of a quick invested/current-value/revenue summary, which matters for a library also meant for interactive analysis
 
 ## License
 
