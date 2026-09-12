@@ -21,17 +21,29 @@ COLOR_BASELINE='#c3c2b7'
 
 
 class Plot:
-    # Default argument values for the plot methods below, exposed as class constants so a
-    # caller can override the library-wide default for a given argument in one place (e.g.
-    # Plot.PERFORMANCE_PLOT_RESAMPLE_RULE='M') instead of passing it explicitly on every call.
-    MONEY_PLOT_KIND='plot'
-    PERFORMANCE_PLOT_KIND='plot'
+    # Allowed values for each plot method's enumerated string arguments, one constant per value,
+    # exposed as class constants so a caller can refer to a valid option without retyping the
+    # literal (e.g. kind=Plot.ALLOCATION_PLOT_KIND_HISTOGRAM) and can override a library-wide
+    # default in one place (e.g. Plot.PERFORMANCE_PLOT_RESAMPLE_RULE='M').
+    MONEY_PLOT_KIND_PLOT='plot'
+    MONEY_PLOT_KIND_STACKED_PLOT='stacked_plot'
+
+    PERFORMANCE_PLOT_KIND_PLOT='plot'
+    PERFORMANCE_PLOT_KIND_CANDLESTICK='candlestick'
     PERFORMANCE_PLOT_RESAMPLE_RULE='W'
+
     REVENUE_PLOT_INCLUDE_DIVIDENDS=True
-    ALLOCATION_PLOT_BY='ticker'
-    ALLOCATION_PLOT_KIND='pie'
-    ALLOCATION_PLOT_METRIC='invested'
-    ALLOCATION_COMPARISON_PLOT_BY='ticker'
+
+    ALLOCATION_PLOT_BY_TICKER='ticker'
+    ALLOCATION_PLOT_BY_DIRECTORY='directory'
+    ALLOCATION_PLOT_KIND_PIE='pie'
+    ALLOCATION_PLOT_KIND_HISTOGRAM='histogram'
+    ALLOCATION_PLOT_METRIC_INVESTED='invested'
+    ALLOCATION_PLOT_METRIC_CURRENT_VALUE='current_value'
+    ALLOCATION_PLOT_METRIC_REVENUE='revenue'
+
+    ALLOCATION_COMPARISON_PLOT_BY_TICKER='ticker'
+    ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY='directory'
 
     def __init__(self, portfolio: Portfolio):
         """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py). If it
@@ -50,30 +62,30 @@ class Plot:
         else:
             fig.show()
 
-    def money_plot(self, kind: str=MONEY_PLOT_KIND, path_to_save_fig: str=None):
+    def money_plot(self, kind: str=MONEY_PLOT_KIND_PLOT, path_to_save_fig: str=None):
         """Money invested vs. total revenue over time.
         kind: 'plot' — two overlaid line plots, or 'stacked_plot' — stacked area plot."""
         dataframe=self.portfolio.portfolio
         revenue=dataframe[self.portfolio.MONEY_INVESTED_COLUMN]+dataframe[self.portfolio.PROFIT_COLUMN]
 
-        if kind=='plot':
+        if kind==self.MONEY_PLOT_KIND_PLOT:
             fig=go.Figure(data=[
                 go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.MONEY_INVESTED_COLUMN], mode='lines', name='Money_invested'),
                 go.Scatter(x=dataframe.index, y=revenue, mode='lines', name='Revenue'),
             ])
-        elif kind=='stacked_plot':
+        elif kind==self.MONEY_PLOT_KIND_STACKED_PLOT:
             fig=go.Figure(data=[
                 go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.MONEY_INVESTED_COLUMN], mode='lines', name='Money_invested', stackgroup='one'),
                 go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN], mode='lines', name='Profit', stackgroup='one'),
             ])
         else:
-            raise ValueError(f"Unknown money_plot kind: {kind!r} (expected 'plot' or 'stacked_plot')")
+            raise ValueError(f"Unknown money_plot kind: {kind!r} (expected {self.MONEY_PLOT_KIND_PLOT!r} or {self.MONEY_PLOT_KIND_STACKED_PLOT!r})")
 
         fig.update_layout(xaxis_title="Time", yaxis_title="Money", legend=dict(x=0, y=1))
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE, path_to_save_fig: str=None):
+    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND_PLOT, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE, path_to_save_fig: str=None):
         """Portfolio performance over time, driven by the Irr column.
         kind: 'plot' — line plot of IRR, or 'candlestick' — candlestick of IRR aggregated
         over resample_rule (min/max/first/last per bucket)."""
@@ -81,7 +93,7 @@ class Plot:
             self.portfolio.calculate_irr()
         dataframe=self.portfolio.portfolio
 
-        if kind=='plot':
+        if kind==self.PERFORMANCE_PLOT_KIND_PLOT:
             # Kept off money_plot on purpose: IRR is a percentage, and mixing it in would mean a dual-axis chart.
             fig=go.Figure(data=[
                 go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.IRR_COLUMN], mode='lines', line=dict(color=CATEGORICAL_COLORS[0]))
@@ -89,7 +101,7 @@ class Plot:
             fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)")
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)
-        elif kind=='candlestick':
+        elif kind==self.PERFORMANCE_PLOT_KIND_CANDLESTICK:
             resample_df=dataframe.resample(resample_rule).ffill()
             open_close_low_high=dataframe[self.portfolio.IRR_COLUMN].resample(resample_rule).aggregate(['min', 'max', 'first', 'last'])
 
@@ -106,7 +118,7 @@ class Plot:
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)
         else:
-            raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected 'plot' or 'candlestick')")
+            raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected {self.PERFORMANCE_PLOT_KIND_PLOT!r} or {self.PERFORMANCE_PLOT_KIND_CANDLESTICK!r})")
 
     def revenue_plot(self, include_dividends: bool=REVENUE_PLOT_INCLUDE_DIVIDENDS, path_to_save_fig: str=None):
         """Portfolio revenue (total gain) over time — a simpler, non-IRR read of performance
@@ -150,9 +162,9 @@ class Plot:
 
     # Suffix appended to 'distribution_by_ticker'/'distribution_by_directory' to reach the
     # Portfolio attribute backing each allocation_plot metric.
-    METRIC_ATTRIBUTE_SUFFIXES={'invested': '', 'current_value': '_current_value', 'revenue': '_revenue'}
+    METRIC_ATTRIBUTE_SUFFIXES={ALLOCATION_PLOT_METRIC_INVESTED: '', ALLOCATION_PLOT_METRIC_CURRENT_VALUE: '_current_value', ALLOCATION_PLOT_METRIC_REVENUE: '_revenue'}
 
-    def allocation_plot(self, by: str=ALLOCATION_PLOT_BY, kind: str=ALLOCATION_PLOT_KIND, metric: str=ALLOCATION_PLOT_METRIC, max_slices: int=7, path_to_save_fig: str=None):
+    def allocation_plot(self, by: str=ALLOCATION_PLOT_BY_TICKER, kind: str=ALLOCATION_PLOT_KIND_PIE, metric: str=ALLOCATION_PLOT_METRIC_INVESTED, max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
         by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value/_revenue), or
         'directory' — self.portfolio.distribution_by_directory(_current_value/_revenue).
@@ -164,15 +176,15 @@ class Plot:
         unrealized gain), or 'revenue' — allocation by each position's share of total portfolio
         gains (unrealized + dividends + realized; can be negative for a losing position)."""
         if metric not in self.METRIC_ATTRIBUTE_SUFFIXES:
-            raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected 'invested', 'current_value', or 'revenue')")
+            raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected {self.ALLOCATION_PLOT_METRIC_INVESTED!r}, {self.ALLOCATION_PLOT_METRIC_CURRENT_VALUE!r}, or {self.ALLOCATION_PLOT_METRIC_REVENUE!r})")
         suffix=self.METRIC_ATTRIBUTE_SUFFIXES[metric]
 
-        if by=='ticker':
+        if by==self.ALLOCATION_PLOT_BY_TICKER:
             distribution=getattr(self.portfolio, f'distribution_by_ticker{suffix}')
-        elif by=='directory':
+        elif by==self.ALLOCATION_PLOT_BY_DIRECTORY:
             distribution=getattr(self.portfolio, f'distribution_by_directory{suffix}')
         else:
-            raise ValueError(f"Unknown allocation_plot by: {by!r} (expected 'ticker' or 'directory')")
+            raise ValueError(f"Unknown allocation_plot by: {by!r} (expected {self.ALLOCATION_PLOT_BY_TICKER!r} or {self.ALLOCATION_PLOT_BY_DIRECTORY!r})")
 
         allocation=sorted(distribution.items(), key=lambda pair: pair[1], reverse=True)
         if len(allocation)>max_slices:
@@ -184,7 +196,7 @@ class Plot:
         if labels_sorted[-1]=='Other':
             colors[-1]=COLOR_OTHER
 
-        if kind=='pie':
+        if kind==self.ALLOCATION_PLOT_KIND_PIE:
             fig=go.Figure(data=[
                 # sort=False: go.Pie defaults to re-sorting its own slices by value, which would
                 # pull 'Other' out of last place (and away from COLOR_OTHER's slice) whenever the
@@ -193,7 +205,7 @@ class Plot:
                 go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent', sort=False)
             ])
             self._render(fig, path_to_save_fig)
-        elif kind=='histogram':
+        elif kind==self.ALLOCATION_PLOT_KIND_HISTOGRAM:
             fig=go.Figure(data=[
                 go.Bar(x=labels_sorted, y=values_sorted, marker_color=colors)
             ])
@@ -201,21 +213,21 @@ class Plot:
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)
         else:
-            raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected 'pie' or 'histogram')")
+            raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected {self.ALLOCATION_PLOT_KIND_PIE!r} or {self.ALLOCATION_PLOT_KIND_HISTOGRAM!r})")
 
-    def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY, max_slices: int=7, path_to_save_fig: str=None):
+    def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY_TICKER, max_slices: int=7, path_to_save_fig: str=None):
         """Grouped bar chart comparing each ticker's/directory's allocation by amount invested
         (cost basis, the default allocation_plot metric) against its allocation by current
         market value — lets you see at a glance which positions have grown or shrunk relative
         to what was put in.
         by: 'ticker' — self.portfolio.distribution_by_ticker/_current_value, or 'directory' —
         self.portfolio.distribution_by_directory/_current_value."""
-        if by=='ticker':
+        if by==self.ALLOCATION_COMPARISON_PLOT_BY_TICKER:
             invested, current_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_current_value
-        elif by=='directory':
+        elif by==self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY:
             invested, current_value=self.portfolio.distribution_by_directory, self.portfolio.distribution_by_directory_current_value
         else:
-            raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected 'ticker' or 'directory')")
+            raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected {self.ALLOCATION_COMPARISON_PLOT_BY_TICKER!r} or {self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY!r})")
 
         # Sort/group by the invested metric (the "default" allocation_plot ordering), then carry
         # the same grouping over to current_value so both bars for a given label line up.
