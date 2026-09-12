@@ -135,17 +135,6 @@ class Stock:
         self.data=self.merge(dataframes_2)
 
     @staticmethod
-    def transform_dataframe_to_dataframe_with_ticker(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> pd.DataFrame:
-        """Equivalent of tranform_dataframe_to_dataframe_with_isin: replaces isin_column_name's
-        values (ISIN codes) with the yfinance ticker looked up from the JSON file, in place.
-        Run this on a per-instrument dataframe before constructing a Stock from it."""
-        with open(path_to_json_file, 'r') as f:
-            j=json.load(f)
-            for _, row in dataframe.iterrows():
-                row[isin_column_name]=j[row[isin_column_name]]["ticker"]
-        return dataframe
-
-    @staticmethod
     def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
         """Equivalent of get_ticker_currency. Only works if all rows share the same ticker/isin."""
         with open(path_to_json_file, "r") as f:

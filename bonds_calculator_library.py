@@ -360,8 +360,6 @@ class PolishRetailBonds:
             if code not in self.BOND_TYPES:
                 raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.BOND_TYPES)}.")
             is_swapped=bool(is_swapped_values[i])
-            price_per_bond=self.NOMINAL_VALUE-(self.BOND_TYPES[code]['swap_discount'] if is_swapped else 0.0)
-            fx_at_purchase=currency.data.loc[dates[i], Currency.CLOSE_COLUMN]
 
             cancellations=self.cancellations.get((dates[i], raw_codes[i]), [])
             tranches=self._build_tranches(amounts[i], cancellations, dates[i], raw_codes[i])

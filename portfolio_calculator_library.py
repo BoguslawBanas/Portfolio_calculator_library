@@ -2,13 +2,12 @@
 Class-based alternative to portfolio_calculator_library.py — a sketch, not wired
 into the rest of the codebase. The original module stays a set of free functions
 that each take a DataFrame; here the same logic is grouped behind a Portfolio
-class whose constructor plays the role of create_dataframe_and_get_data_from_directory:
-it loads and splits the per-instrument DataFrames once, and the rest of the
-methods operate on the state the constructor built instead of re-taking a
-dataframe argument every call.
+class whose constructor builds each source's Stock/PolishRetailBonds/Commodity/
+Crypto/BankAccount instance once and merges their per-instrument DataFrames, and
+the rest of the methods operate on the state the constructor built instead of
+re-taking a dataframe argument every call.
 """
 
-import os
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -37,31 +36,29 @@ class Portfolio:
     TOTAL_MONEY_COLUMN='Total_money'
     CASHFLOW_COLUMN='Cashflow'
 
-    # --- Ingestion tags: synthesized while loading (from the sources dict / CSV filename),
-    # not read from inside a CSV cell — but consumed everywhere exactly like input columns. ---
+    # --- Leftover from a raw-CSV ingestion path (_load_sources/_read_directory/_split_by_isin/
+    # _replace_isin_with_ticker/get_dataframe_currency/get_earliest_date) that has since been
+    # removed as dead code: __init__ never builds a combined dataframe of its own to tag/split -
+    # it hands each sources dict entry straight to the matching Stock/PolishRetailBonds/
+    # Commodity/Crypto/BankAccount constructor, which does its own loading. Nothing in this file
+    # reads these four constants anymore (each asset-type module defines its own
+    # SOURCE_TYPE_COLUMN/CSV_TICKER_COLUMN instead - see e.g. Stock's) - kept only in case a
+    # future raw-ingestion path resurrects them; safe to delete otherwise. ---
     SOURCE_TYPE_COLUMN='type'          # asset type ('stock'/'bonds'/...), from the sources dict
     TRANSACTION_STATE_COLUMN='state'   # per-row state ('buy'/'sell'/...), from the CSV filename
-
-    # --- Input: columns read from a raw sources CSV (only reachable via the currently-dead
-    # _load_sources/_read_directory/_split_by_isin path — see __init__'s docstring/comments). ---
     CSV_TICKER_COLUMN='isin'
     CSV_DATE_COLUMN='date'
 
     def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
-        """sources: a dict mapping each path to the asset type it holds (e.g. 'stock', 'bonds',
-        'commodities', 'bank_account', 'crypto'). Each path is either
-        - a directory of per-state CSVs (state inferred from filename, as in
-          create_dataframe_and_get_data_from_directory), or
-        - an already-prepared single transactions CSV that already has a 'state'
-          column (as in create_dataframe_and_get_data).
-        Directories and prepared CSVs can be mixed freely in the same dict; every row loaded
-        from a given path is tagged with that path's type (SOURCE_TYPE_COLUMN) before all rows
-        are combined and split by CSV_TICKER_COLUMN, so each per-instrument dataframe carries along
-        which asset-type module should process it (dataframe[Portfolio.SOURCE_TYPE_COLUMN].iloc[0]).
+        """sources: a dict mapping each directory path to the asset type it holds ('stock',
+        'bonds', 'commodities', 'crypto', or 'bank_account'). Each directory is handed straight
+        to the matching Stock/PolishRetailBonds/Commodity/Crypto/BankAccount constructor below,
+        which does its own loading/splitting of the CSVs inside it - Portfolio itself never
+        builds a combined raw dataframe to tag/split.
 
-        tickers_json: optional path to the JSON file (see CLAUDE.md / stock_calculator_library)
-        mapping each ISIN to {"ticker": <yfinance symbol>, "currency": <instrument currency>}.
-        When given, get_currency()/get_dataframe_currency() become available.
+        tickers_json: required when sources includes a 'stock' entry - path to the JSON file
+        (see CLAUDE.md / stock_calculator_library) mapping each ISIN to {"ticker": <yfinance
+        symbol>, "currency": <instrument currency>}, passed straight through to Stock.
 
         self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
         allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
@@ -289,18 +286,6 @@ class Portfolio:
         currency_code=currency_by_ticker[key].upper()
         target[currency_code]=target.get(currency_code, 0.0)+amount
 
-    def _replace_isin_with_ticker(self):
-        """Swaps CSV_TICKER_COLUMN's values for the yfinance ticker symbol from self.tickers, in place
-        on every per-instrument dataframe. Equivalent of stock_calculator_library.tranform_dataframe_to_dataframe_with_isin."""
-        for dataframe in self.dataframes:
-            dataframe[self.CSV_TICKER_COLUMN]=dataframe[self.CSV_TICKER_COLUMN].map(lambda isin: self.tickers[isin]['ticker'])
-
-    def get_dataframe_currency(self, dataframe: pd.DataFrame) -> str:
-        """Currency of the instrument a per-instrument dataframe (one of self.dataframes) belongs to.
-        Once tickers_json is supplied, CSV_TICKER_COLUMN holds the yfinance ticker (see _replace_isin_with_ticker),
-        so this looks the currency up by ticker rather than by the original ISIN."""
-        return self._currency_by_ticker[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
-
     @staticmethod
     def _irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):
         cashflows=np.asarray(cashflows, dtype=np.float64)
@@ -397,13 +382,6 @@ class Portfolio:
         dataframe[self.IRR_COLUMN]=irr
         dataframe.drop(columns=[self.PREV_MONEY_INVESTED_COLUMN, self.CASHFLOW_COLUMN], inplace=True)
         self.portfolio=dataframe
-
-    def get_earliest_date(self) -> datetime:
-        earliest_date=datetime.today()
-        for df in self.dataframes:
-            if df.index.min()<earliest_date:
-                earliest_date=df.index.min()
-        return earliest_date
 
     def calculate_money_earned_between_dates(self, start_date: datetime, end_date: datetime) -> float:
         dataframe=self.portfolio
