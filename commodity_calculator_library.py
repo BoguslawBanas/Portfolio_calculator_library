@@ -5,14 +5,16 @@ transactions turned into a daily investment/profit DataFrame. Commodities don't 
 so there's no Dividend column — Profit is simply unrealized plus realized profit, the same two
 terms Stock uses minus the dividend one.
 
-Unlike Stock (and unlike this class's own sell.csv), buy.csv carries no price_of_unit column —
-a buy's market price is always the yfinance close price on its own transaction date (the same
-series later used to mark the held position to market), not a price the user records by hand.
-Instead, buy.csv carries amount_of_units alongside a unit column (CSV_UNIT_COLUMN) naming the
-physical unit that amount is denominated in ('troy_ounce' or 'gram', see UNIT_TO_GRAMS) - the
-amount is converted internally, via grams, to whatever unit that symbol's own yfinance ticker
-actually quotes (troy ounce for gold/silver/platinum/palladium, pound for copper - see
-QUOTE_UNIT_GRAMS), so a buy recorded in either unit lands on the same cost basis.
+Unlike Stock, neither buy.csv nor sell.csv carries a price_of_unit column — every transaction's
+market price is always the yfinance close price on its own transaction date (the same series
+later used to mark the held position to market), not a price the user records by hand. Instead,
+buy.csv carries amount_of_units alongside a unit column (CSV_UNIT_COLUMN) naming the physical
+unit that amount is denominated in ('troy_ounce' or 'gram', see UNIT_TO_GRAMS) - the amount is
+converted internally, via grams, to whatever unit that symbol's own yfinance ticker actually
+quotes (troy ounce for gold/silver/platinum/palladium, pound for copper - see QUOTE_UNIT_GRAMS),
+so a buy recorded in either unit lands on the same cost basis. sell.csv's amount_of_units is
+already in that same native quote unit (it's selling off units tracked that way internally), so
+it needs no unit column/conversion of its own.
 """
 
 import os
@@ -39,14 +41,13 @@ class Commodity:
     # inside a CSV cell — but consumed everywhere exactly like an input column. ---
     SOURCE_TYPE_COLUMN='state'
 
-    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). Only
-    # sell.csv carries CSV_PRICE_OF_UNIT_COLUMN — a sell is a real, known transaction price,
-    # unlike a buy, whose market price now always comes from yfinance (see module docstring). ---
+    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). Neither
+    # buy nor sell carries a price - both are priced off yfinance's own close price on that
+    # transaction's date (see module docstring). ---
     CSV_TICKER_COLUMN='symbol'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
     CSV_UNIT_COLUMN='unit'
-    CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
     CSV_PREMIUM_COLUMN='premium'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
@@ -81,10 +82,11 @@ class Commodity:
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
         CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
-        buy.csv rows carry CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see UNIT_TO_GRAMS) instead
-        of a price_of_unit: the market price is always that day's own yfinance close instead of
-        a manually recorded one, so buy.csv only needs amount_of_units/unit/premium. sell.csv
-        is unaffected and still carries its own price_of_unit, a real, known sale price.
+        Neither buy.csv nor sell.csv carries a price_of_unit: every transaction's market price is
+        always that day's own yfinance close, not a manually recorded one. buy.csv rows carry
+        amount_of_units alongside CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see UNIT_TO_GRAMS)
+        and premium; sell.csv rows carry just amount_of_units (already in that symbol's own
+        native quote unit, same as the units tracked internally - see module docstring).
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
         progress_callback: optional zero-arg callback invoked once per symbol, right after that
         symbol's price history has been fetched and computed — the unit of work a caller (e.g.
@@ -225,12 +227,13 @@ class Commodity:
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            # 'commodity-v2': bumped from 'commodity' when buy.csv dropped price_of_unit for
+            # 'commodity-v3': bumped from 'commodity' when buy.csv dropped price_of_unit for
             # CSV_UNIT_COLUMN and this method started returning a (dataframe, total_buy_invested)
-            # tuple instead of a bare DataFrame - the isinstance check below guards a cache
-            # entry from the older, bare-DataFrame format the same way PolishRetailBonds guards
-            # its own tuple cache format.
-            cache_key=DiskCache.make_key('commodity-v2', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
+            # tuple instead of a bare DataFrame ('commodity-v2'), then again when sell.csv also
+            # dropped its own price_of_unit in favor of that day's yfinance close. The isinstance
+            # check below guards a cache entry from the older, bare-DataFrame format the same
+            # way PolishRetailBonds guards its own tuple cache format.
+            cache_key=DiskCache.make_key('commodity-v3', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if isinstance(cached, tuple) and len(cached)==2:
@@ -272,7 +275,6 @@ class Commodity:
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
         unit=column_or_none(self.CSV_UNIT_COLUMN)
-        price=column_or_nan(self.CSV_PRICE_OF_UNIT_COLUMN)
         premium=column_or_nan(self.CSV_PREMIUM_COLUMN)
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
         fx=currency.data.loc[sorted_df.index, self.CLOSE_COLUMN].to_numpy(dtype=float)
@@ -282,10 +284,11 @@ class Commodity:
             missing=sorted_df.index[position<0]
             raise KeyError(f"Transaction date(s) {list(missing)} for {ticker_name} fall outside the computed daily range.")
 
-        # A buy's own market price - the same already currency_to-converted Close series used
-        # for unrealized profit below - looked up by transaction row via position, exactly like
-        # every other per-row column here (no separate FX step needed for it, unlike price/
-        # sell_tax below, since data[CLOSE_COLUMN] above is already converted to currency_to).
+        # Every buy's and sell's own market price - the same already currency_to-converted
+        # Close series used for unrealized profit below - looked up by transaction row via
+        # position, exactly like every other per-row column here (no separate FX step needed
+        # for it, unlike sell_tax below, since data[CLOSE_COLUMN] above is already converted to
+        # currency_to).
         market_price=data[self.CLOSE_COLUMN].to_numpy()[position]
 
         money_invested_by_day=np.zeros(len(data))
@@ -326,7 +329,7 @@ class Commodity:
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 
-                proceeds=amount[i]*price[i]*row_fx
+                proceeds=amount[i]*market_price[i]
 
                 units_by_day[pos]-=units_sold
                 money_invested_by_day[pos]-=money_invested_removed
