@@ -212,17 +212,31 @@ class Commodity:
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+        """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
+        amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
+        distribution_by_ticker/total_money_invested (see CLAUDE.md's Stock architecture notes on
+        that lifetime-vs-currently-held split). Returned from here, rather than recomputed
+        independently in __init__ the way Stock/Crypto still do straight from each buy row's own
+        CSV price_of_unit, because a buy's price now comes from this method's own yfinance fetch
+        below - recomputing it separately in __init__ would mean fetching the same price history
+        a second time."""
         start_date=dataframe.index.min()
-        ticker_name=self.TICKERS[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
+        symbol=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
+        ticker_name=self.TICKERS[symbol]
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            cache_key=DiskCache.make_key('commodity', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
+            # 'commodity-v2': bumped from 'commodity' when buy.csv dropped price_of_unit for
+            # CSV_UNIT_COLUMN and this method started returning a (dataframe, total_buy_invested)
+            # tuple instead of a bare DataFrame - the isinstance check below guards a cache
+            # entry from the older, bare-DataFrame format the same way PolishRetailBonds guards
+            # its own tuple cache format.
+            cache_key=DiskCache.make_key('commodity-v2', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
-                if cached is not None:
+                if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
         currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -253,8 +267,14 @@ class Commodity:
                 return sorted_df[column].to_numpy(dtype=float)
             return np.full(n, np.nan)
 
+        def column_or_none(column: str) -> np.ndarray:
+            if column in sorted_df.columns:
+                return sorted_df[column].to_numpy(dtype=object)
+            return np.full(n, None, dtype=object)
+
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
+        unit=column_or_none(self.CSV_UNIT_COLUMN)
         price=column_or_nan(self.CSV_PRICE_OF_UNIT_COLUMN)
         premium=column_or_nan(self.CSV_PREMIUM_COLUMN)
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
@@ -265,12 +285,19 @@ class Commodity:
             missing=sorted_df.index[position<0]
             raise KeyError(f"Transaction date(s) {list(missing)} for {ticker_name} fall outside the computed daily range.")
 
+        # A buy's own market price - the same already currency_to-converted Close series used
+        # for unrealized profit below - looked up by transaction row via position, exactly like
+        # every other per-row column here (no separate FX step needed for it, unlike price/
+        # sell_tax below, since data[CLOSE_COLUMN] above is already converted to currency_to).
+        market_price=data[self.CLOSE_COLUMN].to_numpy()[position]
+
         money_invested_by_day=np.zeros(len(data))
         units_by_day=np.zeros(len(data))
         realized_profit_by_day=np.zeros(len(data))
 
         running_units=0.0
         running_money_invested=0.0
+        total_buy_invested=0.0
 
         for i in range(n):
             pos=position[i]
@@ -278,8 +305,12 @@ class Commodity:
             row_fx=fx[i]
 
             if row_state=='buy':
-                units=round(amount[i], 4)
-                raw_money_invested=amount[i]*price[i]*row_fx
+                row_unit=unit[i]
+                if row_unit not in self.UNIT_TO_GRAMS:
+                    raise ValueError(f"Unknown unit {row_unit!r} for {ticker_name} buy on {sorted_df.index[i].date()} (expected one of {sorted(self.UNIT_TO_GRAMS)}).")
+                grams=amount[i]*self.UNIT_TO_GRAMS[row_unit]
+                units=round(grams/self.QUOTE_UNIT_GRAMS[symbol], 4)
+                raw_money_invested=units*market_price[i]
                 money_invested=round((premium[i]+1.0)*raw_money_invested, 2)
 
                 money_invested_by_day[pos]+=money_invested
@@ -287,6 +318,7 @@ class Commodity:
 
                 running_units+=units
                 running_money_invested+=money_invested
+                total_buy_invested+=money_invested
             elif row_state=='sell':
                 units_sold=round(amount[i], 4)
                 if units_sold>running_units+1e-9:
@@ -321,7 +353,8 @@ class Commodity:
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
+        result=(data, total_buy_invested)
         if cache is not None:
-            cache.set(cache_key, data)
+            cache.set(cache_key, result)
 
-        return data
+        return result
