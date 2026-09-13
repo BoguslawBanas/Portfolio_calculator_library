@@ -1,13 +1,24 @@
 """Tests for commodity_calculator_library.Commodity against synthetic, fixed data (no network)."""
 
+from datetime import date
+
 import pytest
 
 from Portfolio_calculator_library import Commodity
 
-# FakeTicker's day-0 close (the earliest transaction's own date, since _compute_data's price
-# history starts at dataframe.index.min()) is always 100.0 + 0.37*((0*7)%11) - 0.5 == 99.5,
-# for every commodity futures symbol (none of them end in '=X') - see tests/conftest.py.
-DAY_0_CLOSE=99.5
+
+def fake_close(start_date: str, transaction_date: str) -> float:
+    """Reproduces tests/conftest.py's FakeTicker.history formula for a given transaction date,
+    relative to a source's earliest transaction (dataframe.index.min(), where _compute_data's
+    own fetched price history starts) - every commodity futures symbol falls into the non-'=X'
+    branch there (base=100.0)."""
+    day_index=(date.fromisoformat(transaction_date)-date.fromisoformat(start_date)).days
+    return 100.0+0.37*((day_index*7) % 11)-0.5
+
+
+# FakeTicker's day-0 close (a source's earliest transaction date) is always fake_close(x, x)
+# == 99.5, regardless of what that date actually is.
+DAY_0_CLOSE=fake_close('2024-01-15', '2024-01-15')
 
 
 def build_commodity(make_source_dir, csv_files, currency_to='usd', **kwargs):
@@ -28,20 +39,22 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
 
 
 def test_partial_sell_preserves_average_cost_basis(make_source_dir):
+    start_date, sell_date='2024-01-15', '2024-03-01'
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
-                   "2024-01-15,gold,10,troy_ounce,0.0\n",
-        'sell.csv': "date,symbol,amount_of_units,price_of_unit\n"
-                    "2024-03-01,gold,4,120.0\n",
+        'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+                   f"{start_date},gold,10,troy_ounce,0.0\n",
+        'sell.csv': f"date,symbol,amount_of_units\n"
+                    f"{sell_date},gold,4\n",
     })
     data=commodity.data
     # 10 troy ounces bought at day-0's fake close (99.5, no premium) -> cost basis 995.0;
-    # selling 4/10 removes 4/10 of that cost basis (398.0), leaving 597.0. sell.csv still
-    # carries its own real price_of_unit, unaffected by this buy-side change.
+    # selling 4/10 removes 4/10 of that cost basis (398.0), leaving 597.0. sell.csv carries no
+    # price of its own anymore either - proceeds come from that sell date's own fake close.
     money_invested=10*DAY_0_CLOSE
     money_invested_removed=round(money_invested*0.4, 2)
+    proceeds=4*fake_close(start_date, sell_date)
     assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(round(money_invested-money_invested_removed, 2))
-    assert data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(round(4*120.0-money_invested_removed, 2))
+    assert data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(round(proceeds-money_invested_removed, 2))
 
 
 def test_oversell_raises_value_error(make_source_dir):
@@ -49,8 +62,8 @@ def test_oversell_raises_value_error(make_source_dir):
         build_commodity(make_source_dir, {
             'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
                        "2024-01-15,silver,5,troy_ounce,0.0\n",
-            'sell.csv': "date,symbol,amount_of_units,price_of_unit\n"
-                        "2024-02-01,silver,999,25.0\n",
+            'sell.csv': "date,symbol,amount_of_units\n"
+                        "2024-02-01,silver,999\n",
         })
 
 
@@ -60,8 +73,8 @@ def test_no_dividend_column_profit_is_unrealized_plus_realized(make_source_dir):
     commodity=build_commodity(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
                    "2024-01-15,gold,10,troy_ounce,0.0\n",
-        'sell.csv': "date,symbol,amount_of_units,price_of_unit\n"
-                    "2024-02-01,gold,4,110.0\n",
+        'sell.csv': "date,symbol,amount_of_units\n"
+                    "2024-02-01,gold,4\n",
     })
     assert not hasattr(Commodity, 'DIVIDEND_COLUMN')
     data=commodity.data
