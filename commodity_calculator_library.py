@@ -116,29 +116,23 @@ class Commodity:
 
         dataframes=self._split_by_symbol(self.dataframe)
 
-        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
-        # which derives it the same way) — recompute it here instead of assuming one exists.
-        money_invested_by_symbol=dict()
-        for df in dataframes:
-            currency=Currency(self.QUOTE_CURRENCY, currency_to, df.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
-
-            money_invested=0.0
-            for idx, row in df.iterrows():
-                if row[self.SOURCE_TYPE_COLUMN]=='buy':
-                    money_invested+=round((row[self.CSV_PREMIUM_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
-
-            money_invested_by_symbol[df[self.CSV_TICKER_COLUMN].iloc[0]]=money_invested
-            self.total_money_invested+=money_invested
-
+        # A buy row's money invested depends on _compute_data's own yfinance fetch (see its
+        # docstring) rather than a price the CSV carries directly, so unlike Stock/Crypto there's
+        # no cheap way to recompute distribution_by_ticker's lifetime-invested figure in a
+        # separate, lightweight pass over the raw CSV rows first - _compute_data is called once
+        # per symbol below and returns that lifetime total alongside its DataFrame instead.
         dataframes_2=list()
+        money_invested_by_symbol=dict()
         current_value_by_symbol=dict()
         revenue_by_symbol=dict()
         for df in dataframes:
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
-            self.distribution_by_ticker[symbol]=(money_invested_by_symbol[symbol]/self.total_money_invested)*100.0
             self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
-            computed=self._compute_data(df, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
+
+            money_invested_by_symbol[symbol]=total_buy_invested
+            self.total_money_invested+=total_buy_invested
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_symbol[symbol]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -152,17 +146,20 @@ class Commodity:
                 if self.QUOTE_CURRENCY.upper()==currency_to.upper():
                     self.native_data[symbol]=computed
                 else:
-                    self.native_data[symbol]=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh)
+                    self.native_data[symbol], _=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh)
                 self.native_currency[symbol]=self.QUOTE_CURRENCY
 
             if progress_callback is not None:
                 progress_callback()
 
+        for symbol, value in money_invested_by_symbol.items():
+            self.distribution_by_ticker[symbol]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+
         for symbol, value in current_value_by_symbol.items():
-            self.distribution_by_ticker_current_value[symbol]=(value/self.total_current_value)*100.0
+            self.distribution_by_ticker_current_value[symbol]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
 
         for symbol, value in revenue_by_symbol.items():
-            self.distribution_by_ticker_revenue[symbol]=(value/self.total_revenue)*100.0
+            self.distribution_by_ticker_revenue[symbol]=(value/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
         self.data=self.merge(dataframes_2)
 
