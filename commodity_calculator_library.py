@@ -1,10 +1,18 @@
 """
 Class-based commodity calculator, built the same way as stock_calculator_library.Stock but
 scoped to physical commodities (gold, silver, ...) instead of stocks/ETFs: a set of buy/sell
-transactions priced in a chosen unit (troy ounce, gram, ...) turned into a daily
-investment/profit DataFrame. Commodities don't pay dividends, so there's no Dividend column —
-Profit is simply unrealized plus realized profit, the same two terms Stock uses minus the
-dividend one.
+transactions turned into a daily investment/profit DataFrame. Commodities don't pay dividends,
+so there's no Dividend column — Profit is simply unrealized plus realized profit, the same two
+terms Stock uses minus the dividend one.
+
+Unlike Stock (and unlike this class's own sell.csv), buy.csv carries no price_of_unit column —
+a buy's market price is always the yfinance close price on its own transaction date (the same
+series later used to mark the held position to market), not a price the user records by hand.
+Instead, buy.csv carries amount_of_units alongside a unit column (CSV_UNIT_COLUMN) naming the
+physical unit that amount is denominated in ('troy_ounce' or 'gram', see UNIT_TO_GRAMS) - the
+amount is converted internally, via grams, to whatever unit that symbol's own yfinance ticker
+actually quotes (troy ounce for gold/silver/platinum/palladium, pound for copper - see
+QUOTE_UNIT_GRAMS), so a buy recorded in either unit lands on the same cost basis.
 """
 
 import os
@@ -31,10 +39,13 @@ class Commodity:
     # inside a CSV cell — but consumed everywhere exactly like an input column. ---
     SOURCE_TYPE_COLUMN='state'
 
-    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). ---
+    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). Only
+    # sell.csv carries CSV_PRICE_OF_UNIT_COLUMN — a sell is a real, known transaction price,
+    # unlike a buy, whose market price now always comes from yfinance (see module docstring). ---
     CSV_TICKER_COLUMN='symbol'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
+    CSV_UNIT_COLUMN='unit'
     CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
     CSV_PREMIUM_COLUMN='premium'
     CSV_SELL_TAX_COLUMN='sell_tax'
@@ -50,10 +61,30 @@ class Commodity:
     }
     QUOTE_CURRENCY='usd'
 
+    # A buy.csv row's amount_of_units/unit is converted to grams, then to the symbol's own
+    # QUOTE_UNIT_GRAMS, so a buy recorded in either supported unit lands on the same physical
+    # quantity (and so the same cost basis) regardless of which one was used.
+    GRAMS_PER_TROY_OUNCE=31.1034768
+    GRAMS_PER_POUND=453.59237
+    UNIT_TO_GRAMS={'troy_ounce': GRAMS_PER_TROY_OUNCE, 'gram': 1.0}
+    # The physical unit each symbol's own yfinance futures ticker actually quotes a price per -
+    # troy ounce for every metal here except copper, which yfinance quotes per pound.
+    QUOTE_UNIT_GRAMS={
+        'gold': GRAMS_PER_TROY_OUNCE,
+        'silver': GRAMS_PER_TROY_OUNCE,
+        'platinum': GRAMS_PER_TROY_OUNCE,
+        'palladium': GRAMS_PER_TROY_OUNCE,
+        'copper': GRAMS_PER_POUND,
+    }
+
     def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
         CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
+        buy.csv rows carry CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see UNIT_TO_GRAMS) instead
+        of a price_of_unit: the market price is always that day's own yfinance close instead of
+        a manually recorded one, so buy.csv only needs amount_of_units/unit/premium. sell.csv
+        is unaffected and still carries its own price_of_unit, a real, known sale price.
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
         progress_callback: optional zero-arg callback invoked once per symbol, right after that
         symbol's price history has been fetched and computed — the unit of work a caller (e.g.
