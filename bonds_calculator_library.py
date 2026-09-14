@@ -418,13 +418,23 @@ class PolishRetailBonds:
         # already handle natural maturity - cancellation is just an earlier "effective maturity".
         accrual_cutoff=min(today, cancel_date) if cancel_date is not None else today
 
+        # end_date/last_accrual_date/n_days below replace what used to be a pd.date_range
+        # (maturity_index) driving a pd.Series-based accrual - everything from here through the
+        # period loop instead works on plain numpy arrays, addressed by integer day-offset from
+        # start_date, since every date in play (period boundaries, accrual_cutoff, today) is
+        # always a whole number of days from start_date. This avoids constructing a fresh
+        # pd.date_range and doing label-based .loc alignment once per period (up to num_periods
+        # times per holding) - the actual hot part of this method, since Stock/Commodity/Crypto's
+        # own per-row loops are already numpy-first (see _compute_data's comment) while this one
+        # previously wasn't.
         end_date=start_date+pd.DateOffset(months=period_months*num_periods)-pd.DateOffset(days=1)
-        maturity_index=pd.date_range(start=start_date, end=min(end_date, accrual_cutoff))
+        last_accrual_date=min(end_date, accrual_cutoff)
+        n_days=(last_accrual_date-start_date).days+1
 
         # Interest always accrues on the bond's full NOMINAL_VALUE, whether bought for cash or
         # (at a discount) by exchange — only the cost basis below differs.
         base=self.NOMINAL_VALUE*amount_of_bonds
-        daily_interest=pd.Series(0.0, index=maturity_index)
+        daily_interest=np.zeros(n_days)
 
         for period in range(num_periods):
             period_start=start_date+pd.DateOffset(months=period_months*period)
@@ -435,10 +445,11 @@ class PolishRetailBonds:
 
             rate=initial_coupon if period==0 or rate_source is None else self._external_rate(rate_source, period_start)+additional_coupon
 
-            period_index=pd.date_range(start=period_start, end=min(period_end-pd.DateOffset(days=1), accrual_cutoff))
-            if len(period_index)==0:
+            start_offset=(period_start-start_date).days
+            end_offset=min((period_end-start_date).days, n_days)
+            if end_offset<=start_offset:
                 break
-            daily_interest.loc[period_index]=base*rate/100.0/(period_days*payments_per_year)
+            daily_interest[start_offset:end_offset]=base*rate/100.0/(period_days*payments_per_year)
 
             if compounding:
                 base=base*(1+rate/100.0)
@@ -456,7 +467,12 @@ class PolishRetailBonds:
         # own row_fx baked in once, not re-applied later). This is what makes a matured bond's
         # frozen accrued_profit below stay frozen in currency_to terms too, rather than silently
         # drifting with FX after redemption despite nothing further actually happening to it.
-        daily_interest=daily_interest*currency.data.loc[daily_interest.index, Currency.CLOSE_COLUMN]
+        # Currency.data itself is still a DataFrame (out of scope here) - .to_numpy() pulls this
+        # one holding's slice of it out as a plain array once, so the multiply/cumsum below are
+        # numpy end to end instead of pandas elementwise ops.
+        maturity_index=pd.date_range(start=start_date, periods=n_days)
+        fx_rates=currency.data.loc[maturity_index, Currency.CLOSE_COLUMN].to_numpy()
+        daily_interest=daily_interest*fx_rates
 
         # Redemption value is always based on NOMINAL_VALUE regardless of what was actually paid
         # (see base above), so a lower cost basis (money_invested, below) needs a matching credit
@@ -464,36 +480,48 @@ class PolishRetailBonds:
         # maturity - not just a lump sum tacked onto the final day, as the pre-rework version did
         # it. Untaxed: it's a purchase-price discount, not interest income. Converted at
         # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
-        accrued_profit=round(daily_interest.cumsum()*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
+        accrued_profit=np.round(np.cumsum(daily_interest)*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
 
         # A genuine early redemption pays out gross accrued interest minus early_redemption_fee,
         # not the plain held-to-maturity accrual — applied once, to the single frozen value every
         # day from cancel_date onward inherits (every day BEFORE cancel_date still shows the
         # gross value, since no redemption has happened on those days yet). Floored at 0, so this
-        # only ever reduces interest, never principal. accrued_profit.index[-1]==cancel_date (not
-        # just "cancel_date is not None") is what actually confirms the cancellation governed
-        # this tranche's cutoff, rather than natural maturity/today (see accrual_cutoff above) -
-        # a cancel_date recorded well after natural maturity, or not yet reached, is a no-op here
+        # only ever reduces interest, never principal. last_accrual_date==cancel_date (not just
+        # "cancel_date is not None") is what actually confirms the cancellation governed this
+        # tranche's cutoff, rather than natural maturity/today (see accrual_cutoff above) - a
+        # cancel_date recorded well after natural maturity, or not yet reached, is a no-op here
         # too, since nothing was actually redeemed early in either case.
-        if cancel_date is not None and accrued_profit.index[-1]==cancel_date:
+        if cancel_date is not None and last_accrual_date==cancel_date:
             fee=config['early_redemption_fee']*amount_of_bonds*currency.data.loc[cancel_date, Currency.CLOSE_COLUMN]
-            accrued_profit.iloc[-1]=round(max(0.0, accrued_profit.iloc[-1]-fee), 2)
+            accrued_profit[-1]=round(max(0.0, accrued_profit[-1]-fee), 2)
 
-        # Extend to today - a no-op if the bond hasn't matured/been cancelled yet, since
-        # maturity_index already reaches today in that case. Past accrual_cutoff (natural
-        # maturity OR an earlier recorded cancellation - both handled identically from here on),
-        # the bond has been redeemed: Money_invested and the unrealized component
-        # (PROFIT_WITHOUT_DIVIDEND_COLUMN) drop to 0 - nothing is left held, the proceeds became
-        # cash, which this library doesn't separately track - while total Profit freezes at its
-        # final accrued value forever, since it was realized at redemption and doesn't disappear
-        # from historical totals. Mirrors how a fully-sold Stock position's running cost basis and
-        # unrealized profit both go to 0 while its cumulative realized profit persists in
-        # PROFIT_COLUMN.
+        # Extend to today - a no-op if the bond hasn't matured/been cancelled yet, since n_days
+        # already reaches today in that case. Past accrual_cutoff (natural maturity OR an earlier
+        # recorded cancellation - both handled identically from here on), the bond has been
+        # redeemed: Money_invested and the unrealized component (PROFIT_WITHOUT_DIVIDEND_COLUMN)
+        # drop to 0 - nothing is left held, the proceeds became cash, which this library doesn't
+        # separately track - while total Profit freezes at its final accrued value forever, since
+        # it was realized at redemption and doesn't disappear from historical totals. Mirrors how
+        # a fully-sold Stock position's running cost basis and unrealized profit both go to 0
+        # while its cumulative realized profit persists in PROFIT_COLUMN. n_days is always <=
+        # full_days (last_accrual_date can't be later than today), so every slice below is safe -
+        # plain numpy fill/copy in place of what used to be three separate pandas reindex/ffill
+        # calls, each re-walking the whole date range on its own.
         full_index=pd.date_range(start=start_date, end=today)
-        dataframe=pd.DataFrame(index=full_index)
-        dataframe[self.MONEY_INVESTED_COLUMN]=pd.Series(amount_of_bonds*price_per_bond*fx_at_purchase, index=maturity_index).reindex(full_index, fill_value=0.0)
-        dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=accrued_profit.reindex(full_index, fill_value=0.0)
-        dataframe[self.PROFIT_COLUMN]=accrued_profit.reindex(full_index).ffill()
+        full_days=len(full_index)
+        money_invested=np.zeros(full_days)
+        money_invested[:n_days]=amount_of_bonds*price_per_bond*fx_at_purchase
+        profit_without_dividend=np.zeros(full_days)
+        profit_without_dividend[:n_days]=accrued_profit
+        profit=np.empty(full_days)
+        profit[:n_days]=accrued_profit
+        profit[n_days:]=accrued_profit[-1]
+
+        dataframe=pd.DataFrame({
+            self.MONEY_INVESTED_COLUMN: money_invested,
+            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: profit_without_dividend,
+            self.PROFIT_COLUMN: profit,
+        }, index=full_index)
         # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still carries
         # the (fluctuating-until-redemption) accrued value, then exactly whatever
         # PROFIT_WITHOUT_DIVIDEND_COLUMN just dropped the moment it drops to 0 - so this is always
