@@ -198,6 +198,14 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
+        # Validated up front, before any file I/O, so a malformed override raises a clear error
+        # right at construction time instead of surfacing later as a cryptic failure deep inside
+        # _bond_dataframe's arithmetic (README Roadmap item).
+        if isinstance(tax_rate, bool) or not isinstance(tax_rate, (int, float)):
+            raise ValueError(f"tax_rate must be a number (percent), got {tax_rate!r}.")
+        if not (0.0<=tax_rate<=100.0):
+            raise ValueError(f"tax_rate must be between 0 and 100 (percent), got {tax_rate!r}.")
+
         self.tax_rate=tax_rate
         self.bond_types=self._load_bond_types(bond_types_json)
         today=datetime.today()
@@ -320,13 +328,28 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         if bond_types_json is not None:
             with open(bond_types_json, 'r') as f:
                 overrides=json.load(f)
+            if not isinstance(overrides, dict):
+                raise ValueError(f"bond_types_json must contain a JSON object of {{code: {{field: value}}}}, got {type(overrides).__name__}.")
             overridable_fields={'swap_discount', 'early_redemption_fee'}
             for code, override in overrides.items():
                 if code not in bond_types:
                     raise ValueError(f"bond_types_json overrides unknown bond type {code!r} (expected one of {sorted(bond_types)}).")
+                if not isinstance(override, dict):
+                    raise ValueError(f"bond_types_json for {code!r} must be a JSON object of {{field: value}}, got {type(override).__name__}.")
                 unknown_fields=set(override)-overridable_fields
                 if unknown_fields:
                     raise ValueError(f"bond_types_json for {code!r} sets unknown field(s) {sorted(unknown_fields)} (expected one of {sorted(overridable_fields)}).")
+                # swap_discount/early_redemption_fee are both zl/bond amounts arithmetic below
+                # subtracts from NOMINAL_VALUE/gross accrued interest - a non-numeric or
+                # out-of-range value would otherwise only surface as a cryptic failure (or a
+                # silently nonsensical negative price/fee) deep inside _bond_dataframe.
+                for field, value in override.items():
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError(f"bond_types_json for {code!r} field {field!r} must be a number, got {value!r}.")
+                    if field=='swap_discount' and not (0.0<=value<cls.NOMINAL_VALUE):
+                        raise ValueError(f"bond_types_json for {code!r} swap_discount must be within [0, {cls.NOMINAL_VALUE}) zl/bond, got {value!r}.")
+                    if field=='early_redemption_fee' and not (value>=0.0):
+                        raise ValueError(f"bond_types_json for {code!r} early_redemption_fee must be >= 0 zl/bond, got {value!r}.")
                 bond_types[code].update(override)
         return bond_types
 
