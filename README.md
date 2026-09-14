@@ -256,7 +256,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 ## Roadmap
 
-- `PolishRetailBonds._load_cancellations` still uses `.iterrows()` over `cancel.csv` — low-impact in practice since that file is typically small, but the same pattern
 - no de-duplication of `Currency` fetches across tickers that share a currency pair within one `Stock`/`Commodity`/`Crypto` construction — several holdings denominated in the same foreign currency each build their own `Currency(...)` and, without `cache_dir`, each hits yfinance separately for the same FX pair; fixing this well is nontrivial since each ticker's own start date can differ, so only worth doing if it's actually a bottleneck in practice
 - `tax_rate`/`bond_types_json` overrides have no type/shape validation — a malformed value fails deep inside arithmetic with a cryptic error instead of a clear one raised at construction time
 - a nonexistent `directory_path` (or missing `buy.csv`/`sell.csv`) raises a raw `FileNotFoundError` (`[WinError 3]`/`[Errno 2]`) straight from `os.listdir`/`pd.read_csv` instead of the library's own established clear-error convention, like the `yfinance`-empty-history `ValueError`s already in place

@@ -347,15 +347,19 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         that pair here, since nothing else distinguishes them). A holding can have more than one
         row (several partial cancellations over time) - see _build_tranches for how these turn
         into per-tranche accrual."""
+        # Grouped via pandas' own (vectorized) groupby instead of a per-row .iterrows() loop
+        # (README Roadmap item) - low-impact in practice since cancel.csv is typically small, but
+        # the same pattern as every other transaction-walking loop in this package. Sorting by
+        # cancel_date up front, before grouping, means each group's rows already come out in
+        # cancel_date order (groupby preserves within-group row order) - equivalent to the old
+        # per-key entries.sort(...) pass after the fact.
         cancel_df=pd.read_csv(path)
         cancel_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
         cancel_df[cls.CSV_CANCEL_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_CANCEL_DATE_COLUMN], format='%Y-%m-%d')
+        cancel_df=cancel_df.sort_values(cls.CSV_CANCEL_DATE_COLUMN, kind='stable')
         cancellations=dict()
-        for _, row in cancel_df.iterrows():
-            key=(row[cls.CSV_DATE_COLUMN], row[cls.CSV_TICKER_COLUMN])
-            cancellations.setdefault(key, list()).append((row[cls.CSV_CANCEL_DATE_COLUMN], float(row[cls.CSV_AMOUNT_OF_UNITS_COLUMN])))
-        for key, entries in cancellations.items():
-            entries.sort(key=lambda entry: entry[0])
+        for key, group in cancel_df.groupby([cls.CSV_DATE_COLUMN, cls.CSV_TICKER_COLUMN], sort=False):
+            cancellations[key]=list(zip(group[cls.CSV_CANCEL_DATE_COLUMN], group[cls.CSV_AMOUNT_OF_UNITS_COLUMN].astype(float)))
         return cancellations
 
     @classmethod
