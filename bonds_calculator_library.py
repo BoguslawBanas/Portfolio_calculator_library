@@ -209,9 +209,9 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         self.tax_rate=tax_rate
         self.bond_types=self._load_bond_types(bond_types_json)
         today=datetime.today()
+        buy_path=self._resolve_buy_path(directory_path)
         interest_rate_path=os.path.join(directory_path, interest_rate_file)
         inflation_rate_path=os.path.join(directory_path, inflation_rate_file)
-        buy_path=os.path.join(directory_path, "buy.csv")
         cancel_path=os.path.join(directory_path, "cancel.csv")
 
         self.dataframe=pd.read_csv(buy_path)
@@ -310,13 +310,26 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0 if self.total_current_value else 0.0
             self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
-    @staticmethod
-    def count_tickers(directory_path: str) -> int:
+    @classmethod
+    def count_tickers(cls, directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
         size a progress bar before construction. Named count_tickers, not count_bonds, to match
         Stock/Commodity/Crypto's equivalent method - distribution_by_ticker already uses
         "ticker" as this library's generic per-holding term, even for a bond type code."""
-        return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
+        return len(pd.read_csv(cls._resolve_buy_path(directory_path)))
+
+    @classmethod
+    def _resolve_buy_path(cls, directory_path: str) -> str:
+        """Validates directory_path/buy.csv exist, raising this library's own established
+        clear-error ValueError convention instead of a raw FileNotFoundError straight from
+        pd.read_csv ([WinError 3]/[Errno 2]) — shared by __init__ and count_tickers, the two
+        entry points that read buy.csv directly (README Roadmap item)."""
+        if not os.path.isdir(directory_path):
+            raise ValueError(f"No such directory: {directory_path!r}")
+        buy_path=os.path.join(directory_path, "buy.csv")
+        if not os.path.exists(buy_path):
+            raise ValueError(f"No buy.csv found in {directory_path!r}")
+        return buy_path
 
     @classmethod
     def _load_bond_types(cls, bond_types_json: str=None) -> dict:

@@ -999,6 +999,24 @@ def test_bond_types_json_is_folded_into_the_cache_key(make_source_dir, make_tick
     assert default_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(default.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
 
 
+def test_nonexistent_directory_raises_clear_value_error(tmp_path):
+    # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
+    # pd.read_csv ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
+    # convention (README Roadmap item).
+    missing_dir=str(tmp_path/'does_not_exist')
+    with pytest.raises(ValueError, match="No such directory"):
+        PolishRetailBonds(missing_dir)
+
+
+def test_missing_buy_csv_raises_clear_value_error(tmp_path):
+    # An existing directory with no buy.csv used to surface as a raw FileNotFoundError straight
+    # from pd.read_csv instead of a clear error (README Roadmap item).
+    empty_dir=tmp_path/'bonds_without_buy_csv'
+    empty_dir.mkdir()
+    with pytest.raises(ValueError, match="buy.csv"):
+        PolishRetailBonds(str(empty_dir))
+
+
 def test_count_tickers_reads_row_count_without_computing(make_source_dir):
     start=date.today()-timedelta(days=1)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(

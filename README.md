@@ -257,7 +257,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 ## Roadmap
 
 - no de-duplication of `Currency` fetches across tickers that share a currency pair within one `Stock`/`Commodity`/`Crypto` construction — several holdings denominated in the same foreign currency each build their own `Currency(...)` and, without `cache_dir`, each hits yfinance separately for the same FX pair; fixing this well is nontrivial since each ticker's own start date can differ, so only worth doing if it's actually a bottleneck in practice
-- a nonexistent `directory_path` (or missing `buy.csv`/`sell.csv`) raises a raw `FileNotFoundError` (`[WinError 3]`/`[Errno 2]`) straight from `os.listdir`/`pd.read_csv` instead of the library's own established clear-error convention, like the `yfinance`-empty-history `ValueError`s already in place
 
 ## License
 
