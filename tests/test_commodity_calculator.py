@@ -26,6 +26,20 @@ def build_commodity(make_source_dir, csv_files, currency_to='usd', **kwargs):
     return Commodity(commodity_dir, currency_to, **kwargs)
 
 
+def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
+    # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
+    # real yfinance's behavior for an invalid futures ticker - must raise here, not silently
+    # produce a Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known
+    # commodities to real yfinance symbols, so monkeypatch in a throwaway entry pointing at a
+    # symbol FakeTicker treats as invalid, rather than one of the real (always-valid) ones.
+    monkeypatch.setitem(Commodity.TICKERS, 'unobtainium', 'INVALIDXYZ=F')
+    with pytest.raises(ValueError, match="INVALIDXYZ=F"):
+        build_commodity(make_source_dir, {
+            'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                       "2024-01-15,unobtainium,2,troy_ounce,0.02\n",
+        })
+
+
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     commodity=build_commodity(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
@@ -36,6 +50,18 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     expected=round(1.02*2*DAY_0_CLOSE, 2)
     assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
     assert commodity.distribution_by_ticker['gold']==pytest.approx(100.0)
+
+
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    commodity=build_commodity(make_source_dir, {
+        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                   "2024-01-15,gold,2,troy_ounce,0.02\n",
+    })
+    representation=repr(commodity)
+    assert representation.startswith("Commodity(")
+    assert f"invested={commodity.total_money_invested:.2f}" in representation
+    assert f"current_value={commodity.total_current_value:.2f}" in representation
+    assert f"revenue={commodity.total_revenue:.2f}" in representation
 
 
 def test_partial_sell_preserves_average_cost_basis(make_source_dir):
@@ -124,6 +150,39 @@ def test_copper_quote_unit_is_pounds_not_troy_ounce(make_source_dir):
     # 1 pound of copper converts to exactly 1.0 unit in copper's own quoted unit.
     expected=round(1.0*DAY_0_CLOSE, 2)
     assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
+    # A new commodity beyond the built-in TICKERS - tickers_json entries need both the yfinance
+    # ticker and the physical unit that ticker quotes a price per (quote_unit), since neither
+    # can be inferred for an arbitrary new symbol (README Roadmap item).
+    tickers_path=make_tickers_json(
+        {"tin": {"ticker": "TIN=F", "quote_unit": "pound"}}, filename='commodity_tickers.json',
+    )
+    commodity=build_commodity(
+        make_source_dir,
+        {'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+                    f"2024-01-15,tin,{Commodity.GRAMS_PER_POUND},gram,0.0\n"},
+        tickers_json=tickers_path,
+    )
+    assert commodity.tickers['tin']=='TIN=F'
+    # 1 pound of tin (recorded in grams) converts to exactly 1.0 unit in tin's own custom
+    # quote_unit ('pound'), same conversion logic UNIT_TO_GRAMS/QUOTE_UNIT_GRAMS use for the
+    # built-in symbols.
+    expected=round(1.0*DAY_0_CLOSE, 2)
+    assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
+    tickers_path=make_tickers_json({"gold": {"ticker": "CUSTOM-GOLD=F", "quote_unit": "troy_ounce"}})
+    build_commodity(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                    "2024-01-15,gold,2,troy_ounce,0.0\n"},
+        tickers_json=tickers_path,
+    )
+    assert 'CUSTOM-GOLD=F' in mock_yfinance.call_log
+    assert 'GC=F' not in mock_yfinance.call_log
 
 
 def test_unknown_unit_raises_value_error(make_source_dir):

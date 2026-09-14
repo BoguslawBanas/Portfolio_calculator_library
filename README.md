@@ -1,10 +1,10 @@
 # Portfolio Library
 
-A Python library for tracking the performance of an investment portfolio, combining stocks/ETFs and Polish retail treasury bonds into a single aggregated view. Price data comes from `yfinance`; every chart is built with `plotly`.
+A Python library for tracking the performance of an investment portfolio, combining stocks/ETFs, Polish retail treasury bonds, physical commodities, crypto, and bank accounts into a single aggregated view. Price data comes from `yfinance`; every chart is built with `plotly`.
 
 ## Features
 
-The library is organized as one class per module.
+The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
 
 ### 📈 `stock_calculator_library.Stock`
 
@@ -16,6 +16,9 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (`tickers.json`'s `currency` field, the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
+- an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
+- splitting the raw multi-ticker transactions dataframe by ticker is a single `groupby` pass, not `iterrows()`/`pd.concat` once per row — the latter is O(n²) in transaction count (each `concat` copies the whole growing per-ticker frame), the biggest single cost for a portfolio with many transactions once price history is cached
+- each ticker's lifetime invested total is computed once, inside the same pass that builds its DataFrame — not a second `Currency`/FX fetch and a second summation pass over the same rows beforehand
 
 ### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
@@ -24,15 +27,18 @@ Computes the value over time of Polish retail treasury bonds (*obligacje detalic
 - all eight bond types currently sold — `OTS` (3-month, fixed), `ROR`/`DOR` (1-/2-year, variable, monthly periods), `TOS` (3-year, fixed, compounding), `COI` (4-year, first year fixed then inflation-indexed), `ROS`/`ROD` (6-/12-year family bonds, inflation-indexed, compounding, not exchangeable), `EDO` (10-year retirement, inflation-indexed, compounding) — dispatched off each holding's bond code's three-letter prefix (e.g. `ROR` out of `ROR0927`), not a single letter
 - each type's period length/count, flat-payout-vs-compounding accrual, and rate source (fixed for life, external interest-rate history, or external inflation history) is one entry in `PolishRetailBonds.BOND_TYPES`, transcribed from the Ministry of Finance's own *listy emisyjne* (emission letters) for a real issuance of each type — supplied for review as `bonds_lists/*.pdf`, not bundled with the repo (see `.gitignore`)
 - `is_swapped` (per holding) discounts the cost basis by that type's *cena zamiany* — the price of buying the bond by exchanging a maturing predecessor's redemption proceeds instead of paying cash (0.10 zł/bond for every exchange-eligible type except `OTS`, priced at par; no effect at all for `ROS`/`ROD`, which aren't exchangeable) — reflected in `Profit` from day one, not as a lump sum tacked onto the final day
-- once a bond matures, its cost basis and unrealized value both drop to 0 — nothing is left held, the redemption proceeds became cash, which this library doesn't separately track — while its accrued interest freezes at the final value and persists in `Profit`/`total_revenue`/`distribution_by_ticker_revenue` forever after, since it was realized at redemption rather than lost; `total_money_invested`/`distribution_by_ticker` track the lifetime amount ever put into each bond/type, unreduced by since-matured holdings — the same split `Stock`'s own `total_money_invested` (lifetime) vs. `data[Money_invested]` (currently held) draws for a fully-sold ticker
-- interest always accrues on each bond's full nominal value (100 zł) regardless of `is_swapped`'s discount, and a flat 19% tax (`PolishRetailBonds.TAX_RATE`) is applied uniformly — neither the exact tax treatment nor the discount amount is stated in the *listy emisyjne* themselves (tax law and bank-quoted exchange pricing aren't issuance terms), so both are asserted as named constants rather than sourced per type
-- optional `currency_to` — every bond is issued in PLN (`PolishRetailBonds.NATIVE_CURRENCY`), converted via `Currency` the same way `Stock`/`Commodity`/`Crypto` convert their own native-currency prices; defaults to `'PLN'`, a no-op. Each day's own accrued interest is converted at *that day's own* FX rate before accumulating (the same convention `Stock` uses for dividends/realized profit — that event's own rate baked in once, not re-marked later), so a matured bond's frozen `Profit` stays frozen in `currency_to` terms too, instead of drifting with FX after redemption despite nothing further actually happening to it. `Portfolio` passes its own `currency` through automatically
-- optional `cancel.csv` — records that some or all of a holding (identified by its own `date`/`isin` pair, matching its `buy.csv` row) was *actually* redeemed early in real life, and how many units (`amount_of_units`) were redeemed on `cancel_date`. A partial cancellation splits the holding into independent tranches — the cancelled units stop accruing at `cancel_date` (paying out gross accrued interest minus that type's `early_redemption_fee`, floored at 0 so redeeming early never returns less than what was originally paid in) while the rest keep accruing normally; a holding can appear more than once in `cancel.csv` for several partial cancellations over time. `OTS`'s fee forfeits *all* interest accrued that period rather than a flat zł amount (`early_redemption_fee=float('inf')`, reduced to 0 by the same floor every other type uses); the other seven types' fees (0.50 zł/bond for `ROR` up to 3.00 zł/bond for `EDO`/`ROD`) are typical values, not transcribed from one specific real issuance the way the rest of `BOND_TYPES` is — treat them the same as `TAX_RATE`/`swap_discount`: asserted, worth double-checking (see Roadmap)
+- once a bond matures, its cost basis and unrealized value both drop to 0 — nothing is left held, the redemption proceeds became cash, which this library doesn't separately track — while its accrued interest freezes at the final value and persists in `Profit`/`total_revenue`/`distribution_by_ticker_revenue` forever after, since it was realized at redemption rather than lost. Unlike `Stock`'s `total_money_invested`/`distribution_by_ticker` (which stay at their lifetime, gross-ever-bought value even for a fully-sold ticker), `PolishRetailBonds`' own `total_money_invested`/`distribution_by_ticker` track only what's currently held per type — a fully-matured type drops to 0% in both, exactly mirroring its 0% in `distribution_by_ticker_current_value`
+- interest always accrues on each bond's full nominal value (100 zł) regardless of `is_swapped`'s discount, and a flat tax is applied uniformly — neither the exact tax treatment nor the discount amount is stated in the *listy emisyjne* themselves (tax law and bank-quoted exchange pricing aren't issuance terms), so both are asserted as named constants/defaults rather than sourced per type
+- optional `tax_rate` — % withholding tax applied uniformly to every bond's interest, defaulting to `PolishRetailBonds.TAX_RATE` (19%, the standard *podatek Belki* rate) — override it for a situation the flat default doesn't fit, e.g. `tax_rate=0.0` for a tax-exempt account (IKE/IKZE)
+- optional `bond_types_json` — a JSON file of `{code: {"swap_discount": <float>, "early_redemption_fee": <float>}}`, merged on top of `BOND_TYPES`' built-in `swap_discount`/`early_redemption_fee` per type (either field may be omitted to leave that one at its built-in value) — for a real issuance where those two asserted defaults don't hold; doesn't touch the taxonomy itself (`period_months`/`num_periods`/`compounding`/`rate_source`), which are issuance facts, not assertions
+- optional `currency_to` — every bond is issued in PLN (`PolishRetailBonds.NATIVE_CURRENCY`), converted via `Currency` the same way `Stock`/`Commodity`/`Crypto` convert their own native-currency prices; defaults to `'PLN'`, a no-op. Each day's own accrued interest is converted at *that day's own* FX rate before accumulating (the same convention `Stock` uses for dividends/realized profit — that event's own rate baked in once, not re-marked later), so a matured bond's frozen `Profit` stays frozen in `currency_to` terms too, instead of drifting with FX after redemption despite nothing further actually happening to it. `Portfolio` passes its own `currency_to` through automatically
+- optional `cancel.csv` — records that some or all of a holding (identified by its own `date`/`isin` pair, matching its `buy.csv` row) was *actually* redeemed early in real life, and how many units (`amount_of_units`) were redeemed on `cancel_date`. A partial cancellation splits the holding into independent tranches — the cancelled units stop accruing at `cancel_date` (paying out gross accrued interest minus that type's `early_redemption_fee`, floored at 0 so redeeming early never returns less than what was originally paid in) while the rest keep accruing normally; a holding can appear more than once in `cancel.csv` for several partial cancellations over time. `OTS`'s fee forfeits *all* interest accrued that period rather than a flat zł amount (`early_redemption_fee=float('inf')`, reduced to 0 by the same floor every other type uses); the other seven types' fees (0.50 zł/bond for `ROR` up to 3.00 zł/bond for `EDO`/`ROD`) are typical values, not transcribed from one specific real issuance the way the rest of `BOND_TYPES` is — treat them the same as `swap_discount`: asserted, worth double-checking against a current, authoritative source, and overridable via `bond_types_json` above for an issuance where the default doesn't hold
 - `Dividend` column, matching `Stock`'s own — 0 while a holding is still open (its accrued value lives entirely in the unrealized column below until then), then jumps once, at redemption (natural maturity or an earlier `cancel.csv` cancellation), to everything ever accrued for that holding and stays there — mirroring a bond's real cash flow (nothing paid until redemption, then it all is), unlike `Stock`'s per-payment `dividend.csv` rows
+- `_bond_dataframe`'s per-holding accrual is numpy end to end — plain arrays addressed by integer day-offset from the holding's own purchase date, not a `pd.Series` walked via label-based `.loc`/`reindex`/`ffill` — since every date in play (period boundaries, `cancel_date`/maturity, today) is always a whole number of days apart. Several times faster per holding, more so the longer its span (~3x for a 1-year `ROR`, ~6x for a 10-year `EDO` in an internal benchmark)
 
 ### 💱 `currency_calculator_library.Currency`
 
-Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone) to convert foreign-currency instruments to a base currency. Same-currency conversions short-circuit to a flat 1.0 rate — no network call needed.
+Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone) to convert foreign-currency instruments to a base currency. Same-currency conversions short-circuit to a flat 1.0 rate — no network call needed. A currency pair `yfinance` doesn't quote raises `ValueError` at construction time instead of silently `ffill()`/`bfill()`ing into a column of all-`NaN`.
 
 ### 📊 `portfolio_calculator_library.Portfolio`
 
@@ -40,7 +46,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 
 - builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
 - allocation by ticker/directory/currency, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
-- `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency` (the single currency `self.data`/totals are already converted to and summed in)
+- `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency_to` (the single currency `self.data`/totals are already converted to and summed in)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
@@ -48,6 +54,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
 - optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
 - optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `PolishRetailBonds`/`BankAccount` are left out — both are already single-currency with no conversion step to opt out of
+- optional `commodity_tickers_json`/`crypto_tickers_json` — passed straight through to every `'commodities'`/`'crypto'` source's own `tickers_json` (see `Commodity`/`Crypto` above), never required unlike `tickers_json` above
 
 ### 💾 `cache_library.DiskCache`
 
@@ -82,6 +89,9 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - no dividends — `Profit` is unrealized plus realized gain
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`
+- same construction-time `ValueError` as `Stock` if `yfinance` returns no price history for a symbol's futures ticker
+- optional `tickers_json` — a JSON file of `{symbol: {"ticker": <yfinance futures ticker>, "quote_unit": <"troy_ounce"/"pound"/"gram">}}`, merged on top of the small built-in `TICKERS`/`QUOTE_UNIT_GRAMS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another commodity without editing the library source
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) symbol split as `Stock`
 
 ### ₿ `crypto_calculator_library.Crypto`
 
@@ -90,19 +100,24 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - prices via `yfinance` USD-quoted tickers (`BTC-USD`, `ETH-USD`, ...), converted to the target currency via `Currency`
 - full or partial sells, tracked against a running average cost basis, same as `Stock`/`Commodity`
 - no dividends — `Profit` is unrealized plus realized gain
+- same construction-time `ValueError` as `Stock`/`Commodity` if `yfinance` returns no price history for a symbol's ticker
 - units rounded to 8 decimal places (vs. `Commodity`'s 4) for fractional holdings
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- optional `tickers_json` — a JSON file of `{symbol: <yfinance ticker>}`, merged on top of the small built-in `TICKERS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another coin without editing the library source
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) symbol split as `Stock`/`Commodity`
+- same "computed once, inside the same pass" lifetime-invested total as `Stock` — no second `Currency`/FX fetch or summation pass
 
 ### 🏛️ `bank_account_calculator_library.BankAccount`
 
-Turns a set of deposit/withdrawal transactions into a daily balance/interest DataFrame. Like `PolishRetailBonds`, there's no `yfinance` fetch and no `Currency` conversion — a bank balance isn't traded or quoted, and (same known limitation as `PolishRetailBonds`, see Roadmap) everything is assumed to already be in one currency.
+Turns a set of deposit/withdrawal transactions into a daily balance/interest DataFrame. Like `PolishRetailBonds` used to be, there's no `yfinance` fetch and no `Currency` conversion — a bank balance isn't traded or quoted, and (unlike `PolishRetailBonds`, which now converts via its own `currency_to`) everything here is still assumed to already be in one currency.
 
 - fixed-rate accounts (a flat annual %) or variable-rate accounts (a spread added to a rate history CSV, `interest_rate.csv` — daily `date,rate` rows, forward-filled for any gaps, a finer-grained format than `PolishRetailBonds`' monthly one)
 - interest compounds via periodic capitalization (`capitalization_months`) — accrued-but-not-yet-capitalized interest earns no further interest until it's folded into the balance, so this is a genuinely sequential day-by-day accrual, unlike every other calculator's mostly-vectorized computation
 - multiple accounts can share one source directory (`account` column), same as `Stock`'s per-ticker/`Commodity`'s per-symbol split
 - tax on interest defaults to 19% (`BankAccount.DEFAULT_TAX`), overridable per account via an optional `tax` column
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) account split as `Stock`/`Commodity`/`Crypto`
 
 ## Project structure
 
@@ -118,6 +133,7 @@ Portfolio_calculator_library/
 ├── plot_library.py                      # Plot
 ├── cache_library.py                     # DiskCache
 ├── bank_account_calculator_library.py   # BankAccount
+├── calculator_mixins.py                 # shared merge()/__repr__/_split_by_ticker()/count_tickers() behavior
 ├── __init__.py                          # re-exports the classes above at the package root
 ├── tests/                               # pytest suite — see Testing below
 └── LICENSE
@@ -171,14 +187,14 @@ sources = {
 # the day, so re-running later today skips both the yfinance calls and the recomputation.
 # force_refresh=True ignores the cache for this one run and refreshes it with fresh data —
 # a one-off cold start, e.g. Portfolio(sources, ..., cache_dir=".portfolio_cache", force_refresh=True).
-portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd", cache_dir=".portfolio_cache")
+portfolio = Portfolio(sources, tickers_json="tickers.json", currency_to="usd", cache_dir=".portfolio_cache")
 
 # To wipe the cache entirely (e.g. to reclaim space from stale/orphaned entries) instead of
 # forcing a single refresh:
 # from Portfolio_calculator_library.cache_library import DiskCache
 # DiskCache(".portfolio_cache").clear()
 
-print(f"Total invested: {portfolio.total_invested_money:.2f}")
+print(f"Total invested: {portfolio.total_money_invested:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
 print(f"Total revenue: {portfolio.total_revenue:.2f}")
 print(portfolio.distribution_by_ticker)                # allocation by amount invested
@@ -187,13 +203,13 @@ print(portfolio.distribution_by_ticker_revenue)         # allocation by share of
 
 # distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
 # position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by
-# ticker - always populated, no flag needed. Independent of currency="usd" above, which is only
+# ticker - always populated, no flag needed. Independent of currency_to="usd" above, which is only
 # what everything gets CONVERTED to for self.data/totals, not what it natively IS.
 print(portfolio.distribution_by_currency)
 
 # include_native_currency=True (pass it to Portfolio(...) above) additionally populates
 # portfolio.native_data/native_currency per Stock/Commodity/Crypto ticker or symbol, isolating
-# that instrument's own performance from FX movement against currency="usd" above:
+# that instrument's own performance from FX movement against currency_to="usd" above:
 # print(portfolio.native_currency["SPY"])                  # e.g. "usd"
 # print(portfolio.native_data["SPY"][Portfolio.PROFIT_COLUMN].iloc[-1])
 
@@ -210,7 +226,7 @@ plot.allocation_comparison_plot(by="ticker")
 
 ## Testing
 
-`tests/` holds an automated `pytest` suite — one module per calculator (`test_stock_calculator.py`, `test_bonds_calculator.py`, `test_commodity_calculator.py`, `test_crypto_calculator.py`, `test_currency_calculator.py`, `test_cache_library.py`) plus `test_portfolio_calculator.py` for the multi-source integration layer. Every test runs against synthetic, fixed CSV data written to a temp directory — `yfinance.Ticker` is monkeypatched suite-wide (see `tests/conftest.py`) to a deterministic fake price series, so the suite needs no network access and never depends on real market data.
+`tests/` holds an automated `pytest` suite — one module per calculator (`test_stock_calculator.py`, `test_bonds_calculator.py`, `test_commodity_calculator.py`, `test_crypto_calculator.py`, `test_bank_account_calculator.py`, `test_currency_calculator.py`, `test_cache_library.py`) plus `test_portfolio_calculator.py` for the multi-source integration layer. Every test runs against synthetic, fixed CSV data written to a temp directory — `yfinance.Ticker` is monkeypatched suite-wide (see `tests/conftest.py`) to a deterministic fake price series, so the suite needs no network access and never depends on real market data.
 
 ```bash
 pip install -e ".[test]"   # or: pip install pytest
@@ -233,20 +249,20 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 ## Use cases
 
-- tracking your own investment portfolio across stocks, ETFs, and treasury bonds
+- tracking your own investment portfolio across stocks, ETFs, treasury bonds, commodities, crypto, and bank accounts
 - comparing performance across brokers/accounts by treating each as a separate source directory
 - computing IRR and rolling returns instead of relying on a broker's own reporting
 - building custom charts or reports on top of one merged portfolio DataFrame
 
 ## Roadmap
 
-- provide to a portfolio condtructor a json file with tax types and values
-- `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
-- add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
-- `stock_calculator_library.py`, `portfolio_calculator_library.py`, `plot_library.py`, and `currency_calculator_library.py` still open with a module docstring calling themselves "a sketch, not wired into the rest of the codebase" — leftover from an earlier scaffolding phase; all four are the actual production implementation `__init__.py` re-exports, and the docstrings should say so
-- `Commodity`/`Crypto`'s `TICKERS` dicts (5-6 symbols each) are hardcoded class constants — unlike `Stock`'s JSON-driven ticker mapping, there's no way to track another commodity/crypto symbol without editing the library source
-- `Stock`/`Commodity`/`Crypto`/`Currency` don't validate that `yfinance` actually returned price/FX history for a ticker/currency pair — an invalid ticker, or a pair `yfinance` doesn't quote, silently `ffill()`/`bfill()`s into a column of `NaN` instead of raising a clear error at construction time
-- no `__repr__` on `Portfolio`/`Stock`/etc. — printing one in a REPL/notebook gives the default `<...object at 0x...>` instead of a quick invested/current-value/revenue summary, which matters for a library also meant for interactive analysis
+- `Portfolio._absorb_source` overwrites rather than accumulates (`target_ticker[key]=amount` instead of `+=`) when the same ticker/ISIN appears in more than one source directory — silently drops a source's contribution to `distribution_by_ticker`/`distribution_by_ticker_current_value`/`distribution_by_ticker_revenue` (and the matching `distribution_by_currency*` breakdowns), even though `total_money_invested`/`total_current_value`/`total_revenue` themselves stay correct; this breaks the advertised "comparing performance across brokers/accounts by treating each as a separate source directory" use case whenever the same holding is split across two sources
+- division-by-zero guards on `distribution_by_ticker_current_value`/`distribution_by_ticker_revenue` are inconsistent across the five asset classes: `Stock`/`Crypto` are unguarded (silent `NaN` plus a `RuntimeWarning` when total current value or total revenue is exactly zero), `Commodity`/`BankAccount` guard to `0.0`, and `PolishRetailBonds` guards by omitting the key entirely — worth picking one behavior and applying it everywhere
+- `BankAccount._compute_data`'s deposit/withdrawal accumulation loop still uses `.iterrows()`/`.loc[label]` — the same O(n), slow-per-row pattern already replaced with numpy arrays in `Stock`/`Commodity`/`Crypto`'s transaction loops and in `BankAccount`'s own interest-accrual loop right below it
+- `PolishRetailBonds._load_cancellations` still uses `.iterrows()` over `cancel.csv` — low-impact in practice since that file is typically small, but the same pattern
+- no de-duplication of `Currency` fetches across tickers that share a currency pair within one `Stock`/`Commodity`/`Crypto` construction — several holdings denominated in the same foreign currency each build their own `Currency(...)` and, without `cache_dir`, each hits yfinance separately for the same FX pair; fixing this well is nontrivial since each ticker's own start date can differ, so only worth doing if it's actually a bottleneck in practice
+- `tax_rate`/`bond_types_json` overrides have no type/shape validation — a malformed value fails deep inside arithmetic with a cryptic error instead of a clear one raised at construction time
+- a nonexistent `directory_path` (or missing `buy.csv`/`sell.csv`) raises a raw `FileNotFoundError` (`[WinError 3]`/`[Errno 2]`) straight from `os.listdir`/`pd.read_csv` instead of the library's own established clear-error convention, like the `yfinance`-empty-history `ValueError`s already in place
 
 ## License
 

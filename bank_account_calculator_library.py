@@ -1,8 +1,8 @@
 """
 Class-based bank account calculator, following the same pattern as
 bonds_calculator_library.PolishRetailBonds: no yfinance fetch and no Currency conversion (a
-bank account balance isn't traded/quoted, and — same known limitation as PolishRetailBonds,
-see the README Roadmap — everything here is assumed to already be in one currency). What makes
+bank account balance isn't traded/quoted, and — unlike PolishRetailBonds, which now converts
+via its own currency_to — everything here is still assumed to already be in one currency). What makes
 this different from every other calculator is that daily interest compounds onto a balance
 that only grows in discrete jumps (deposits/withdrawals, and periodic interest
 capitalization) rather than continuously — so unlike Stock/Commodity/Crypto's per-transaction
@@ -17,9 +17,10 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
 
-class BankAccount:
+class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). No
     # Dividend/Realized_profit columns — same as PolishRetailBonds, interest accrues into
@@ -33,7 +34,10 @@ class BankAccount:
     SOURCE_TYPE_COLUMN='state'
 
     # --- Input: columns read from deposit.csv / withdrawal.csv. ---
-    CSV_ACCOUNT_COLUMN='account'
+    # Named CSV_TICKER_COLUMN (its value is still 'account'), matching Stock/PolishRetailBonds/
+    # Commodity/Crypto's own CSV_TICKER_COLUMN - this class still populates
+    # self.distribution_by_ticker with account names, same generic term as every other class.
+    CSV_TICKER_COLUMN='account'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_COLUMN='amount'
     CSV_RATE_TYPE_COLUMN='rate_type'
@@ -47,7 +51,7 @@ class BankAccount:
     def __init__(self, directory_path: str, interest_rate_file: str='interest_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """directory_path: a directory holding deposit.csv (required) and withdrawal.csv
         (optional), one row per transaction. Multiple accounts can share a directory,
-        distinguished by CSV_ACCOUNT_COLUMN. Every deposit.csv row also carries that account's
+        distinguished by CSV_TICKER_COLUMN. Every deposit.csv row also carries that account's
         rate_type ('fixed'/'variable'), rate (the fixed annual %, or the spread added to
         interest_rate_file's base rate when variable), capitalization_months (how often accrued
         interest is folded into the interest-bearing balance), and optional tax (%, defaults to
@@ -76,14 +80,14 @@ class BankAccount:
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
 
-        dataframes=self._split_by_account(self.dataframe)
+        dataframes=self._split_by_ticker(self.dataframe)
 
         dataframes_2=list()
         money_invested_by_account=dict()
         current_value_by_account=dict()
         revenue_by_account=dict()
         for df in dataframes:
-            account=df[self.CSV_ACCOUNT_COLUMN].iloc[0]
+            account=df[self.CSV_TICKER_COLUMN].iloc[0]
             computed=self._compute_data(df, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
@@ -108,18 +112,6 @@ class BankAccount:
             self.distribution_by_ticker_revenue[account]=(value/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
         self.data=self.merge(dataframes_2)
-
-    @staticmethod
-    def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-account DataFrames by date into a single aggregate DataFrame.
-        Equivalent of Stock.merge/Commodity.merge."""
-        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
-
-    @classmethod
-    def count_accounts(cls, directory_path: str) -> int:
-        """Number of distinct accounts in a source directory's deposit.csv, without computing
-        any interest — lets a caller (e.g. Portfolio) size a progress bar before construction."""
-        return cls._load_sources(directory_path)[cls.CSV_ACCOUNT_COLUMN].nunique()
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
@@ -146,22 +138,6 @@ class BankAccount:
 
         return pd.concat(dataframes)
 
-    @classmethod
-    def _split_by_account(cls, dataframe: pd.DataFrame) -> list:
-        dataframes=dict()
-        for _, row in dataframe.iterrows():
-            if dataframes.get(row[cls.CSV_ACCOUNT_COLUMN]) is None:
-                dataframes[row[cls.CSV_ACCOUNT_COLUMN]]=pd.DataFrame()
-            dataframes[row[cls.CSV_ACCOUNT_COLUMN]]=pd.concat([dataframes[row[cls.CSV_ACCOUNT_COLUMN]], row], axis=1)
-
-        list_of_dataframes=list(dataframes.values())
-        for i in range(len(list_of_dataframes)):
-            list_of_dataframes[i]=list_of_dataframes[i].transpose()
-            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
-            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
-
-        return list_of_dataframes
-
     def _load_interest_rate_data(self, end_date: datetime) -> pd.DataFrame:
         if self._interest_rate_data is None:
             rate_df=pd.read_csv(self._interest_rate_path)
@@ -172,7 +148,7 @@ class BankAccount:
         return self._interest_rate_data
 
     def _compute_data(self, dataframe: pd.DataFrame, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
-        account=dataframe[self.CSV_ACCOUNT_COLUMN].iloc[0]
+        account=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
         start_date=dataframe.index.min()
         end_date=datetime.today()
 

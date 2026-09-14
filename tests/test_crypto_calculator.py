@@ -10,6 +10,20 @@ def build_crypto(make_source_dir, csv_files, currency_to='usd', **kwargs):
     return Crypto(crypto_dir, currency_to, **kwargs)
 
 
+def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
+    # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
+    # real yfinance's behavior for an invalid ticker - must raise here, not silently produce a
+    # Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known coins to
+    # real yfinance symbols, so monkeypatch in a throwaway entry pointing at a symbol FakeTicker
+    # treats as invalid, rather than one of the real (always-valid) ones.
+    monkeypatch.setitem(Crypto.TICKERS, 'notarealcoin', 'INVALIDCOIN-USD')
+    with pytest.raises(ValueError, match="INVALIDCOIN-USD"):
+        build_crypto(make_source_dir, {
+            'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                       "2024-01-15,notarealcoin,0.5,40000.0,0.01\n",
+        })
+
+
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     crypto=build_crypto(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
@@ -19,6 +33,46 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     expected=round(1.01*0.5*40000.0, 2)
     assert data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
     assert crypto.distribution_by_ticker['bitcoin']==pytest.approx(100.0)
+
+
+def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
+    # A new coin beyond the built-in TICKERS - tickers_json is a plain {symbol: yfinance
+    # ticker} mapping, simpler than Commodity's (no per-symbol quote_unit needed, since every
+    # crypto ticker here is directly USD-quoted per whole coin) (README Roadmap item).
+    tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
+    crypto=build_crypto(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                    "2024-01-15,notarealcoin,0.5,40000.0,0.01\n"},
+        tickers_json=tickers_path,
+    )
+    assert crypto.tickers['notarealcoin']=='NRC-USD'
+    expected=round(1.01*0.5*40000.0, 2)
+    assert crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
+    tickers_path=make_tickers_json({"bitcoin": "CUSTOM-BTC-USD"})
+    build_crypto(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                    "2024-01-15,bitcoin,0.5,40000.0,0.01\n"},
+        tickers_json=tickers_path,
+    )
+    assert 'CUSTOM-BTC-USD' in mock_yfinance.call_log
+    assert 'BTC-USD' not in mock_yfinance.call_log
+
+
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    crypto=build_crypto(make_source_dir, {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,0.5,40000.0,0.01\n",
+    })
+    representation=repr(crypto)
+    assert representation.startswith("Crypto(")
+    assert f"invested={crypto.total_money_invested:.2f}" in representation
+    assert f"current_value={crypto.total_current_value:.2f}" in representation
+    assert f"revenue={crypto.total_revenue:.2f}" in representation
 
 
 def test_units_rounded_to_eight_decimals_not_stocks_four(make_source_dir):

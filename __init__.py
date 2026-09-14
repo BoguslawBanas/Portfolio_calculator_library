@@ -1,7 +1,7 @@
 """
 Portfolio_calculator_library — tracks the performance of an investment portfolio combining
-stocks/ETFs, Polish retail treasury bonds, commodities, and crypto into a single aggregated
-view. See README.md for the full usage example.
+stocks/ETFs, Polish retail treasury bonds, commodities, crypto, and bank accounts into a single
+aggregated view. See README.md for the full usage example.
 
 Re-exports the library's public classes at the package root, so
     from Portfolio_calculator_library import Portfolio, Plot

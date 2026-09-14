@@ -1,13 +1,9 @@
 """
-Class-based alternative to stock_calculator_library.py — a sketch, not wired into the rest
-of the codebase, built the same way test.py wraps portfolio_calculator_library.py: the
-module's free functions become methods on a Stock class, and the constructor does the work
-that used to require calling get_data_from_isin by hand — it fetches the FX data and the
-price history and computes the final Money_invested/Profit/Dividend DataFrame right away,
-caching the result on self.data.
-
-Uses a plain (non-relative) import of currency_calculator_library, same assumption test.py
-makes: run as a standalone script from the repo root rather than as part of a package.
+Class-based stock/ETF calculator: given a directory of buy/sell/dividend transactions plus a
+tickers.json mapping each ISIN to its yfinance ticker and native currency, the constructor
+fetches the FX data and price history and computes the final Money_invested/Profit/Dividend
+DataFrame right away, caching the result on self.data. Every other asset-type calculator in
+this package (PolishRetailBonds, Commodity, Crypto, BankAccount) follows the same shape.
 """
 
 import os
@@ -19,9 +15,10 @@ import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import Currency
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
 
-class Stock:
+class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -46,8 +43,12 @@ class Stock:
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
-        """progress_callback: optional zero-arg callback invoked once per ticker, right after that
+    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+        """tickers_json: path to the JSON file mapping each ISIN to {"ticker": <yfinance
+        symbol>, "currency": <instrument currency>} - same shape/role as Commodity/Crypto's own
+        tickers_json parameter, just required here (rather than optional) since Stock has no
+        built-in ticker registry of its own to fall back on.
+        progress_callback: optional zero-arg callback invoked once per ticker, right after that
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes time.
         cache_dir: optional directory to cache each ticker's computed DataFrame in, keyed by
@@ -75,35 +76,29 @@ class Stock:
         self.native_data=dict()
         self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
-        self.tickers=self._load_tickers_json(stock_data)
+        self.tickers=self._load_tickers_json(tickers_json)
         self._cache_dir=cache_dir
 
-        dataframes=self._split_by_isin(self.dataframe)
+        dataframes=self._split_by_ticker(self.dataframe)
 
-        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
-        # which derives it the same way) — recompute it here instead of assuming one exists.
-        money_invested_by_ticker=dict()
-        for df in dataframes:
-            currency=Currency(self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, df.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
-
-            money_invested=0.0
-            for idx, row in df.iterrows():
-                if row[self.SOURCE_TYPE_COLUMN]=='buy':
-                    money_invested+=round((row[self.CSV_PENALTY_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
-
-            money_invested_by_ticker[df[self.CSV_TICKER_COLUMN].iloc[0]]=money_invested
-            self.total_money_invested+=money_invested
-
+        # A buy row's money invested depends on that ticker's own FX rate (see _compute_data),
+        # so - same pattern Commodity._compute_data already uses - _compute_data itself returns
+        # the lifetime buy total alongside its DataFrame, computed in the very same pass, rather
+        # than a second iterrows() loop plus a second Currency(...) construction/fetch here
+        # recomputing the identical figure a second time.
         dataframes_2=list()
+        money_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
-            self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
-            ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
+            ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
-            computed=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
+
+            money_invested_by_ticker[ticker]=total_buy_invested
+            self.total_money_invested+=total_buy_invested
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -120,11 +115,14 @@ class Stock:
                 if ticker_currency.upper()==currency_to.upper():
                     self.native_data[ticker]=computed
                 else:
-                    self.native_data[ticker]=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
                 self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
                 progress_callback()
+
+        for ticker, value in money_invested_by_ticker.items():
+            self.distribution_by_ticker[ticker]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
 
         for ticker, value in current_value_by_ticker.items():
             self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0
@@ -135,45 +133,20 @@ class Stock:
         self.data=self.merge(dataframes_2)
 
     @staticmethod
-    def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
-        """Equivalent of get_ticker_currency. Only works if all rows share the same ticker/isin."""
+    def ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
+        """Looks up a single ticker's declared currency from tickers_json. Only works if every
+        row in dataframe shares the same ticker/isin - named ticker_currency, not
+        get_ticker_currency, matching the rest of this library's public methods, none of which
+        use a get_ prefix (merge, count_tickers, ...)."""
         with open(path_to_json_file, "r") as f:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']
         return currency
 
     @staticmethod
-    def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
-        Equivalent of merge_dataframes(dataframes)."""
-        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
-
-    @staticmethod
     def _load_tickers_json(tickers_json: str) -> dict:
         with open(tickers_json, 'r') as f:
             return json.load(f)
-
-    @classmethod
-    def _split_by_isin(cls, dataframe: pd.DataFrame) -> list:
-        dataframes=dict()
-        for _, row in dataframe.iterrows():
-            if dataframes.get(row[cls.CSV_TICKER_COLUMN]) is None:
-                dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.DataFrame()
-            dataframes[row[cls.CSV_TICKER_COLUMN]]=pd.concat([dataframes[row[cls.CSV_TICKER_COLUMN]], row], axis=1)
-
-        list_of_dataframes=list(dataframes.values())
-        for i in range(len(list_of_dataframes)):
-            list_of_dataframes[i]=list_of_dataframes[i].transpose()
-            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
-            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
-
-        return list_of_dataframes
-
-    @classmethod
-    def count_tickers(cls, directory_path: str) -> int:
-        """Number of distinct tickers/ISINs in a source directory, without fetching any price
-        data — lets a caller (e.g. Portfolio) size a progress bar before construction."""
-        return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
@@ -193,23 +166,39 @@ class Stock:
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+        """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
+        amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
+        distribution_by_ticker/total_money_invested. Returned from here (same pattern
+        Commodity._compute_data already uses) instead of recomputed independently in __init__
+        via a second iterrows() pass and a second Currency(...) fetch for the same ticker/date
+        range - this loop already computes it below while building the full DataFrame."""
         start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            cache_key=DiskCache.make_key('stock', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
+            # 'stock-v2': bumped from 'stock' when this method started returning a (dataframe,
+            # total_buy_invested) tuple instead of a bare DataFrame - the isinstance check below
+            # guards a cache entry from the older, bare-DataFrame format the same way
+            # Commodity/PolishRetailBonds guard their own tuple cache formats.
+            cache_key=DiskCache.make_key('stock-v2', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
-                if cached is not None:
+                if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
         currency=Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        # yfinance returns an empty DataFrame (not an error) for an invalid/delisted ticker,
+        # rather than raising - left unchecked, all_days.join(ticker_data) below would silently
+        # produce a Close column of all-NaN that ffill() can't fill from anything, rather than
+        # failing loudly at construction time (README Roadmap item).
+        if ticker_data.empty:
+            raise ValueError(f"yfinance returned no price history for ticker {ticker_name!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
         ticker_data.index=ticker_data.index.tz_localize(None).normalize()
 
@@ -265,6 +254,7 @@ class Stock:
 
         running_units=0.0
         running_money_invested=0.0
+        total_buy_invested=0.0
 
         for i in range(n):
             pos=position[i]
@@ -281,6 +271,7 @@ class Stock:
 
                 running_units+=units
                 running_money_invested+=money_invested
+                total_buy_invested+=money_invested
             elif row_state=='sell':
                 units_sold=round(amount[i], 4)
                 if units_sold>running_units+1e-9:
@@ -321,7 +312,8 @@ class Stock:
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
+        result=(data, total_buy_invested)
         if cache is not None:
-            cache.set(cache_key, data)
+            cache.set(cache_key, result)
 
-        return data
+        return result

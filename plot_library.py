@@ -1,18 +1,16 @@
 """
-Class-based alternative wiring plot_library.py's chart logic to a Portfolio instance (see
-portfolio_calculator_library.py) — a sketch, not wired into the rest of the codebase. Unlike
-the first version of this file, it does not import plot_library: each method's plotly code is
-inlined here, driven by whatever DataFrame/columns the Portfolio instance already has
-(computing them via Portfolio's own methods first if they aren't there yet). Built on plotly
-alone (not matplotlib) so every chart type - including the candlestick - comes from one library.
+Class-based charting layer wiring plotly to a Portfolio instance (see
+portfolio_calculator_library.py): each method's plotly code is driven by whatever
+DataFrame/columns the Portfolio instance already has, computing them via Portfolio's own
+methods first if they aren't there yet. Built on plotly alone (not matplotlib) so every chart
+type - including the candlestick - comes from one library.
 """
 
 import pandas as pd
 import plotly.graph_objects as go
 from .portfolio_calculator_library import Portfolio
 
-# Colorblind-safe categorical palette (fixed order, never cycled/generated) — same values as
-# plot_library.py's, duplicated here since this file intentionally doesn't import that module.
+# Colorblind-safe categorical palette (fixed order, never cycled/generated).
 CATEGORICAL_COLORS=['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
 COLOR_GOOD='#0ca30c'
 COLOR_CRITICAL='#d03b3b'
@@ -49,12 +47,13 @@ class Plot:
     ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY='directory'
 
     def __init__(self, portfolio: Portfolio):
-        """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py). If it
-        hasn't been merged yet (self.portfolio not set), merge it now so every plot method below
-        has a DataFrame to draw from."""
+        """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py) that
+        has already had calculate_irr()/resample()/calculate_money_earned_between_dates_column()
+        called on it at least once - whichever one a caller needs first, since each of them sets
+        portfolio.portfolio (the working DataFrame money_plot/performance_plot/
+        period_return_bar_plot read from) as a side effect. See the README's Usage example,
+        which always calls calculate_irr() right before constructing a Plot."""
         self.portfolio=portfolio
-        # if not hasattr(self.portfolio, 'portfolio'):
-        #     self.portfolio.portfolio=Portfolio.merge(self.portfolio.dataframes)
 
     @staticmethod
     def _render(fig: go.Figure, path_to_save_fig: str=None):

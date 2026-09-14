@@ -1,11 +1,9 @@
 """
-Class-based alternative to portfolio_calculator_library.py — a sketch, not wired
-into the rest of the codebase. The original module stays a set of free functions
-that each take a DataFrame; here the same logic is grouped behind a Portfolio
-class whose constructor builds each source's Stock/PolishRetailBonds/Commodity/
-Crypto/BankAccount instance once and merges their per-instrument DataFrames, and
-the rest of the methods operate on the state the constructor built instead of
-re-taking a dataframe argument every call.
+Class-based Portfolio calculator: combines one or more Stock/PolishRetailBonds/Commodity/
+Crypto/BankAccount sources into a single portfolio-level DataFrame. The constructor builds
+each source's own instance once and merges their per-instrument DataFrames, and the rest of
+the methods (calculate_irr, resample, ...) operate on the state the constructor already built
+instead of re-taking a dataframe argument every call.
 """
 
 from datetime import datetime
@@ -18,9 +16,10 @@ from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin
 
 
-class Portfolio:
+class Portfolio(ReprMixin):
     # --- Output: self.data contract + Portfolio-specific extras. The first three form the
     # shared DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -36,22 +35,9 @@ class Portfolio:
     TOTAL_MONEY_COLUMN='Total_money'
     CASHFLOW_COLUMN='Cashflow'
 
-    # --- Leftover from a raw-CSV ingestion path (_load_sources/_read_directory/_split_by_isin/
-    # _replace_isin_with_ticker/get_dataframe_currency/get_earliest_date) that has since been
-    # removed as dead code: __init__ never builds a combined dataframe of its own to tag/split -
-    # it hands each sources dict entry straight to the matching Stock/PolishRetailBonds/
-    # Commodity/Crypto/BankAccount constructor, which does its own loading. Nothing in this file
-    # reads these four constants anymore (each asset-type module defines its own
-    # SOURCE_TYPE_COLUMN/CSV_TICKER_COLUMN instead - see e.g. Stock's) - kept only in case a
-    # future raw-ingestion path resurrects them; safe to delete otherwise. ---
-    SOURCE_TYPE_COLUMN='type'          # asset type ('stock'/'bonds'/...), from the sources dict
-    TRANSACTION_STATE_COLUMN='state'   # per-row state ('buy'/'sell'/...), from the CSV filename
-    CSV_TICKER_COLUMN='isin'
-    CSV_DATE_COLUMN='date'
-
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
         """sources: a dict mapping each directory path to the asset type it holds - one of
         VALID_SOURCE_TYPES ('stock', 'bonds', 'commodities', 'crypto', 'bank_account'); any
         other value raises ValueError immediately, before any source is constructed. Each
@@ -63,10 +49,22 @@ class Portfolio:
         (see CLAUDE.md / stock_calculator_library) mapping each ISIN to {"ticker": <yfinance
         symbol>, "currency": <instrument currency>}, passed straight through to Stock.
 
+        commodity_tickers_json/crypto_tickers_json: optional, passed straight through to every
+        Commodity/Crypto source's own tickers_json (see their docstrings) - lets a caller track
+        a commodity/crypto symbol beyond each class's small built-in TICKERS dict without
+        editing the library source (README Roadmap item). Unlike tickers_json above, never
+        required - Commodity/Crypto both work with no configuration via their built-in TICKERS.
+
+        currency_to: target currency every source is converted to and summed in (self.data and
+        every total_*/distribution_by_*_current_value/_revenue figure) - defaults to 'USD'.
+        Passed straight through as each Stock/PolishRetailBonds/Commodity/Crypto source's own
+        currency_to, matching their parameter name (BankAccount has none - see its own README
+        entry on the single-currency limitation).
+
         self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
         allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
         a Polish bond's 'PLN', ...) rather than by ticker/directory - answers "how much of my
-        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency below
+        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency_to above
         (the single currency self.data itself is already converted to and summed in).
 
         cache_dir: optional directory to cache every source's computed DataFrame in — see
@@ -83,12 +81,12 @@ class Portfolio:
 
         include_native_currency: when True, Stock/Commodity/Crypto sources also compute each
         ticker/symbol's DataFrame in its own native currency, isolated from FX movement
-        against currency — collected into self.native_data/self.native_currency (keyed by
+        against currency_to — collected into self.native_data/self.native_currency (keyed by
         ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
         of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
-        currency above — see README Roadmap), but doesn't yet expose an include_native_currency
-        of its own the way Stock/Commodity/Crypto do, so there's no per-holding native-currency
-        DataFrame for Portfolio to collect here."""
+        currency_to above), but doesn't yet expose an include_native_currency of its own the way
+        Stock/Commodity/Crypto do, so there's no per-holding native-currency DataFrame for
+        Portfolio to collect here."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
@@ -97,7 +95,7 @@ class Portfolio:
         self.distribution_by_ticker_revenue=dict()
         # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
         # currency field for Stock, each source's fixed QUOTE_CURRENCY/NATIVE_CURRENCY for
-        # Commodity/Crypto/PolishRetailBonds) - not by currency (this constructor's target
+        # Commodity/Crypto/PolishRetailBonds) - not by currency_to (this constructor's target
         # currency, what self.data is already summed in), so this answers "how much of my
         # portfolio is actually USD-denominated vs. EUR vs. PLN" regardless of what everything
         # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
@@ -107,7 +105,7 @@ class Portfolio:
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
-        self.total_invested_money=0.0
+        self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
@@ -136,21 +134,21 @@ class Portfolio:
             elif type=='crypto':
                 total_units+=Crypto.count_tickers(dir)
             elif type=='bank_account':
-                total_units+=BankAccount.count_accounts(dir)
+                total_units+=BankAccount.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    source=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='bonds':
-                    source=PolishRetailBonds(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -163,7 +161,7 @@ class Portfolio:
         # ZeroDivisionError (these are plain Python floats, not numpy - an unguarded division
         # raises rather than silently producing NaN).
         for key, value in self.distribution_by_directory.items():
-            self.distribution_by_directory[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -172,7 +170,7 @@ class Portfolio:
             self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_ticker.items():
-            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -181,7 +179,7 @@ class Portfolio:
             self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_currency.items():
-            self.distribution_by_currency[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
             self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -221,7 +219,7 @@ class Portfolio:
         self.distribution_by_directory[dir]=source.total_money_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
-        self.total_invested_money+=source.total_money_invested
+        self.total_money_invested+=source.total_money_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
 
@@ -264,8 +262,7 @@ class Portfolio:
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
-        Equivalent of merge_dataframes(dataframes)."""
+        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame."""
         list_of_df=[df.data for df in dataframes]
         merged=pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
         return Portfolio._prepend_zero_day(merged)
