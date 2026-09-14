@@ -604,11 +604,13 @@ def test_distribution_by_ticker_survives_a_cache_hit(make_source_dir, cache_dir)
     assert set(warm.distribution_by_ticker)=={'TOS', 'ROR'}
 
 
-def test_matured_bond_type_stays_in_lifetime_invested_but_drops_from_current_value(make_source_dir):
-    """A matured holding's Money_invested/unrealized profit both go to 0 (nothing is left held -
-    see _bond_dataframe), but the amount that was, historically, put into it doesn't disappear -
-    same as a fully-sold Stock ticker still counting toward distribution_by_ticker (lifetime
-    invested) while showing 0% in distribution_by_ticker_current_value (nothing currently held)."""
+def test_matured_bond_type_drops_out_of_invested_and_current_value_alike(make_source_dir):
+    """total_money_invested/distribution_by_ticker read each type's CURRENT Money_invested (its
+    merged type_dataframe's last row), not a lifetime sum - a matured holding's Money_invested
+    drops to 0 (nothing is left held - see _bond_dataframe), so a fully-matured type contributes
+    0 to both total_money_invested and distribution_by_ticker, exactly mirroring its 0% in
+    distribution_by_ticker_current_value (unlike Stock, which keeps a fully-sold ticker's
+    lifetime cost basis in distribution_by_ticker even once nothing is held)."""
     matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     active_start=date.today()-timedelta(days=2)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
@@ -618,23 +620,25 @@ def test_matured_bond_type_stays_in_lifetime_invested_but_drops_from_current_val
     ))
     bonds=PolishRetailBonds(bonds_dir)
 
-    assert bonds.total_money_invested==pytest.approx(100.0+300.0)
+    # OTS has matured (Money_invested -> 0); only TOS's 3*100=300 still counts.
+    assert bonds.total_money_invested==pytest.approx(300.0)
     assert set(bonds.distribution_by_ticker)=={'OTS', 'TOS'}
-    assert bonds.distribution_by_ticker['OTS']==pytest.approx(25.0)
-    assert bonds.distribution_by_ticker['TOS']==pytest.approx(75.0)
+    assert bonds.distribution_by_ticker['OTS']==pytest.approx(0.0)
+    assert bonds.distribution_by_ticker['TOS']==pytest.approx(100.0)
 
     # Both types still appear (matches Stock: 0%, not omitted) - OTS's matured holding no longer
     # holds anything, TOS's is still fully held.
     assert bonds.distribution_by_ticker_current_value==pytest.approx({'OTS': 0.0, 'TOS': 100.0})
 
-    # OTS's interest was realized at maturity and persists in revenue forever after.
+    # OTS's interest was realized at maturity and persists in revenue forever after, even though
+    # it no longer counts toward total_money_invested/distribution_by_ticker.
     expected_ots_revenue=_expected_profit(matured_start, date.today(), 'OTS', initial_coupon=2.0, additional_coupon=0.0)
     assert expected_ots_revenue>0.0
     assert set(bonds.distribution_by_ticker_revenue)=={'OTS', 'TOS'}
     assert bonds.distribution_by_ticker_revenue['OTS']>0.0
 
 
-def test_matured_holding_still_counts_toward_lifetime_invested_but_not_currently_held(make_source_dir):
+def test_matured_holding_no_longer_counts_toward_invested_once_matured(make_source_dir):
     matured_start=date.today()-timedelta(days=100)
     active_start=date.today()-timedelta(days=10)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
@@ -644,12 +648,14 @@ def test_matured_holding_still_counts_toward_lifetime_invested_but_not_currently
     ))
     bonds=PolishRetailBonds(bonds_dir)
 
-    # Lifetime invested counts both holdings (1+2 units) even though only one is still held.
-    assert bonds.total_money_invested==pytest.approx(300.0)
+    # Both holdings are type OTS, merged into one type_dataframe - only the still-active one
+    # (2 units) contributes to its last-row Money_invested; the matured one already dropped to 0.
+    assert bonds.total_money_invested==pytest.approx(200.0)
     assert set(bonds.distribution_by_ticker)=={'OTS'}
     assert bonds.distribution_by_ticker['OTS']==pytest.approx(100.0)
 
-    # Only the still-active holding (2 units) contributes to what's currently held.
+    # Matches self.data's own last row exactly, since total_money_invested is now just that same
+    # currently-held figure, summed per type instead of read off the merged whole-portfolio frame.
     assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(200.0)
     assert bonds.total_current_value==pytest.approx(200.0+bonds.data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
 

@@ -237,12 +237,17 @@ class PolishRetailBonds:
         elif progress_callback is not None:
             progress_callback()
 
-        # total_money_invested (and distribution_by_ticker below) is the lifetime amount ever
-        # invested, unreduced by since-matured holdings - see _compute_data's invested_by_type
-        # docstring. total_current_value/total_revenue instead read self.data's actual last row,
-        # which already correctly reflects only what's still held today (Money_invested/
-        # PROFIT_WITHOUT_DIVIDEND_COLUMN both go to 0 past maturity - see _bond_dataframe) plus
-        # whatever's been realized so far (PROFIT_COLUMN, which persists past maturity).
+        # total_money_invested (and distribution_by_ticker below) is what's CURRENTLY held per
+        # type - each entry is that type's own merged type_dataframe's last MONEY_INVESTED_COLUMN
+        # row (see _compute_data's invested_by_type docstring), so it's exactly equal to
+        # self.data[MONEY_INVESTED_COLUMN].iloc[-1] summed by type rather than read off the whole
+        # portfolio at once. A matured type's Money_invested has already dropped to 0 (see
+        # _bond_dataframe), so it contributes 0 here too - unlike Stock's total_money_invested/
+        # distribution_by_ticker, which stay at their lifetime (gross-ever-bought) value even for
+        # a fully-sold ticker. total_current_value/total_revenue read self.data's actual last row
+        # directly, which already reflects only what's still held today (Money_invested/
+        # PROFIT_WITHOUT_DIVIDEND_COLUMN both go to 0 past maturity) plus whatever's been realized
+        # so far (PROFIT_COLUMN, which persists past maturity).
         self.total_money_invested=sum(invested_by_type.values())
         self.total_current_value=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
@@ -251,10 +256,11 @@ class PolishRetailBonds:
         # 'Polish bonds' bucket, the same way Stock/Commodity/Crypto break distribution_by_ticker
         # down by ticker/symbol - merging per type first (type_dataframes below), not per holding,
         # so two separate holdings of the same type (e.g. two different ROR issues) land in one
-        # slice instead of two. A type that's fully matured still appears in distribution_by_ticker
-        # (nonzero - money was, historically, invested in it) but naturally converges toward 0% in
-        # _current_value (nothing left held) while _revenue keeps whatever it realized - mirrors
-        # how a fully-sold Stock ticker behaves in the same three metrics.
+        # slice instead of two. A type that's fully matured drops to 0% in distribution_by_ticker
+        # itself (Money_invested has nothing left held - see _bond_dataframe), matching its 0% in
+        # _current_value - unlike a fully-sold Stock ticker, which keeps its lifetime cost basis
+        # in distribution_by_ticker even once nothing is held. _revenue still keeps whatever a
+        # matured/cancelled type realized, regardless of what it currently holds.
         self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_invested else dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
@@ -332,14 +338,11 @@ class PolishRetailBonds:
         - merged_dataframe: the whole-portfolio DataFrame (self.data).
         - type_dataframes: {bond-type code: merged DataFrame} for that type alone, one entry per
           distinct type actually held, used for distribution_by_ticker_current_value/_revenue.
-        - invested_by_type: {bond-type code: lifetime amount ever invested in that type}, summed
-          from every holding's own cost basis (converted at that holding's own purchase-date FX
-          rate — see below) regardless of whether it's since matured - the same "gross amount
-          ever bought, unreduced by later realization" concept Stock's distribution_by_ticker/
-          total_money_invested use (see CLAUDE.md), as opposed to MONEY_INVESTED_COLUMN's
-          "currently held" one. Needed because a matured holding's MONEY_INVESTED_COLUMN is 0
-          (see _bond_dataframe), which would make distribution_by_ticker misreport a type as 0%
-          the moment its last holding matures, rather than reflecting how much was ever put into it.
+        - invested_by_type: {bond-type code: that type's own CURRENT Money_invested}, read off
+          type_dataframes[code]'s own last MONEY_INVESTED_COLUMN row - so a matured/fully-
+          cancelled holding contributes 0, same as MONEY_INVESTED_COLUMN itself already does (see
+          _bond_dataframe). Kept as its own dict (rather than reading self.data directly) purely
+          so distribution_by_ticker can be broken down per type instead of one flat total.
         All three are cached together (see __init__) so a cache hit doesn't lose any of them."""
         # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
         # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
