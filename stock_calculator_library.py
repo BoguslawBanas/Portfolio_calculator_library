@@ -210,6 +210,12 @@ class Stock:
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        # yfinance returns an empty DataFrame (not an error) for an invalid/delisted ticker,
+        # rather than raising - left unchecked, all_days.join(ticker_data) below would silently
+        # produce a Close column of all-NaN that ffill() can't fill from anything, rather than
+        # failing loudly at construction time (README Roadmap item).
+        if ticker_data.empty:
+            raise ValueError(f"yfinance returned no price history for ticker {ticker_name!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
         ticker_data.index=ticker_data.index.tz_localize(None).normalize()
 

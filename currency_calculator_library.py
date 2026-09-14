@@ -47,8 +47,14 @@ class Currency:
                 if cached is not None:
                     return cached
 
-        ticker=yf.Ticker(self.currency_from.upper()+self.currency_to.upper()+"=X")
+        symbol=self.currency_from.upper()+self.currency_to.upper()+"=X"
+        ticker=yf.Ticker(symbol)
         data=ticker.history(start=self.start_date, end=self.end_date, repair=True, actions=False)
+        # yfinance returns an empty DataFrame (not an error) for a pair it doesn't quote, rather
+        # than raising - left unchecked, all_days.join(data) below would silently produce a
+        # column of all-NaN that ffill()/bfill() can't fill from anything (README Roadmap item).
+        if data.empty:
+            raise ValueError(f"yfinance returned no FX history for {symbol!r} (requested {self.start_date.date()} to {self.end_date.date()}) - check {self.currency_from!r}/{self.currency_to!r} is a currency pair yfinance actually quotes.")
         data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
         data.index=pd.to_datetime(data.index).tz_localize(None).normalize()
 

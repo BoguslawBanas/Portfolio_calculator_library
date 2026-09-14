@@ -41,6 +41,11 @@ class FakeTicker:
 
     def history(self, start, end, repair=True, actions=False):
         FakeTicker.call_log.append(self.symbol)
+        if self.symbol.startswith('INVALID'):
+            # Mirrors real yfinance: an invalid ticker/unquoted pair returns an empty DataFrame
+            # (not an error) - same shape as a real result, just no rows - see each calculator's
+            # own "yfinance returned no ... history" ValueError (README Roadmap item).
+            return pd.DataFrame(columns=['Close', 'High', 'Low', 'Open', 'Volume', 'Repaired?'])
         idx=pd.date_range(start=start, end=end, freq='D')
         base=1.10 if self.symbol.endswith('=X') else 100.0
         close=[base + 0.37*((i*7) % 11) - 0.5 for i in range(len(idx))]

@@ -10,6 +10,20 @@ def build_crypto(make_source_dir, csv_files, currency_to='usd', **kwargs):
     return Crypto(crypto_dir, currency_to, **kwargs)
 
 
+def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
+    # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
+    # real yfinance's behavior for an invalid ticker - must raise here, not silently produce a
+    # Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known coins to
+    # real yfinance symbols, so monkeypatch in a throwaway entry pointing at a symbol FakeTicker
+    # treats as invalid, rather than one of the real (always-valid) ones.
+    monkeypatch.setitem(Crypto.TICKERS, 'notarealcoin', 'INVALIDCOIN-USD')
+    with pytest.raises(ValueError, match="INVALIDCOIN-USD"):
+        build_crypto(make_source_dir, {
+            'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                       "2024-01-15,notarealcoin,0.5,40000.0,0.01\n",
+        })
+
+
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     crypto=build_crypto(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"

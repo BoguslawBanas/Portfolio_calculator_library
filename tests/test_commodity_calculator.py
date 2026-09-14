@@ -26,6 +26,20 @@ def build_commodity(make_source_dir, csv_files, currency_to='usd', **kwargs):
     return Commodity(commodity_dir, currency_to, **kwargs)
 
 
+def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
+    # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
+    # real yfinance's behavior for an invalid futures ticker - must raise here, not silently
+    # produce a Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known
+    # commodities to real yfinance symbols, so monkeypatch in a throwaway entry pointing at a
+    # symbol FakeTicker treats as invalid, rather than one of the real (always-valid) ones.
+    monkeypatch.setitem(Commodity.TICKERS, 'unobtainium', 'INVALIDXYZ=F')
+    with pytest.raises(ValueError, match="INVALIDXYZ=F"):
+        build_commodity(make_source_dir, {
+            'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                       "2024-01-15,unobtainium,2,troy_ounce,0.02\n",
+        })
+
+
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     commodity=build_commodity(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
