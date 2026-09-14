@@ -50,6 +50,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
 - optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
 - optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `PolishRetailBonds`/`BankAccount` are left out — both are already single-currency with no conversion step to opt out of
+- optional `commodity_tickers_json`/`crypto_tickers_json` — passed straight through to every `'commodities'`/`'crypto'` source's own `tickers_json` (see `Commodity`/`Crypto` above), never required unlike `tickers_json` above
 
 ### 💾 `cache_library.DiskCache`
 
@@ -85,6 +86,7 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`
 - same construction-time `ValueError` as `Stock` if `yfinance` returns no price history for a symbol's futures ticker
+- optional `tickers_json` — a JSON file of `{symbol: {"ticker": <yfinance futures ticker>, "quote_unit": <"troy_ounce"/"pound"/"gram">}}`, merged on top of the small built-in `TICKERS`/`QUOTE_UNIT_GRAMS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another commodity without editing the library source
 
 ### ₿ `crypto_calculator_library.Crypto`
 
@@ -96,6 +98,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - same construction-time `ValueError` as `Stock`/`Commodity` if `yfinance` returns no price history for a symbol's ticker
 - units rounded to 8 decimal places (vs. `Commodity`'s 4) for fractional holdings
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- optional `tickers_json` — a JSON file of `{symbol: <yfinance ticker>}`, merged on top of the small built-in `TICKERS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another coin without editing the library source
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
 
 ### 🏛️ `bank_account_calculator_library.BankAccount`
@@ -247,7 +250,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - provide to a portfolio condtructor a json file with tax types and values
 - `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
-- `Commodity`/`Crypto`'s `TICKERS` dicts (5-6 symbols each) are hardcoded class constants — unlike `Stock`'s JSON-driven ticker mapping, there's no way to track another commodity/crypto symbol without editing the library source
 - no `__repr__` on `Portfolio`/`Stock`/etc. — printing one in a REPL/notebook gives the default `<...object at 0x...>` instead of a quick invested/current-value/revenue summary, which matters for a library also meant for interactive analysis
 
 ## License

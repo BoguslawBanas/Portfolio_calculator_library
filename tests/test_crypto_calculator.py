@@ -35,6 +35,34 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     assert crypto.distribution_by_ticker['bitcoin']==pytest.approx(100.0)
 
 
+def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
+    # A new coin beyond the built-in TICKERS - tickers_json is a plain {symbol: yfinance
+    # ticker} mapping, simpler than Commodity's (no per-symbol quote_unit needed, since every
+    # crypto ticker here is directly USD-quoted per whole coin) (README Roadmap item).
+    tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
+    crypto=build_crypto(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                    "2024-01-15,notarealcoin,0.5,40000.0,0.01\n"},
+        tickers_json=tickers_path,
+    )
+    assert crypto.tickers['notarealcoin']=='NRC-USD'
+    expected=round(1.01*0.5*40000.0, 2)
+    assert crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
+    tickers_path=make_tickers_json({"bitcoin": "CUSTOM-BTC-USD"})
+    build_crypto(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                    "2024-01-15,bitcoin,0.5,40000.0,0.01\n"},
+        tickers_json=tickers_path,
+    )
+    assert 'CUSTOM-BTC-USD' in mock_yfinance.call_log
+    assert 'BTC-USD' not in mock_yfinance.call_log
+
+
 def test_units_rounded_to_eight_decimals_not_stocks_four(make_source_dir):
     # amount_of_units itself (0.123456789) isn't what's charged — money invested is
     # amount*price*(1+fee), so the 8-decimal rounding only shows up if it happened before
