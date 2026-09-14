@@ -91,7 +91,7 @@ class Stock:
         revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
-            ticker_currency=self.get_ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
+            ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
             computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
@@ -138,8 +138,11 @@ class Stock:
         return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @staticmethod
-    def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
-        """Equivalent of get_ticker_currency. Only works if all rows share the same ticker/isin."""
+    def ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
+        """Looks up a single ticker's declared currency from tickers_json. Only works if every
+        row in dataframe shares the same ticker/isin - named ticker_currency, not
+        get_ticker_currency, matching the rest of this library's public methods, none of which
+        use a get_ prefix (merge, count_tickers, ...)."""
         with open(path_to_json_file, "r") as f:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']

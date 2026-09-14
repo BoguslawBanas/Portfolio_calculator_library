@@ -261,7 +261,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 Private (leading-underscore) names are exempt — these are all public API surface, found by an audit across every class:
 
-- `get_ticker_currency` (`Stock`) is the only `get_`-prefixed public method in the library — everywhere else skips that prefix (`merge`, `count_tickers`, `resample`, `calculate_irr`, `evict_stale`, `make_key`, `hash_file`, ...)
 - `currency_to` (`Stock`/`Commodity`/`Crypto`/`PolishRetailBonds`) vs. `currency` (`Portfolio`) for the same "target currency everything is converted to" constructor parameter — fixing this one is a breaking change to the most-used constructor, so it needs a deliberate choice of direction rather than a default
 
 ## License
