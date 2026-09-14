@@ -102,6 +102,23 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     assert data[Crypto.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(4*2200.0-20000.0*0.4)
 
 
+def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir):
+    # Same division-by-zero edge case as Stock's own version of this test (README Roadmap item):
+    # selling every unit at exactly the buy price drives total_current_value/total_revenue to
+    # exactly 0.0, which distribution_by_ticker_current_value/_revenue must guard to 0.0 rather
+    # than dividing by zero.
+    crypto=build_crypto(make_source_dir, {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,5,40000.0,0.0\n",
+        'sell.csv': "date,symbol,amount_of_units,price_of_unit\n"
+                    "2024-03-01,bitcoin,5,40000.0\n",
+    })
+    assert crypto.total_current_value==pytest.approx(0.0)
+    assert crypto.total_revenue==pytest.approx(0.0)
+    assert crypto.distribution_by_ticker_current_value==pytest.approx({'bitcoin': 0.0})
+    assert crypto.distribution_by_ticker_revenue==pytest.approx({'bitcoin': 0.0})
+
+
 def test_oversell_raises_value_error(make_source_dir):
     with pytest.raises(ValueError, match="Cannot sell"):
         build_crypto(make_source_dir, {

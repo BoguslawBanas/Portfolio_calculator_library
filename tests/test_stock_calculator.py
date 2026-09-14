@@ -50,6 +50,28 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     assert data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(80.0)
 
 
+def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir, make_tickers_json):
+    # Selling every unit at exactly the buy price leaves realized profit, units, and dividends
+    # all at 0 -> total_current_value and total_revenue both land on exactly 0.0. distribution_
+    # by_ticker_current_value/_revenue used to divide by that 0 unguarded, producing NaN plus a
+    # RuntimeWarning instead of 0.0 like distribution_by_ticker itself already handled (README
+    # Roadmap item).
+    stock=build_stock(
+        make_source_dir, make_tickers_json,
+        {
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                       "2024-01-15,US0000000001,10,100.0,0.0\n",
+            'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                        "2024-03-01,US0000000001,10,100.0\n",
+        },
+        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+    )
+    assert stock.total_current_value==pytest.approx(0.0)
+    assert stock.total_revenue==pytest.approx(0.0)
+    assert stock.distribution_by_ticker_current_value==pytest.approx({'US0000000001': 0.0})
+    assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
+
+
 def test_oversell_raises_value_error(make_source_dir, make_tickers_json):
     with pytest.raises(ValueError, match="Cannot sell"):
         build_stock(

@@ -125,10 +125,10 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             self.distribution_by_ticker[ticker]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
 
         for ticker, value in current_value_by_ticker.items():
-            self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0
+            self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
 
         for ticker, value in revenue_by_ticker.items():
-            self.distribution_by_ticker_revenue[ticker]=(value/self.total_revenue)*100.0
+            self.distribution_by_ticker_revenue[ticker]=(value/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
         self.data=self.merge(dataframes_2)
 

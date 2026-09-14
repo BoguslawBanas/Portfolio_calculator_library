@@ -306,6 +306,29 @@ def test_ots_early_redemption_forfeits_all_accrued_interest(make_source_dir):
     assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(0.0)
 
 
+def test_zero_total_current_value_and_revenue_keep_the_key_at_zero_not_omitted(make_source_dir):
+    """A single, fully-cancelled OTS holding (see test_ots_early_redemption_forfeits_all_accrued_
+    interest above) drives total_current_value and total_revenue both to exactly 0.0 - the same
+    division-by-zero edge case distribution_by_ticker_current_value/_revenue used to handle by
+    omitting the key entirely instead of guarding to 0.0 like every other asset class (README
+    Roadmap item)."""
+    start=date.today()-timedelta(days=60)
+    cancel_date=start+timedelta(days=45)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},OTS0826,3,0.0,2.0,False\n"
+    ), cancel_csv=(
+        "date,isin,cancel_date,amount_of_units\n"
+        f"{start.isoformat()},OTS0826,{cancel_date.isoformat()},3\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    assert bonds.total_current_value==pytest.approx(0.0)
+    assert bonds.total_revenue==pytest.approx(0.0)
+    assert bonds.distribution_by_ticker_current_value==pytest.approx({'OTS': 0.0})
+    assert bonds.distribution_by_ticker_revenue==pytest.approx({'OTS': 0.0})
+
+
 def test_early_redemption_fee_is_floored_at_zero_not_negative(make_source_dir):
     """Cancelling almost immediately after purchase - so barely any interest has accrued, less
     than TOS's 1.00 zl/bond fee - must still floor at 0.0, never go negative (the fee only ever
