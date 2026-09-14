@@ -16,6 +16,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (`tickers.json`'s `currency` field, the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
+- an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
 
 ### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
@@ -33,7 +34,7 @@ Computes the value over time of Polish retail treasury bonds (*obligacje detalic
 
 ### 💱 `currency_calculator_library.Currency`
 
-Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone) to convert foreign-currency instruments to a base currency. Same-currency conversions short-circuit to a flat 1.0 rate — no network call needed.
+Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone) to convert foreign-currency instruments to a base currency. Same-currency conversions short-circuit to a flat 1.0 rate — no network call needed. A currency pair `yfinance` doesn't quote raises `ValueError` at construction time instead of silently `ffill()`/`bfill()`ing into a column of all-`NaN`.
 
 ### 📊 `portfolio_calculator_library.Portfolio`
 
@@ -83,6 +84,7 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - no dividends — `Profit` is unrealized plus realized gain
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`
+- same construction-time `ValueError` as `Stock` if `yfinance` returns no price history for a symbol's futures ticker
 
 ### ₿ `crypto_calculator_library.Crypto`
 
@@ -91,6 +93,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - prices via `yfinance` USD-quoted tickers (`BTC-USD`, `ETH-USD`, ...), converted to the target currency via `Currency`
 - full or partial sells, tracked against a running average cost basis, same as `Stock`/`Commodity`
 - no dividends — `Profit` is unrealized plus realized gain
+- same construction-time `ValueError` as `Stock`/`Commodity` if `yfinance` returns no price history for a symbol's ticker
 - units rounded to 8 decimal places (vs. `Commodity`'s 4) for fractional holdings
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
@@ -245,7 +248,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
 - `Commodity`/`Crypto`'s `TICKERS` dicts (5-6 symbols each) are hardcoded class constants — unlike `Stock`'s JSON-driven ticker mapping, there's no way to track another commodity/crypto symbol without editing the library source
-- `Stock`/`Commodity`/`Crypto`/`Currency` don't validate that `yfinance` actually returned price/FX history for a ticker/currency pair — an invalid ticker, or a pair `yfinance` doesn't quote, silently `ffill()`/`bfill()`s into a column of `NaN` instead of raising a clear error at construction time
 - no `__repr__` on `Portfolio`/`Stock`/etc. — printing one in a REPL/notebook gives the default `<...object at 0x...>` instead of a quick invested/current-value/revenue summary, which matters for a library also meant for interactive analysis
 
 ## License

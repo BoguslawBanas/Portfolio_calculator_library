@@ -92,6 +92,19 @@ def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_ticker
     assert stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==0.0
 
 
+def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_tickers_json):
+    # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
+    # real yfinance's behavior for an invalid/delisted ticker - must raise here, not silently
+    # produce a Close column of NaN (README Roadmap item).
+    with pytest.raises(ValueError, match="INVALIDTICKER"):
+        build_stock(
+            make_source_dir, make_tickers_json,
+            {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                        "2024-01-15,US0000000001,5,100.0,0.0\n"},
+            {"US0000000001": {"ticker": "INVALIDTICKER", "currency": "usd"}},
+        )
+
+
 def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
