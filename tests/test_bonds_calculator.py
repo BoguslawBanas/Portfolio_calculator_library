@@ -34,7 +34,7 @@ def make_bonds_dir(make_source_dir, buy_csv: str, rate_row: str="01-2020,5.0\n",
     return make_source_dir('bonds', files)
 
 
-def _expected_profit(start, today, code, initial_coupon, additional_coupon, external_rate=0.0, amount=1.0, is_swapped=False):
+def _expected_profit(start, today, code, initial_coupon, additional_coupon, external_rate=0.0, amount=1.0, is_swapped=False, tax_rate=None):
     """Independent transcription of PolishRetailBonds._bond_dataframe's per-period accrual, used
     to compute an expected Profit without calling into the class under test. external_rate is the
     single ffilled interest_rate.csv/inflation_rate.csv value a rate_source type would see for
@@ -64,7 +64,8 @@ def _expected_profit(start, today, code, initial_coupon, additional_coupon, exte
         if config['compounding']:
             base=base*(1+rate/100.0)
 
-    return round(gross*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
+    effective_tax_rate=PolishRetailBonds.TAX_RATE if tax_rate is None else tax_rate
+    return round(gross*(1-effective_tax_rate/100.0), 2)
 
 
 def _apply_early_redemption_fee(profit: float, code: str, amount: float) -> float:
@@ -778,6 +779,53 @@ def test_currency_to_is_folded_into_the_cache_key(make_source_dir, cache_dir):
 
     assert pln.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(usd.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
     assert pln_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(pln.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+
+
+def test_tax_rate_defaults_to_tax_rate_constant(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+    # Existing callers that never pass tax_rate keep getting exactly the old TAX_RATE-taxed
+    # result - same guarantee currency_to='PLN' already gives for the currency_to argument.
+    expected=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0, amount=3.0)
+    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert bonds.tax_rate==pytest.approx(PolishRetailBonds.TAX_RATE)
+
+
+def test_tax_rate_override_changes_accrued_profit(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,3,0.0,4.4,False\n"
+    ))
+    # e.g. a tax-exempt account (IKE/IKZE) - 0% withholding, so Profit should equal the gross,
+    # untaxed accrual rather than the default 19%-taxed one.
+    tax_exempt=PolishRetailBonds(bonds_dir, tax_rate=0.0)
+    assert tax_exempt.tax_rate==pytest.approx(0.0)
+
+    expected_untaxed=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0, amount=3.0, tax_rate=0.0)
+    assert tax_exempt.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_untaxed)
+
+    default_taxed=PolishRetailBonds(bonds_dir)
+    assert tax_exempt.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>default_taxed.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
+
+
+def test_tax_rate_is_folded_into_the_cache_key(make_source_dir, cache_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+
+    default=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)
+    untaxed=PolishRetailBonds(bonds_dir, tax_rate=0.0, cache_dir=cache_dir)
+    default_again=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # cache hit - must not read untaxed's entry
+
+    assert default.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]!=pytest.approx(untaxed.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
+    assert default_again.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(default.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
 
 
 def test_count_tickers_reads_row_count_without_computing(make_source_dir):
