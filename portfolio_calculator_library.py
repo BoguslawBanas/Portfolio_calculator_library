@@ -111,7 +111,7 @@ class Portfolio:
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
-        self.total_invested_money=0.0
+        self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
@@ -167,7 +167,7 @@ class Portfolio:
         # ZeroDivisionError (these are plain Python floats, not numpy - an unguarded division
         # raises rather than silently producing NaN).
         for key, value in self.distribution_by_directory.items():
-            self.distribution_by_directory[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -176,7 +176,7 @@ class Portfolio:
             self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_ticker.items():
-            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -185,7 +185,7 @@ class Portfolio:
             self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_currency.items():
-            self.distribution_by_currency[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
             self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -202,7 +202,7 @@ class Portfolio:
         """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
         Portfolio in a REPL/notebook shows something useful instead of the default
         <...object at 0x...>."""
-        return f"{self.__class__.__name__}(invested={self.total_invested_money:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
@@ -231,7 +231,7 @@ class Portfolio:
         self.distribution_by_directory[dir]=source.total_money_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
-        self.total_invested_money+=source.total_money_invested
+        self.total_money_invested+=source.total_money_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
 

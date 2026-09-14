@@ -27,10 +27,10 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     data=portfolio.data
     # Money_invested (the data column): current cost basis still held, reduced by the 4-unit
-    # sell -> 1000*0.6 = 600. total_invested_money: gross amount ever bought (1000), unreduced
+    # sell -> 1000*0.6 = 600. total_money_invested: gross amount ever bought (1000), unreduced
     # by later sells — the two track different things (position size vs. lifetime capital in).
     assert data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
-    assert portfolio.total_invested_money==pytest.approx(1000.0)
+    assert portfolio.total_money_invested==pytest.approx(1000.0)
     # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
     # by the CSV's isin column, not the yfinance ticker symbol.
     assert 'US0000000001' in portfolio.distribution_by_ticker
@@ -42,7 +42,7 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tic
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     representation=repr(portfolio)
     assert representation.startswith("Portfolio(")
-    assert f"invested={portfolio.total_invested_money:.2f}" in representation
+    assert f"invested={portfolio.total_money_invested:.2f}" in representation
     assert f"current_value={portfolio.total_current_value:.2f}" in representation
     assert f"revenue={portfolio.total_revenue:.2f}" in representation
 
@@ -153,7 +153,7 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # of hardcoding 100.0 PLN, so this test doesn't depend on the fake FX rate's exact value.
     from Portfolio_calculator_library import PolishRetailBonds
     bonds_alone=PolishRetailBonds(bonds_dir, 'usd')
-    assert portfolio.total_invested_money==pytest.approx(1000.0+bonds_alone.total_money_invested)
+    assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
@@ -199,8 +199,8 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     # Profit: the bond's realized gain is still added on top, even though it matured before today.
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
-    # total_invested_money is lifetime (like Stock's own), so it still counts the matured bond.
-    assert mixed.total_invested_money==pytest.approx(stock_only.total_invested_money+bonds_only.total_money_invested)
+    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond.
+    assert mixed.total_money_invested==pytest.approx(stock_only.total_money_invested+bonds_only.total_money_invested)
 
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
@@ -210,7 +210,7 @@ def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
                        f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n",
     })
     portfolio=Portfolio({account_dir: 'bank_account'})
-    assert portfolio.total_invested_money==pytest.approx(1000.0)
+    assert portfolio.total_money_invested==pytest.approx(1000.0)
     assert 'savings' in portfolio.distribution_by_ticker
     assert portfolio.distribution_by_directory[account_dir]==pytest.approx(100.0)
 
@@ -239,7 +239,7 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
         crypto_tickers_json=crypto_tickers_path,
     )
     assert set(portfolio.distribution_by_ticker)=={'tin', 'notarealcoin'}
-    assert portfolio.total_invested_money>0.0
+    assert portfolio.total_money_invested>0.0
 
 
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):

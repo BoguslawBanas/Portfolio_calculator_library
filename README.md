@@ -191,7 +191,7 @@ portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd", cach
 # from Portfolio_calculator_library.cache_library import DiskCache
 # DiskCache(".portfolio_cache").clear()
 
-print(f"Total invested: {portfolio.total_invested_money:.2f}")
+print(f"Total invested: {portfolio.total_money_invested:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
 print(f"Total revenue: {portfolio.total_revenue:.2f}")
 print(portfolio.distribution_by_ticker)                # allocation by amount invested
@@ -261,7 +261,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 Private (leading-underscore) names are exempt — these are all public API surface, found by an audit across every class:
 
-- `self.total_money_invested` (`Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccount`) vs. `self.total_invested_money` (`Portfolio`) — same concept, words reversed
 - `PolishRetailBonds.__init__`'s first parameter is named `dataframe`, but it's a directory path (`str`), not a DataFrame — every sibling class (`Stock`/`Commodity`/`Crypto`/`BankAccount`) calls the equivalent parameter `directory_path`; the docstring compounds this by describing `dataframe` as if it were an actual DataFrame of transactions
 - `Stock`'s `stock_data` constructor parameter is the same thing `Commodity`/`Crypto`/`Portfolio` call `tickers_json` (a path to the ticker→`{ticker, currency}` JSON mapping) — also undocumented in `Stock`'s own docstring
 - `merge` is a public staticmethod on `Stock`/`Commodity`/`Crypto`/`BankAccount`/`Portfolio`, but private (`_merge`) on `PolishRetailBonds`, despite doing the same thing (sum per-instrument DataFrames by date)
