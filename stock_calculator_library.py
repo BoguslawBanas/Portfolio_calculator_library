@@ -15,9 +15,10 @@ import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import Currency
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
 
-class Stock:
+class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -78,7 +79,7 @@ class Stock:
         self.tickers=self._load_tickers_json(tickers_json)
         self._cache_dir=cache_dir
 
-        dataframes=self._split_by_isin(self.dataframe)
+        dataframes=self._split_by_ticker(self.dataframe)
 
         # A buy row's money invested depends on that ticker's own FX rate (see _compute_data),
         # so - same pattern Commodity._compute_data already uses - _compute_data itself returns
@@ -131,12 +132,6 @@ class Stock:
 
         self.data=self.merge(dataframes_2)
 
-    def __repr__(self) -> str:
-        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
-        Stock in a REPL/notebook shows something useful instead of the default
-        <...object at 0x...>."""
-        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
-
     @staticmethod
     def ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
         """Looks up a single ticker's declared currency from tickers_json. Only works if every
@@ -149,36 +144,9 @@ class Stock:
         return currency
 
     @staticmethod
-    def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
-        Equivalent of merge_dataframes(dataframes)."""
-        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
-
-    @staticmethod
     def _load_tickers_json(tickers_json: str) -> dict:
         with open(tickers_json, 'r') as f:
             return json.load(f)
-
-    @classmethod
-    def _split_by_isin(cls, dataframe: pd.DataFrame) -> list:
-        """Splits the raw multi-ticker dataframe into one per-ticker DataFrame each, indexed by
-        parsed transaction date - a single groupby pass rather than iterrows()+pd.concat once
-        per row, which is O(n^2) in transaction count (each concat copies the whole growing
-        per-ticker frame so far) and, via the row-Series/transpose round trip, tends to coerce
-        every column to dtype=object instead of keeping each column's own read_csv dtype.
-        set_index/drop both return new frames rather than mutating dataframe in place, so the
-        caller's own copy (self.dataframe) is left untouched, same as before this rewrite."""
-        dates=pd.to_datetime(dataframe[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
-        indexed=dataframe.set_index(dates).drop(columns=[cls.CSV_DATE_COLUMN])
-        # sort=False preserves each ticker's first-appearance order, matching the old dict's
-        # insertion order - callers don't rely on this, but it keeps behavior identical anyway.
-        return [group for _, group in indexed.groupby(cls.CSV_TICKER_COLUMN, sort=False)]
-
-    @classmethod
-    def count_tickers(cls, directory_path: str) -> int:
-        """Number of distinct tickers/ISINs in a source directory, without fetching any price
-        data — lets a caller (e.g. Portfolio) size a progress bar before construction."""
-        return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
