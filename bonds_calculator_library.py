@@ -376,20 +376,21 @@ class PolishRetailBonds:
                 self._bond_dataframe(code, tranche_amount, initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, tranche_cancel_date)
                 for tranche_amount, tranche_cancel_date in tranches
             ]
-            bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self._merge(tranche_dataframes)
+            bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self.merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
             progress_callback()
 
-        type_dataframes={code: self._merge(holdings) for code, holdings in bonds_by_type.items()}
+        type_dataframes={code: self.merge(holdings) for code, holdings in bonds_by_type.items()}
         for code, value in type_dataframes.items():
             invested_by_type[code]=value[self.MONEY_INVESTED_COLUMN].iloc[-1]
-        return self._merge(list(type_dataframes.values())), type_dataframes, invested_by_type
+        return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type
 
     @staticmethod
-    def _merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame."""
+    def merge(dataframes: list) -> pd.DataFrame:
+        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame.
+        Equivalent of Stock.merge/Commodity.merge/Crypto.merge/BankAccount.merge."""
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
     def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:

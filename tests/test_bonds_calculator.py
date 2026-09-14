@@ -871,7 +871,7 @@ def test_dividend_column_reflects_the_early_redemption_fee_at_cancellation(make_
 
 
 def test_dividend_column_sums_correctly_across_partial_cancellation_tranches(make_source_dir):
-    """Two tranches (one cancelled early, one still held) are summed by _merge - Dividend must
+    """Two tranches (one cancelled early, one still held) are summed by merge - Dividend must
     come out right for the aggregate, not just for a single-tranche holding."""
     start=date.today()-timedelta(days=200)
     cancel_date=start+timedelta(days=80)
