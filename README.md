@@ -17,6 +17,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 - an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
+- each ticker's lifetime invested total is computed once, inside the same pass that builds its DataFrame — not a second `Currency`/FX fetch and a second summation pass over the same rows beforehand
 
 ### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
@@ -100,6 +101,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `tickers_json` — a JSON file of `{symbol: <yfinance ticker>}`, merged on top of the small built-in `TICKERS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another coin without editing the library source
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
+- same "computed once, inside the same pass" lifetime-invested total as `Stock` — no second `Currency`/FX fetch or summation pass
 
 ### 🏛️ `bank_account_calculator_library.BankAccount`
 
