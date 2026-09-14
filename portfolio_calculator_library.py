@@ -96,9 +96,9 @@ class Portfolio:
         against currency_to — collected into self.native_data/self.native_currency (keyed by
         ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
         of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
-        currency_to above — see README Roadmap), but doesn't yet expose an include_native_currency
-        of its own the way Stock/Commodity/Crypto do, so there's no per-holding native-currency
-        DataFrame for Portfolio to collect here."""
+        currency_to above), but doesn't yet expose an include_native_currency of its own the way
+        Stock/Commodity/Crypto do, so there's no per-holding native-currency DataFrame for
+        Portfolio to collect here."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()

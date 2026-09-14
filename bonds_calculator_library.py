@@ -4,8 +4,8 @@ from the Treasury, no secondary market or observable price, only redeemable earl
 penalty rather than sold. That's why this class looks nothing like Stock/Commodity/Crypto: no
 yfinance fetch, just each bond type's own accrual formula keyed off the bond code's three-letter
 prefix. Every bond is issued in PLN (NOMINAL_VALUE), but — unlike the pre-rework version, which
-never imported Currency at all (see README Roadmap) — currency_to converts every PLN amount via
-Currency, the same way Stock/Commodity/Crypto convert their own native-currency prices.
+never imported Currency at all — currency_to converts every PLN amount via Currency, the same
+way Stock/Commodity/Crypto convert their own native-currency prices.
 
 Each day's own accrued interest is converted at THAT day's own FX rate before accumulating (see
 _bond_dataframe), not re-marked to today's rate afterward — the same convention Stock uses for
@@ -42,9 +42,11 @@ both quoted per-issuance in each type's own list emisyjny, so both belong in the
 row rather than as a class constant.
 
 None of the eight letters mention withholding tax at all — that's tax law, not an issuance term,
-so it's asserted here as one TAX_RATE constant applied uniformly, rather than inferred per type
-(the prior version of this class applied 19% to variable-rate bonds and 0% to fixed-rate ones,
-a split that had no documented basis and is not carried forward — see README Roadmap on this).
+so it's asserted here as one flat rate applied uniformly to every type, defaulting to TAX_RATE
+(19%, the standard 'podatek Belki' rate) but overridable per construction via the tax_rate
+constructor argument — e.g. tax_rate=0.0 for a tax-exempt account (IKE/IKZE) — rather than
+inferred per type (the prior version of this class applied 19% to variable-rate bonds and 0%
+to fixed-rate ones, a split that had no documented basis and is not carried forward).
 
 cancel.csv (optional) records that some or all of a holding was ACTUALLY redeemed early in real
 life — a holding is identified by its own (date, isin) pair, the same values as its buy.csv row,
@@ -67,11 +69,14 @@ forfeiting ALL interest accrued in the then-current period - modeled as early_re
 which the same floor-at-0 formula reduces to correctly with no separate branch needed. Every
 other type's fee is a flat zł/bond figure - these are typical values, not transcribed from one
 specific real issuance's own list emisyjny the way the rest of BOND_TYPES is (early-redemption
-fees have varied somewhat across issuances/years), so treat them the same as TAX_RATE/
-swap_discount: asserted, worth double-checking against a current, authoritative source.
+fees have varied somewhat across issuances/years), so treat them the same as swap_discount:
+asserted, worth double-checking against a current, authoritative source - and, like TAX_RATE,
+overridable per construction (bond_types_json) rather than trusted as-is for real money, for a
+type/issuance where the built-in default doesn't hold.
 """
 
 import os
+import json
 from typing import Callable
 import numpy as np
 import pandas as pd
@@ -118,7 +123,9 @@ class PolishRetailBonds:
     NOMINAL_VALUE=100.0  # zł per bond, every type (every list emisyjny's ust. 2)
     NATIVE_CURRENCY='PLN'  # every bond is issued in PLN — see module docstring
     TAX_RATE=19.0  # % 'podatek Belki' on interest income — see module docstring: not sourced from
-                   # the listy emisyjne (they don't set tax law), asserted as one uniform rate
+                   # the listy emisyjne (they don't set tax law), asserted as one uniform rate.
+                   # Default for the tax_rate constructor argument, not read directly elsewhere -
+                   # self.tax_rate (instance attribute) is what accrual actually uses.
 
     # One entry per bond-type code (the CSV isin/code's first three letters — e.g. 'ROR' out of
     # 'ROR0927'). period_months/num_periods: length of one interest period and the bond's full
@@ -149,7 +156,7 @@ class PolishRetailBonds:
         'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=3.00),
     }
 
-    def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', tax_rate: float=TAX_RATE, bond_types_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """directory_path: a directory holding buy.csv, one row per bond holding, with columns
         date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
         BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
@@ -160,7 +167,23 @@ class PolishRetailBonds:
         for how/when each value is converted.
         interest_rate_file/inflation_rate_file: CSVs used respectively by 'interest'/'inflation'
         rate_source types (see BOND_TYPES), resolved relative to directory_path — pass an
-        absolute path instead to point elsewhere. progress_callback:
+        absolute path instead to point elsewhere.
+        tax_rate: % withholding tax applied uniformly to every bond's interest — defaults to
+        TAX_RATE (19%, the standard 'podatek Belki' rate), the same value every existing caller
+        that never passes this already got. Override it for a situation the flat default doesn't
+        fit - e.g. tax_rate=0.0 for a tax-exempt account (IKE/IKZE). See the module docstring for
+        why this is asserted rather than sourced from the listy emisyjne.
+        bond_types_json: optional path to a JSON file of {code: {"swap_discount": <float>,
+        "early_redemption_fee": <float>}} - e.g. {"EDO": {"early_redemption_fee": 2.00}} - merged
+        on top of the built-in BOND_TYPES's swap_discount/early_redemption_fee, per type, for a
+        real issuance where the built-in (asserted, not derived from any specific list emisyjny -
+        see module docstring) default doesn't hold. Either field may be omitted to leave that one
+        at its built-in value; a code not already in BOND_TYPES, or any field other than those
+        two, raises ValueError - this overrides the two asserted per-type values, not the
+        taxonomy itself (period_months/num_periods/compounding/rate_source are issuance facts,
+        not assertions, so there's nothing to override there). None (default): self.bond_types is
+        exactly BOND_TYPES.
+        progress_callback:
         optional zero-arg callback invoked once, after all bond rows have been computed, for a
         caller (e.g. Portfolio) tracking overall progress.
         cancel.csv (optional, resolved relative to directory_path): records that some or all of a
@@ -169,11 +192,13 @@ class PolishRetailBonds:
         and exactly what recording a cancellation does/doesn't change.
         cache_dir: optional directory to cache the fully computed bonds data in (self.data plus
         the per-bond-type breakdown behind distribution_by_ticker/_current_value/_revenue — see
-        _compute_data's return value), keyed by currency_to plus the content of
-        buy.csv/interest_rate_file/inflation_rate_file/cancel.csv and valid for the
+        _compute_data's return value), keyed by currency_to/tax_rate/bond_types_json plus the
+        content of buy.csv/interest_rate_file/inflation_rate_file/cancel.csv and valid for the
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
+        self.tax_rate=tax_rate
+        self.bond_types=self._load_bond_types(bond_types_json)
         today=datetime.today()
         interest_rate_path=os.path.join(directory_path, interest_rate_file)
         inflation_rate_path=os.path.join(directory_path, inflation_rate_file)
@@ -198,14 +223,16 @@ class PolishRetailBonds:
             # buy.csv/the rate files aren't necessarily what changed between versions, so their
             # content hash alone wouldn't invalidate an old-shaped/wrong-currency/missing-column,
             # same-day entry already on disk - bump this tag again if the cached shape/semantics
-            # ever change again. currency_to is folded into the key itself (not just this tag)
-            # since two different target currencies are both otherwise-valid, simultaneously-live
-            # cache entries for the same buy.csv - not a stale-vs-fresh case. cancel.csv is folded
-            # in the same way (a sentinel string when absent, since there's nothing to hash_file)
-            # - adding/editing/removing it must invalidate a same-day entry computed before that
-            # change, exactly like editing buy.csv itself would.
+            # ever change again. currency_to/tax_rate are folded into the key itself (not just
+            # this tag) since two different target currencies (or tax rates) are both otherwise-
+            # valid, simultaneously-live cache entries for the same buy.csv - not a stale-vs-fresh
+            # case. cancel.csv is folded in the same way (a sentinel string when absent, since
+            # there's nothing to hash_file) - adding/editing/removing it must invalidate a
+            # same-day entry computed before that change, exactly like editing buy.csv itself
+            # would. bond_types_json is folded in the same sentinel-when-absent way as cancel.csv.
             cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
-            cache_key=DiskCache.make_key('bonds-v5', currency_to.upper(), DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
+            bond_types_component=DiskCache.hash_file(bond_types_json) if bond_types_json is not None else 'default-bond-types'
+            cache_key=DiskCache.make_key('bonds-v5', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
@@ -291,6 +318,26 @@ class PolishRetailBonds:
         return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
 
     @classmethod
+    def _load_bond_types(cls, bond_types_json: str=None) -> dict:
+        """{code: config-dict}, starting from a fresh per-type copy of the built-in BOND_TYPES
+        (so a partial override below never mutates the class-level dict, which every other
+        instance still reads from) and merging bond_types_json's swap_discount/
+        early_redemption_fee overrides (if given) on top, per type - see __init__'s docstring."""
+        bond_types={code: dict(config) for code, config in cls.BOND_TYPES.items()}
+        if bond_types_json is not None:
+            with open(bond_types_json, 'r') as f:
+                overrides=json.load(f)
+            overridable_fields={'swap_discount', 'early_redemption_fee'}
+            for code, override in overrides.items():
+                if code not in bond_types:
+                    raise ValueError(f"bond_types_json overrides unknown bond type {code!r} (expected one of {sorted(bond_types)}).")
+                unknown_fields=set(override)-overridable_fields
+                if unknown_fields:
+                    raise ValueError(f"bond_types_json for {code!r} sets unknown field(s) {sorted(unknown_fields)} (expected one of {sorted(overridable_fields)}).")
+                bond_types[code].update(override)
+        return bond_types
+
+    @classmethod
     def _load_rate_file(cls, path: str, date_format: str, today: datetime) -> pd.DataFrame:
         rate_df=pd.read_csv(path)
         rate_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(rate_df[cls.CSV_DATE_COLUMN], format=date_format)
@@ -368,8 +415,8 @@ class PolishRetailBonds:
         invested_by_type=dict()
         for i in range(len(self.dataframe)):
             code=codes[i]
-            if code not in self.BOND_TYPES:
-                raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.BOND_TYPES)}.")
+            if code not in self.bond_types:
+                raise ValueError(f"Unknown Polish retail bond code {raw_codes[i]!r}: its type prefix {code!r} isn't one of {sorted(self.bond_types)}.")
             is_swapped=bool(is_swapped_values[i])
 
             cancellations=self.cancellations.get((dates[i], raw_codes[i]), [])
@@ -412,7 +459,7 @@ class PolishRetailBonds:
         return max(raw, 0.0)
 
     def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency, cancel_date: pd.Timestamp=None) -> pd.DataFrame:
-        config=self.BOND_TYPES[code]
+        config=self.bond_types[code]
         period_months=config['period_months']
         num_periods=config['num_periods']
         compounding=config['compounding']
@@ -489,7 +536,7 @@ class PolishRetailBonds:
         # maturity - not just a lump sum tacked onto the final day, as the pre-rework version did
         # it. Untaxed: it's a purchase-price discount, not interest income. Converted at
         # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
-        accrued_profit=np.round(np.cumsum(daily_interest)*(1-self.TAX_RATE/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
+        accrued_profit=np.round(np.cumsum(daily_interest)*(1-self.tax_rate/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
 
         # A genuine early redemption pays out gross accrued interest minus early_redemption_fee,
         # not the plain held-to-maturity accrual — applied once, to the single frozen value every
