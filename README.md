@@ -17,6 +17,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 - an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
+- splitting the raw multi-ticker transactions dataframe by ticker is a single `groupby` pass, not `iterrows()`/`pd.concat` once per row — the latter is O(n²) in transaction count (each `concat` copies the whole growing per-ticker frame), the biggest single cost for a portfolio with many transactions once price history is cached
 
 ### 🏦 `bonds_calculator_library.PolishRetailBonds`
 
@@ -87,6 +88,7 @@ Turns a set of buy/sell transactions in physical commodities (gold, silver, plat
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`
 - same construction-time `ValueError` as `Stock` if `yfinance` returns no price history for a symbol's futures ticker
 - optional `tickers_json` — a JSON file of `{symbol: {"ticker": <yfinance futures ticker>, "quote_unit": <"troy_ounce"/"pound"/"gram">}}`, merged on top of the small built-in `TICKERS`/`QUOTE_UNIT_GRAMS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another commodity without editing the library source
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) symbol split as `Stock`
 
 ### ₿ `crypto_calculator_library.Crypto`
 
@@ -100,6 +102,7 @@ Turns a set of buy/sell transactions in crypto (bitcoin, ethereum, ...) into a d
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `tickers_json` — a JSON file of `{symbol: <yfinance ticker>}`, merged on top of the small built-in `TICKERS` (an entry for an existing symbol overrides the built-in one) — lets a caller track another coin without editing the library source
 - optional `include_native_currency` — also computes each symbol's DataFrame in USD (its native quote currency), same as `Stock`/`Commodity`
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) symbol split as `Stock`/`Commodity`
 
 ### 🏛️ `bank_account_calculator_library.BankAccount`
 
@@ -110,6 +113,7 @@ Turns a set of deposit/withdrawal transactions into a daily balance/interest Dat
 - multiple accounts can share one source directory (`account` column), same as `Stock`'s per-ticker/`Commodity`'s per-symbol split
 - tax on interest defaults to 19% (`BankAccount.DEFAULT_TAX`), overridable per account via an optional `tax` column
 - optional progress-bar hook, driven by `Portfolio` (see below)
+- same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) account split as `Stock`/`Commodity`/`Crypto`
 
 ## Project structure
 
