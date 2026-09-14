@@ -261,7 +261,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 Private (leading-underscore) names are exempt — these are all public API surface, found by an audit across every class:
 
-- `Stock`'s `stock_data` constructor parameter is the same thing `Commodity`/`Crypto`/`Portfolio` call `tickers_json` (a path to the ticker→`{ticker, currency}` JSON mapping) — also undocumented in `Stock`'s own docstring
 - `merge` is a public staticmethod on `Stock`/`Commodity`/`Crypto`/`BankAccount`/`Portfolio`, but private (`_merge`) on `PolishRetailBonds`, despite doing the same thing (sum per-instrument DataFrames by date)
 - `count_tickers` (`Stock`/`Commodity`/`Crypto`) vs. `count_bonds` (`PolishRetailBonds`) vs. `count_accounts` (`BankAccount`) — every one of these classes still names its own output `distribution_by_ticker` regardless, so "ticker" is already the established generic term everywhere except this one method
 - `CSV_ACCOUNT_COLUMN` (`BankAccount`) vs. `CSV_TICKER_COLUMN` (`Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`, and `Portfolio`'s own unused leftover constant) — `BankAccount` still populates `self.distribution_by_ticker` with account names, so this is inconsistent with itself, not just its siblings

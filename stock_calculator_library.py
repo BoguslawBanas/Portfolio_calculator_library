@@ -42,8 +42,12 @@ class Stock:
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, stock_data: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
-        """progress_callback: optional zero-arg callback invoked once per ticker, right after that
+    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+        """tickers_json: path to the JSON file mapping each ISIN to {"ticker": <yfinance
+        symbol>, "currency": <instrument currency>} - same shape/role as Commodity/Crypto's own
+        tickers_json parameter, just required here (rather than optional) since Stock has no
+        built-in ticker registry of its own to fall back on.
+        progress_callback: optional zero-arg callback invoked once per ticker, right after that
         ticker's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes time.
         cache_dir: optional directory to cache each ticker's computed DataFrame in, keyed by
@@ -71,7 +75,7 @@ class Stock:
         self.native_data=dict()
         self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
-        self.tickers=self._load_tickers_json(stock_data)
+        self.tickers=self._load_tickers_json(tickers_json)
         self._cache_dir=cache_dir
 
         dataframes=self._split_by_isin(self.dataframe)
@@ -87,7 +91,7 @@ class Stock:
         revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
-            ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
+            ticker_currency=self.get_ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
             computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
