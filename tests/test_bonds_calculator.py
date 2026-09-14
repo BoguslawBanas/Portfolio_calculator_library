@@ -916,7 +916,7 @@ def test_dividend_column_merges_with_stocks_dividend_column_in_portfolio(make_so
         f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"
     ))
 
-    portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency='usd')
+    portfolio=Portfolio({stock_dir: 'stock', bonds_dir: 'bonds'}, tickers_json=tickers_json, currency_to='usd')
 
     from Portfolio_calculator_library import PolishRetailBonds as PRB
     bonds_alone=PRB(bonds_dir, 'usd')
