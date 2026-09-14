@@ -18,6 +18,7 @@ it needs no unit column/conversion of its own.
 """
 
 import os
+import json
 from datetime import datetime
 from typing import Callable
 import numpy as np
@@ -52,7 +53,9 @@ class Commodity:
     CSV_SELL_TAX_COLUMN='sell_tax'
 
     # Every one of these yfinance futures tickers is USD-quoted, so unlike Stock/Bonds there's
-    # no per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
+    # no per-symbol currency to look up — QUOTE_CURRENCY below covers all of them. Built-in
+    # defaults, always available with no configuration - tickers_json (below) can add to or
+    # override these without editing this dict (README Roadmap item).
     TICKERS={
         'gold': 'GC=F',
         'silver': 'SI=F',
@@ -63,13 +66,16 @@ class Commodity:
     QUOTE_CURRENCY='usd'
 
     # A buy.csv row's amount_of_units/unit is converted to grams, then to the symbol's own
-    # QUOTE_UNIT_GRAMS, so a buy recorded in either supported unit lands on the same physical
-    # quantity (and so the same cost basis) regardless of which one was used.
+    # quote_unit_grams entry, so a buy recorded in either supported unit lands on the same
+    # physical quantity (and so the same cost basis) regardless of which one was used.
     GRAMS_PER_TROY_OUNCE=31.1034768
     GRAMS_PER_POUND=453.59237
     UNIT_TO_GRAMS={'troy_ounce': GRAMS_PER_TROY_OUNCE, 'gram': 1.0}
     # The physical unit each symbol's own yfinance futures ticker actually quotes a price per -
-    # troy ounce for every metal here except copper, which yfinance quotes per pound.
+    # troy ounce for every metal here except copper, which yfinance quotes per pound. Built-in
+    # defaults matching TICKERS above - a tickers_json entry for a new symbol must carry its own
+    # quote_unit (one of QUOTE_UNIT_NAME_TO_GRAMS's keys) alongside its ticker, since there's no
+    # way to infer what unit an arbitrary new yfinance ticker quotes a price per.
     QUOTE_UNIT_GRAMS={
         'gold': GRAMS_PER_TROY_OUNCE,
         'silver': GRAMS_PER_TROY_OUNCE,
@@ -77,17 +83,28 @@ class Commodity:
         'palladium': GRAMS_PER_TROY_OUNCE,
         'copper': GRAMS_PER_POUND,
     }
+    # Named units a tickers_json entry's own quote_unit can reference - a superset of
+    # UNIT_TO_GRAMS (which is only the units a buy.csv row itself may specify), since a quoted
+    # unit like 'pound' (copper) is never something a buy.csv row is recorded in directly.
+    QUOTE_UNIT_NAME_TO_GRAMS={'troy_ounce': GRAMS_PER_TROY_OUNCE, 'pound': GRAMS_PER_POUND, 'gram': 1.0}
 
-    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
-        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'gold', 'silver').
+        CSV_TICKER_COLUMN value must be one of self.tickers's keys (e.g. 'gold', 'silver' from
+        the built-in TICKERS, or a custom one added via tickers_json).
         Neither buy.csv nor sell.csv carries a price_of_unit: every transaction's market price is
         always that day's own yfinance close, not a manually recorded one. buy.csv rows carry
         amount_of_units alongside CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see UNIT_TO_GRAMS)
         and premium; sell.csv rows carry just amount_of_units (already in that symbol's own
         native quote unit, same as the units tracked internally - see module docstring).
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
+        tickers_json: optional path to a JSON file of {symbol: {"ticker": <yfinance futures
+        ticker>, "quote_unit": <one of QUOTE_UNIT_NAME_TO_GRAMS's keys>}} - e.g. {"tin":
+        {"ticker": "TIN=F", "quote_unit": "pound"}} - merged on top of the built-in
+        TICKERS/QUOTE_UNIT_GRAMS (an entry here for an existing symbol overrides the built-in
+        one), so a caller can track another commodity without editing this module's source.
+        None (default): self.tickers/self.quote_unit_grams are exactly TICKERS/QUOTE_UNIT_GRAMS.
         progress_callback: optional zero-arg callback invoked once per symbol, right after that
         symbol's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes
@@ -102,6 +119,7 @@ class Commodity:
         currency_to-converted one in self.data — isolates that symbol's own performance from
         FX movement against currency_to. Free when currency_to is already QUOTE_CURRENCY (the
         already-computed DataFrame is reused); otherwise a second fetch/computation."""
+        self.tickers, self.quote_unit_grams=self._load_tickers(tickers_json)
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -194,6 +212,21 @@ class Commodity:
         return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
 
     @classmethod
+    def _load_tickers(cls, tickers_json: str=None) -> tuple:
+        """(tickers, quote_unit_grams): {symbol: yfinance ticker} and {symbol: grams per quoted
+        unit}, each starting from the built-in TICKERS/QUOTE_UNIT_GRAMS and merging tickers_json
+        (if given) on top - see __init__'s docstring."""
+        tickers=dict(cls.TICKERS)
+        quote_unit_grams=dict(cls.QUOTE_UNIT_GRAMS)
+        if tickers_json is not None:
+            with open(tickers_json, 'r') as f:
+                custom=json.load(f)
+            for symbol, config in custom.items():
+                tickers[symbol]=config['ticker']
+                quote_unit_grams[symbol]=cls.QUOTE_UNIT_NAME_TO_GRAMS[config['quote_unit']]
+        return tickers, quote_unit_grams
+
+    @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
         dataframes=list()
         for filename in sorted(os.listdir(directory)):
@@ -222,7 +255,7 @@ class Commodity:
         a second time."""
         start_date=dataframe.index.min()
         symbol=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
-        ticker_name=self.TICKERS[symbol]
+        ticker_name=self.tickers[symbol]
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
@@ -309,7 +342,7 @@ class Commodity:
                 if row_unit not in self.UNIT_TO_GRAMS:
                     raise ValueError(f"Unknown unit {row_unit!r} for {ticker_name} buy on {sorted_df.index[i].date()} (expected one of {sorted(self.UNIT_TO_GRAMS)}).")
                 grams=amount[i]*self.UNIT_TO_GRAMS[row_unit]
-                units=round(grams/self.QUOTE_UNIT_GRAMS[symbol], 4)
+                units=round(grams/self.quote_unit_grams[symbol], 4)
                 raw_money_invested=units*market_price[i]
                 money_invested=round((premium[i]+1.0)*raw_money_invested, 2)
 

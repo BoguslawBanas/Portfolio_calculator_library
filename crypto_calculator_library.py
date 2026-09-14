@@ -6,6 +6,7 @@ profit, the same two terms Stock uses minus the dividend one.
 """
 
 import os
+import json
 from datetime import datetime
 from typing import Callable
 import numpy as np
@@ -38,7 +39,9 @@ class Crypto:
     CSV_SELL_TAX_COLUMN='sell_tax'
 
     # Every one of these yfinance tickers is USD-quoted, so unlike Stock/Bonds there's no
-    # per-symbol currency to look up — QUOTE_CURRENCY below covers all of them.
+    # per-symbol currency to look up — QUOTE_CURRENCY below covers all of them. Built-in
+    # defaults, always available with no configuration - tickers_json (below) can add to or
+    # override these without editing this dict (README Roadmap item).
     TICKERS={
         'bitcoin': 'BTC-USD',
         'ethereum': 'ETH-USD',
@@ -49,11 +52,16 @@ class Crypto:
     }
     QUOTE_CURRENCY='usd'
 
-    def __init__(self, directory_path: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
-        CSV_TICKER_COLUMN value must be one of TICKERS's keys (e.g. 'bitcoin', 'ethereum').
+        CSV_TICKER_COLUMN value must be one of self.tickers's keys (e.g. 'bitcoin', 'ethereum'
+        from the built-in TICKERS, or a custom one added via tickers_json).
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
+        tickers_json: optional path to a JSON file of {symbol: yfinance ticker} - e.g.
+        {"mynewcoin": "XYZ-USD"} - merged on top of the built-in TICKERS (an entry here for an
+        existing symbol overrides the built-in one), so a caller can track another coin without
+        editing this module's source. None (default): self.tickers is exactly TICKERS.
         progress_callback: optional zero-arg callback invoked once per symbol, right after that
         symbol's price history has been fetched and computed — the unit of work a caller (e.g.
         Portfolio) would want to track progress by, since that fetch is what actually takes
@@ -68,6 +76,7 @@ class Crypto:
         currency_to-converted one in self.data — isolates that symbol's own performance from
         FX movement against currency_to. Free when currency_to is already QUOTE_CURRENCY (the
         already-computed DataFrame is reused); otherwise a second fetch/computation."""
+        self.tickers=self._load_tickers(tickers_json)
         self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -163,6 +172,16 @@ class Crypto:
         return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
 
     @classmethod
+    def _load_tickers(cls, tickers_json: str=None) -> dict:
+        """{symbol: yfinance ticker}, starting from the built-in TICKERS and merging tickers_json
+        (if given) on top - see __init__'s docstring."""
+        tickers=dict(cls.TICKERS)
+        if tickers_json is not None:
+            with open(tickers_json, 'r') as f:
+                tickers.update(json.load(f))
+        return tickers
+
+    @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
         dataframes=list()
         for filename in sorted(os.listdir(directory)):
@@ -182,7 +201,7 @@ class Crypto:
 
     def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
         start_date=dataframe.index.min()
-        ticker_name=self.TICKERS[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
+        ticker_name=self.tickers[dataframe[self.CSV_TICKER_COLUMN].iloc[0]]
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None

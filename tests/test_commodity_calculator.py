@@ -126,6 +126,39 @@ def test_copper_quote_unit_is_pounds_not_troy_ounce(make_source_dir):
     assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
 
 
+def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
+    # A new commodity beyond the built-in TICKERS - tickers_json entries need both the yfinance
+    # ticker and the physical unit that ticker quotes a price per (quote_unit), since neither
+    # can be inferred for an arbitrary new symbol (README Roadmap item).
+    tickers_path=make_tickers_json(
+        {"tin": {"ticker": "TIN=F", "quote_unit": "pound"}}, filename='commodity_tickers.json',
+    )
+    commodity=build_commodity(
+        make_source_dir,
+        {'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+                    f"2024-01-15,tin,{Commodity.GRAMS_PER_POUND},gram,0.0\n"},
+        tickers_json=tickers_path,
+    )
+    assert commodity.tickers['tin']=='TIN=F'
+    # 1 pound of tin (recorded in grams) converts to exactly 1.0 unit in tin's own custom
+    # quote_unit ('pound'), same conversion logic UNIT_TO_GRAMS/QUOTE_UNIT_GRAMS use for the
+    # built-in symbols.
+    expected=round(1.0*DAY_0_CLOSE, 2)
+    assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
+    tickers_path=make_tickers_json({"gold": {"ticker": "CUSTOM-GOLD=F", "quote_unit": "troy_ounce"}})
+    build_commodity(
+        make_source_dir,
+        {'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                    "2024-01-15,gold,2,troy_ounce,0.0\n"},
+        tickers_json=tickers_path,
+    )
+    assert 'CUSTOM-GOLD=F' in mock_yfinance.call_log
+    assert 'GC=F' not in mock_yfinance.call_log
+
+
 def test_unknown_unit_raises_value_error(make_source_dir):
     with pytest.raises(ValueError, match="[Uu]nit"):
         build_commodity(make_source_dir, {

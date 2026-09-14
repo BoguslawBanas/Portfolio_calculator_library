@@ -206,6 +206,33 @@ def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
     assert portfolio.distribution_by_directory[account_dir]==pytest.approx(100.0)
 
 
+def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir, make_tickers_json):
+    # commodity_tickers_json/crypto_tickers_json let a Portfolio-level caller track a symbol
+    # beyond each class's built-in TICKERS without touching the library source, same as
+    # tickers_json already does for 'stock' sources (README Roadmap item).
+    commodity_tickers_path=make_tickers_json(
+        {"tin": {"ticker": "TIN=F", "quote_unit": "pound"}}, filename='commodity_tickers.json',
+    )
+    crypto_tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
+
+    commodities_dir=make_source_dir('commodities', {
+        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                   "2024-01-15,tin,100.0,gram,0.0\n",
+    })
+    crypto_dir=make_source_dir('crypto', {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,notarealcoin,0.5,40000.0,0.01\n",
+    })
+
+    portfolio=Portfolio(
+        {commodities_dir: 'commodities', crypto_dir: 'crypto'},
+        commodity_tickers_json=commodity_tickers_path,
+        crypto_tickers_json=crypto_tickers_path,
+    )
+    assert set(portfolio.distribution_by_ticker)=={'tin', 'notarealcoin'}
+    assert portfolio.total_invested_money>0.0
+
+
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"

@@ -51,7 +51,7 @@ class Portfolio:
 
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
         """sources: a dict mapping each directory path to the asset type it holds - one of
         VALID_SOURCE_TYPES ('stock', 'bonds', 'commodities', 'crypto', 'bank_account'); any
         other value raises ValueError immediately, before any source is constructed. Each
@@ -62,6 +62,12 @@ class Portfolio:
         tickers_json: required when sources includes a 'stock' entry - path to the JSON file
         (see CLAUDE.md / stock_calculator_library) mapping each ISIN to {"ticker": <yfinance
         symbol>, "currency": <instrument currency>}, passed straight through to Stock.
+
+        commodity_tickers_json/crypto_tickers_json: optional, passed straight through to every
+        Commodity/Crypto source's own tickers_json (see their docstrings) - lets a caller track
+        a commodity/crypto symbol beyond each class's small built-in TICKERS dict without
+        editing the library source (README Roadmap item). Unlike tickers_json above, never
+        required - Commodity/Crypto both work with no configuration via their built-in TICKERS.
 
         self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
         allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
@@ -147,10 +153,10 @@ class Portfolio:
                     source=PolishRetailBonds(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Commodity(dir, currency, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Crypto(dir, currency, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
