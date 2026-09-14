@@ -33,7 +33,10 @@ class BankAccount:
     SOURCE_TYPE_COLUMN='state'
 
     # --- Input: columns read from deposit.csv / withdrawal.csv. ---
-    CSV_ACCOUNT_COLUMN='account'
+    # Named CSV_TICKER_COLUMN (its value is still 'account'), matching Stock/PolishRetailBonds/
+    # Commodity/Crypto's own CSV_TICKER_COLUMN - this class still populates
+    # self.distribution_by_ticker with account names, same generic term as every other class.
+    CSV_TICKER_COLUMN='account'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_COLUMN='amount'
     CSV_RATE_TYPE_COLUMN='rate_type'
@@ -47,7 +50,7 @@ class BankAccount:
     def __init__(self, directory_path: str, interest_rate_file: str='interest_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
         """directory_path: a directory holding deposit.csv (required) and withdrawal.csv
         (optional), one row per transaction. Multiple accounts can share a directory,
-        distinguished by CSV_ACCOUNT_COLUMN. Every deposit.csv row also carries that account's
+        distinguished by CSV_TICKER_COLUMN. Every deposit.csv row also carries that account's
         rate_type ('fixed'/'variable'), rate (the fixed annual %, or the spread added to
         interest_rate_file's base rate when variable), capitalization_months (how often accrued
         interest is folded into the interest-bearing balance), and optional tax (%, defaults to
@@ -83,7 +86,7 @@ class BankAccount:
         current_value_by_account=dict()
         revenue_by_account=dict()
         for df in dataframes:
-            account=df[self.CSV_ACCOUNT_COLUMN].iloc[0]
+            account=df[self.CSV_TICKER_COLUMN].iloc[0]
             computed=self._compute_data(df, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
@@ -128,7 +131,7 @@ class BankAccount:
         Named count_tickers, not count_accounts, to match Stock/Commodity/Crypto's equivalent
         method - distribution_by_ticker already uses "ticker" as this library's generic
         per-holding term, even for a bank account."""
-        return cls._load_sources(directory_path)[cls.CSV_ACCOUNT_COLUMN].nunique()
+        return cls._load_sources(directory_path)[cls.CSV_TICKER_COLUMN].nunique()
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
@@ -168,7 +171,7 @@ class BankAccount:
         indexed=dataframe.set_index(dates).drop(columns=[cls.CSV_DATE_COLUMN])
         # sort=False preserves each account's first-appearance order, matching the old dict's
         # insertion order - callers don't rely on this, but it keeps behavior identical anyway.
-        return [group for _, group in indexed.groupby(cls.CSV_ACCOUNT_COLUMN, sort=False)]
+        return [group for _, group in indexed.groupby(cls.CSV_TICKER_COLUMN, sort=False)]
 
     def _load_interest_rate_data(self, end_date: datetime) -> pd.DataFrame:
         if self._interest_rate_data is None:
@@ -180,7 +183,7 @@ class BankAccount:
         return self._interest_rate_data
 
     def _compute_data(self, dataframe: pd.DataFrame, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
-        account=dataframe[self.CSV_ACCOUNT_COLUMN].iloc[0]
+        account=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
         start_date=dataframe.index.min()
         end_date=datetime.today()
 
