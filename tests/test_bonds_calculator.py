@@ -828,6 +828,93 @@ def test_tax_rate_is_folded_into_the_cache_key(make_source_dir, cache_dir):
     assert default_again.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(default.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])
 
 
+def test_bond_types_json_defaults_to_the_built_in_registry(make_source_dir):
+    bonds=PolishRetailBonds(make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    )))
+    # Existing callers that never pass bond_types_json keep getting exactly the built-in
+    # BOND_TYPES values - same guarantee tax_rate/currency_to already give their own defaults.
+    assert bonds.bond_types==PolishRetailBonds.BOND_TYPES
+    assert bonds.bond_types is not PolishRetailBonds.BOND_TYPES  # a copy, not the same dict
+
+
+def test_bond_types_json_overrides_swap_discount(make_source_dir, make_tickers_json):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,True\n"  # is_swapped=True to actually exercise the discount
+    ))
+    bond_types_json=make_tickers_json({"TOS": {"swap_discount": 0.50}}, filename='bond_types.json')
+    bonds=PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+    assert bonds.bond_types['TOS']['swap_discount']==pytest.approx(0.50)
+    # Cost basis reflects the overridden 0.50 zl/bond discount, not the built-in 0.10.
+    assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(PolishRetailBonds.NOMINAL_VALUE-0.50)
+    # early_redemption_fee wasn't touched by this override - still the built-in TOS value.
+    assert bonds.bond_types['TOS']['early_redemption_fee']==pytest.approx(PolishRetailBonds.BOND_TYPES['TOS']['early_redemption_fee'])
+
+
+def test_bond_types_json_overrides_early_redemption_fee(make_source_dir, make_tickers_json):
+    start=date.today()-timedelta(days=200)
+    cancel_date=start+timedelta(days=80)
+    bonds_dir=make_bonds_dir(
+        make_source_dir,
+        buy_csv=(
+            "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+            f"{start.isoformat()},ROR0927,1,0.5,4.0,False\n"
+        ),
+        rate_row="01-2020,6.0\n",
+        cancel_csv=(
+            "date,isin,cancel_date,amount_of_units\n"
+            f"{start.isoformat()},ROR0927,{cancel_date.isoformat()},1\n"
+        ),
+    )
+    bond_types_json=make_tickers_json({"ROR": {"early_redemption_fee": 2.00}}, filename='bond_types.json')
+    bonds=PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+    gross_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
+    expected=round(max(0.0, gross_at_cancellation-2.00), 2)  # overridden 2.00, not the built-in 0.50
+    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+
+
+def test_bond_types_json_unknown_code_raises(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    bond_types_json=make_tickers_json({"XYZ": {"swap_discount": 0.50}}, filename='bond_types.json')
+    with pytest.raises(ValueError, match="XYZ"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
+def test_bond_types_json_unknown_field_raises(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    # period_months is issuance taxonomy, not an asserted value - not overridable via bond_types_json.
+    bond_types_json=make_tickers_json({"TOS": {"period_months": 6}}, filename='bond_types.json')
+    with pytest.raises(ValueError, match="period_months"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
+def test_bond_types_json_is_folded_into_the_cache_key(make_source_dir, make_tickers_json, cache_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0929,1,0.0,4.4,True\n"
+    ))
+    bond_types_json=make_tickers_json({"TOS": {"swap_discount": 0.50}}, filename='bond_types.json')
+
+    default=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)
+    overridden=PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json, cache_dir=cache_dir)
+    default_again=PolishRetailBonds(bonds_dir, cache_dir=cache_dir)  # cache hit - must not read overridden's entry
+
+    assert default.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(overridden.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+    assert default_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(default.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+
+
 def test_count_tickers_reads_row_count_without_computing(make_source_dir):
     start=date.today()-timedelta(days=1)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(

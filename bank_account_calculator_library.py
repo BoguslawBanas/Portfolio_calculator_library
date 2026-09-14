@@ -1,8 +1,8 @@
 """
 Class-based bank account calculator, following the same pattern as
 bonds_calculator_library.PolishRetailBonds: no yfinance fetch and no Currency conversion (a
-bank account balance isn't traded/quoted, and — same known limitation as PolishRetailBonds,
-see the README Roadmap — everything here is assumed to already be in one currency). What makes
+bank account balance isn't traded/quoted, and — unlike PolishRetailBonds, which now converts
+via its own currency_to — everything here is still assumed to already be in one currency). What makes
 this different from every other calculator is that daily interest compounds onto a balance
 that only grows in discrete jumps (deposits/withdrawals, and periodic interest
 capitalization) rather than continuously — so unlike Stock/Commodity/Crypto's per-transaction
