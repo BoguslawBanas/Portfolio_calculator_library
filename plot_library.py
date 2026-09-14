@@ -1,18 +1,16 @@
 """
-Class-based alternative wiring plot_library.py's chart logic to a Portfolio instance (see
-portfolio_calculator_library.py) — a sketch, not wired into the rest of the codebase. Unlike
-the first version of this file, it does not import plot_library: each method's plotly code is
-inlined here, driven by whatever DataFrame/columns the Portfolio instance already has
-(computing them via Portfolio's own methods first if they aren't there yet). Built on plotly
-alone (not matplotlib) so every chart type - including the candlestick - comes from one library.
+Class-based charting layer wiring plotly to a Portfolio instance (see
+portfolio_calculator_library.py): each method's plotly code is driven by whatever
+DataFrame/columns the Portfolio instance already has, computing them via Portfolio's own
+methods first if they aren't there yet. Built on plotly alone (not matplotlib) so every chart
+type - including the candlestick - comes from one library.
 """
 
 import pandas as pd
 import plotly.graph_objects as go
 from .portfolio_calculator_library import Portfolio
 
-# Colorblind-safe categorical palette (fixed order, never cycled/generated) — same values as
-# plot_library.py's, duplicated here since this file intentionally doesn't import that module.
+# Colorblind-safe categorical palette (fixed order, never cycled/generated).
 CATEGORICAL_COLORS=['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
 COLOR_GOOD='#0ca30c'
 COLOR_CRITICAL='#d03b3b'

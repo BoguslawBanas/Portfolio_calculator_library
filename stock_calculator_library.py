@@ -1,13 +1,9 @@
 """
-Class-based alternative to stock_calculator_library.py — a sketch, not wired into the rest
-of the codebase, built the same way test.py wraps portfolio_calculator_library.py: the
-module's free functions become methods on a Stock class, and the constructor does the work
-that used to require calling get_data_from_isin by hand — it fetches the FX data and the
-price history and computes the final Money_invested/Profit/Dividend DataFrame right away,
-caching the result on self.data.
-
-Uses a plain (non-relative) import of currency_calculator_library, same assumption test.py
-makes: run as a standalone script from the repo root rather than as part of a package.
+Class-based stock/ETF calculator: given a directory of buy/sell/dividend transactions plus a
+tickers.json mapping each ISIN to its yfinance ticker and native currency, the constructor
+fetches the FX data and price history and computes the final Money_invested/Profit/Dividend
+DataFrame right away, caching the result on self.data. Every other asset-type calculator in
+this package (PolishRetailBonds, Commodity, Crypto, BankAccount) follows the same shape.
 """
 
 import os

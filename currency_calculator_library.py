@@ -1,8 +1,8 @@
 """
-Class-based alternative to currency_calculator_library.py — a sketch, not wired into the
-rest of the codebase, built the same way test.py/test2.py wrap their modules: the module's
-one function becomes a method, and the constructor fetches the exchange-rate data right
-away, caching the result on self.data.
+Class-based FX rate fetcher: the constructor fetches daily exchange-rate history for a
+currency pair via yfinance right away, caching the result on self.data. Used internally by
+Stock/Commodity/Crypto/PolishRetailBonds to convert their own native-currency values to a
+portfolio's target currency, and usable standalone.
 """
 
 from datetime import datetime
