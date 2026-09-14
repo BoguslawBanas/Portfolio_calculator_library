@@ -105,6 +105,32 @@ def test_distribution_by_currency_groups_same_currency_tickers_together(make_sou
     assert portfolio.distribution_by_currency==pytest.approx({'USD': 100.0})
 
 
+def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_source_dir, make_tickers_json):
+    # Same ISIN split across two separate source directories (e.g. two different brokers) -
+    # _absorb_source used to overwrite distribution_by_ticker[isin] with the later source's own
+    # amount instead of adding to it, silently dropping the first source's contribution even
+    # though total_money_invested itself stayed correct (README Roadmap item).
+    stock_dir1=make_source_dir('broker_a', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-15,US0000000001,5,100.0,0.0\n",
+    })
+    stock_dir2=make_source_dir('broker_b', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                   "2024-01-20,US0000000001,5,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    portfolio=Portfolio(
+        {stock_dir1: 'stock', stock_dir2: 'stock'},
+        tickers_json=tickers_json, currency_to='usd',
+    )
+
+    assert portfolio.total_money_invested==pytest.approx(1000.0)
+    # A single ISIN held across both sources -> its distribution should reflect the combined
+    # 1000 invested (100% of the portfolio), not just one source's 500 (50%).
+    assert portfolio.distribution_by_ticker==pytest.approx({'US0000000001': 100.0})
+    assert portfolio.distribution_by_currency==pytest.approx({'USD': 100.0})
+
+
 def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"

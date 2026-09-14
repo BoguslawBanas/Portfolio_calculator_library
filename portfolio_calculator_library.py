@@ -231,7 +231,7 @@ class Portfolio(ReprMixin):
         for target_ticker, target_currency, source_ticker, total in per_metric:
             for key, value in source_ticker.items():
                 amount=round(value/100.0*total, 2)
-                target_ticker[key]=amount
+                target_ticker[key]=target_ticker.get(key, 0.0)+amount
                 if supports_currency:
                     self._accumulate_by_currency(target_currency, source.currency_by_ticker, key, amount)
 
