@@ -253,6 +253,17 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - computing IRR and rolling returns instead of relying on a broker's own reporting
 - building custom charts or reports on top of one merged portfolio DataFrame
 
+## Roadmap
+
+- `Portfolio._absorb_source` overwrites rather than accumulates (`target_ticker[key]=amount` instead of `+=`) when the same ticker/ISIN appears in more than one source directory — silently drops a source's contribution to `distribution_by_ticker`/`distribution_by_ticker_current_value`/`distribution_by_ticker_revenue` (and the matching `distribution_by_currency*` breakdowns), even though `total_money_invested`/`total_current_value`/`total_revenue` themselves stay correct; this breaks the advertised "comparing performance across brokers/accounts by treating each as a separate source directory" use case whenever the same holding is split across two sources
+- division-by-zero guards on `distribution_by_ticker_current_value`/`distribution_by_ticker_revenue` are inconsistent across the five asset classes: `Stock`/`Crypto` are unguarded (silent `NaN` plus a `RuntimeWarning` when total current value or total revenue is exactly zero), `Commodity`/`BankAccount` guard to `0.0`, and `PolishRetailBonds` guards by omitting the key entirely — worth picking one behavior and applying it everywhere
+- `merge()`, `__repr__`, the groupby-based `_split_by_*` method, and `count_tickers()` are now byte-for-byte identical (or near enough) across `Stock`/`Commodity`/`Crypto`/`BankAccount`/`PolishRetailBonds` — a shared base class or mixin could collapse 4-6 copies of the same few lines, at the cost of introducing inheritance into a codebase that has so far deliberately kept every class self-contained
+- `BankAccount._compute_data`'s deposit/withdrawal accumulation loop still uses `.iterrows()`/`.loc[label]` — the same O(n), slow-per-row pattern already replaced with numpy arrays in `Stock`/`Commodity`/`Crypto`'s transaction loops and in `BankAccount`'s own interest-accrual loop right below it
+- `PolishRetailBonds._load_cancellations` still uses `.iterrows()` over `cancel.csv` — low-impact in practice since that file is typically small, but the same pattern
+- no de-duplication of `Currency` fetches across tickers that share a currency pair within one `Stock`/`Commodity`/`Crypto` construction — several holdings denominated in the same foreign currency each build their own `Currency(...)` and, without `cache_dir`, each hits yfinance separately for the same FX pair; fixing this well is nontrivial since each ticker's own start date can differ, so only worth doing if it's actually a bottleneck in practice
+- `tax_rate`/`bond_types_json` overrides have no type/shape validation — a malformed value fails deep inside arithmetic with a cryptic error instead of a clear one raised at construction time
+- a nonexistent `directory_path` (or missing `buy.csv`/`sell.csv`) raises a raw `FileNotFoundError` (`[WinError 3]`/`[Errno 2]`) straight from `os.listdir`/`pd.read_csv` instead of the library's own established clear-error convention, like the `yfinance`-empty-history `ValueError`s already in place
+
 ## License
 
 MIT License.
