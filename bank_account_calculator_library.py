@@ -175,12 +175,24 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
             self.PROFIT_COLUMN: 0.0,
         }, index=pd.date_range(start=start_date, end=end_date, freq='D'))
 
+        # Pulled out as plain numpy arrays and scattered into a preallocated array by integer
+        # position instead of .iterrows()/.loc[label] per row - the same pattern Stock/Commodity/
+        # Crypto's transaction loops already use (README Roadmap item). Unlike those loops, this
+        # one has no running-average-style dependency between rows, so np.add.at can do the
+        # whole accumulation in one call rather than a Python for-loop.
         sorted_df=dataframe.sort_index(kind='stable')
-        for idx, row in sorted_df.iterrows():
-            if row[self.SOURCE_TYPE_COLUMN]=='deposit':
-                data.loc[idx, self.MONEY_INVESTED_COLUMN]+=round(row[self.CSV_AMOUNT_COLUMN], 2)
-            elif row[self.SOURCE_TYPE_COLUMN]=='withdrawal':
-                data.loc[idx, self.MONEY_INVESTED_COLUMN]-=round(row[self.CSV_AMOUNT_COLUMN], 2)
+        state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
+        raw_amount=sorted_df[self.CSV_AMOUNT_COLUMN].to_numpy(dtype=float)
+        signed_amount=np.where(state=='deposit', 1.0, -1.0)*np.round(raw_amount, 2)
+
+        position=data.index.get_indexer(sorted_df.index)
+        if (position<0).any():
+            missing=sorted_df.index[position<0]
+            raise KeyError(f"Transaction date(s) {list(missing)} for {account} fall outside the computed daily range.")
+
+        money_invested_by_day=np.zeros(len(data))
+        np.add.at(money_invested_by_day, position, signed_amount)
+        data[self.MONEY_INVESTED_COLUMN]=money_invested_by_day
 
         data[self.MONEY_INVESTED_COLUMN]=data[self.MONEY_INVESTED_COLUMN].cumsum()
         money_invested=data[self.MONEY_INVESTED_COLUMN].to_numpy()

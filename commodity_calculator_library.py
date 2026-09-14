@@ -201,6 +201,13 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
+        # A nonexistent directory would otherwise surface as a raw FileNotFoundError straight
+        # from os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established
+        # clear-error convention, like the yfinance-empty-history ValueErrors already in place
+        # (README Roadmap item).
+        if not os.path.isdir(directory):
+            raise ValueError(f"No such directory: {directory!r}")
+
         dataframes=list()
         for filename in sorted(os.listdir(directory)):
             if not filename.endswith('.csv'):

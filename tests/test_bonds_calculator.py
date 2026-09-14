@@ -922,6 +922,67 @@ def test_bond_types_json_unknown_field_raises(make_source_dir, make_tickers_json
         PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
 
 
+def test_tax_rate_non_numeric_raises_value_error(make_source_dir):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    with pytest.raises(ValueError, match="tax_rate"):
+        PolishRetailBonds(bonds_dir, tax_rate="19")
+
+
+@pytest.mark.parametrize("bad_tax_rate", [-1.0, 150.0])
+def test_tax_rate_out_of_range_raises_value_error(make_source_dir, bad_tax_rate):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    with pytest.raises(ValueError, match="tax_rate"):
+        PolishRetailBonds(bonds_dir, tax_rate=bad_tax_rate)
+
+
+def test_bond_types_json_non_numeric_value_raises_value_error(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    bond_types_json=make_tickers_json({"TOS": {"swap_discount": "0.50"}}, filename='bond_types.json')
+    with pytest.raises(ValueError, match="swap_discount"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
+def test_bond_types_json_swap_discount_out_of_range_raises_value_error(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    # swap_discount is a zl/bond amount subtracted from NOMINAL_VALUE (100.0) - must stay below it,
+    # or the swapped price_per_bond would go zero/negative.
+    bond_types_json=make_tickers_json({"TOS": {"swap_discount": 150.0}}, filename='bond_types.json')
+    with pytest.raises(ValueError, match="swap_discount"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
+def test_bond_types_json_negative_early_redemption_fee_raises_value_error(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    bond_types_json=make_tickers_json({"TOS": {"early_redemption_fee": -1.0}}, filename='bond_types.json')
+    with pytest.raises(ValueError, match="early_redemption_fee"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
+def test_bond_types_json_top_level_not_an_object_raises_value_error(make_source_dir, make_tickers_json):
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{(date.today()-timedelta(days=2)).isoformat()},TOS0929,1,0.0,4.4,False\n"
+    ))
+    bond_types_json=make_tickers_json(["TOS"], filename='bond_types.json')  # a JSON array, not an object
+    with pytest.raises(ValueError, match="JSON object"):
+        PolishRetailBonds(bonds_dir, bond_types_json=bond_types_json)
+
+
 def test_bond_types_json_is_folded_into_the_cache_key(make_source_dir, make_tickers_json, cache_dir):
     start=date.today()-timedelta(days=2)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
@@ -936,6 +997,24 @@ def test_bond_types_json_is_folded_into_the_cache_key(make_source_dir, make_tick
 
     assert default.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(overridden.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
     assert default_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(default.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
+
+
+def test_nonexistent_directory_raises_clear_value_error(tmp_path):
+    # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
+    # pd.read_csv ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
+    # convention (README Roadmap item).
+    missing_dir=str(tmp_path/'does_not_exist')
+    with pytest.raises(ValueError, match="No such directory"):
+        PolishRetailBonds(missing_dir)
+
+
+def test_missing_buy_csv_raises_clear_value_error(tmp_path):
+    # An existing directory with no buy.csv used to surface as a raw FileNotFoundError straight
+    # from pd.read_csv instead of a clear error (README Roadmap item).
+    empty_dir=tmp_path/'bonds_without_buy_csv'
+    empty_dir.mkdir()
+    with pytest.raises(ValueError, match="buy.csv"):
+        PolishRetailBonds(str(empty_dir))
 
 
 def test_count_tickers_reads_row_count_without_computing(make_source_dir):

@@ -24,6 +24,15 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeyp
         })
 
 
+def test_nonexistent_directory_raises_clear_value_error(tmp_path):
+    # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
+    # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
+    # convention (README Roadmap item).
+    missing_dir=str(tmp_path/'does_not_exist')
+    with pytest.raises(ValueError, match="No such directory"):
+        Crypto(missing_dir, 'usd')
+
+
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     crypto=build_crypto(make_source_dir, {
         'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"

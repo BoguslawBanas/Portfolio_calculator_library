@@ -198,12 +198,20 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
+        # Validated up front, before any file I/O, so a malformed override raises a clear error
+        # right at construction time instead of surfacing later as a cryptic failure deep inside
+        # _bond_dataframe's arithmetic (README Roadmap item).
+        if isinstance(tax_rate, bool) or not isinstance(tax_rate, (int, float)):
+            raise ValueError(f"tax_rate must be a number (percent), got {tax_rate!r}.")
+        if not (0.0<=tax_rate<=100.0):
+            raise ValueError(f"tax_rate must be between 0 and 100 (percent), got {tax_rate!r}.")
+
         self.tax_rate=tax_rate
         self.bond_types=self._load_bond_types(bond_types_json)
         today=datetime.today()
+        buy_path=self._resolve_buy_path(directory_path)
         interest_rate_path=os.path.join(directory_path, interest_rate_file)
         inflation_rate_path=os.path.join(directory_path, inflation_rate_file)
-        buy_path=os.path.join(directory_path, "buy.csv")
         cancel_path=os.path.join(directory_path, "cancel.csv")
 
         self.dataframe=pd.read_csv(buy_path)
@@ -302,13 +310,26 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0 if self.total_current_value else 0.0
             self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
-    @staticmethod
-    def count_tickers(directory_path: str) -> int:
+    @classmethod
+    def count_tickers(cls, directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
         size a progress bar before construction. Named count_tickers, not count_bonds, to match
         Stock/Commodity/Crypto's equivalent method - distribution_by_ticker already uses
         "ticker" as this library's generic per-holding term, even for a bond type code."""
-        return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
+        return len(pd.read_csv(cls._resolve_buy_path(directory_path)))
+
+    @classmethod
+    def _resolve_buy_path(cls, directory_path: str) -> str:
+        """Validates directory_path/buy.csv exist, raising this library's own established
+        clear-error ValueError convention instead of a raw FileNotFoundError straight from
+        pd.read_csv ([WinError 3]/[Errno 2]) — shared by __init__ and count_tickers, the two
+        entry points that read buy.csv directly (README Roadmap item)."""
+        if not os.path.isdir(directory_path):
+            raise ValueError(f"No such directory: {directory_path!r}")
+        buy_path=os.path.join(directory_path, "buy.csv")
+        if not os.path.exists(buy_path):
+            raise ValueError(f"No buy.csv found in {directory_path!r}")
+        return buy_path
 
     @classmethod
     def _load_bond_types(cls, bond_types_json: str=None) -> dict:
@@ -320,13 +341,28 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         if bond_types_json is not None:
             with open(bond_types_json, 'r') as f:
                 overrides=json.load(f)
+            if not isinstance(overrides, dict):
+                raise ValueError(f"bond_types_json must contain a JSON object of {{code: {{field: value}}}}, got {type(overrides).__name__}.")
             overridable_fields={'swap_discount', 'early_redemption_fee'}
             for code, override in overrides.items():
                 if code not in bond_types:
                     raise ValueError(f"bond_types_json overrides unknown bond type {code!r} (expected one of {sorted(bond_types)}).")
+                if not isinstance(override, dict):
+                    raise ValueError(f"bond_types_json for {code!r} must be a JSON object of {{field: value}}, got {type(override).__name__}.")
                 unknown_fields=set(override)-overridable_fields
                 if unknown_fields:
                     raise ValueError(f"bond_types_json for {code!r} sets unknown field(s) {sorted(unknown_fields)} (expected one of {sorted(overridable_fields)}).")
+                # swap_discount/early_redemption_fee are both zl/bond amounts arithmetic below
+                # subtracts from NOMINAL_VALUE/gross accrued interest - a non-numeric or
+                # out-of-range value would otherwise only surface as a cryptic failure (or a
+                # silently nonsensical negative price/fee) deep inside _bond_dataframe.
+                for field, value in override.items():
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError(f"bond_types_json for {code!r} field {field!r} must be a number, got {value!r}.")
+                    if field=='swap_discount' and not (0.0<=value<cls.NOMINAL_VALUE):
+                        raise ValueError(f"bond_types_json for {code!r} swap_discount must be within [0, {cls.NOMINAL_VALUE}) zl/bond, got {value!r}.")
+                    if field=='early_redemption_fee' and not (value>=0.0):
+                        raise ValueError(f"bond_types_json for {code!r} early_redemption_fee must be >= 0 zl/bond, got {value!r}.")
                 bond_types[code].update(override)
         return bond_types
 
@@ -347,15 +383,19 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         that pair here, since nothing else distinguishes them). A holding can have more than one
         row (several partial cancellations over time) - see _build_tranches for how these turn
         into per-tranche accrual."""
+        # Grouped via pandas' own (vectorized) groupby instead of a per-row .iterrows() loop
+        # (README Roadmap item) - low-impact in practice since cancel.csv is typically small, but
+        # the same pattern as every other transaction-walking loop in this package. Sorting by
+        # cancel_date up front, before grouping, means each group's rows already come out in
+        # cancel_date order (groupby preserves within-group row order) - equivalent to the old
+        # per-key entries.sort(...) pass after the fact.
         cancel_df=pd.read_csv(path)
         cancel_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
         cancel_df[cls.CSV_CANCEL_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_CANCEL_DATE_COLUMN], format='%Y-%m-%d')
+        cancel_df=cancel_df.sort_values(cls.CSV_CANCEL_DATE_COLUMN, kind='stable')
         cancellations=dict()
-        for _, row in cancel_df.iterrows():
-            key=(row[cls.CSV_DATE_COLUMN], row[cls.CSV_TICKER_COLUMN])
-            cancellations.setdefault(key, list()).append((row[cls.CSV_CANCEL_DATE_COLUMN], float(row[cls.CSV_AMOUNT_OF_UNITS_COLUMN])))
-        for key, entries in cancellations.items():
-            entries.sort(key=lambda entry: entry[0])
+        for key, group in cancel_df.groupby([cls.CSV_DATE_COLUMN, cls.CSV_TICKER_COLUMN], sort=False):
+            cancellations[key]=list(zip(group[cls.CSV_CANCEL_DATE_COLUMN], group[cls.CSV_AMOUNT_OF_UNITS_COLUMN].astype(float)))
         return cancellations
 
     @classmethod

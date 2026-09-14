@@ -72,6 +72,16 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
 
 
+def test_nonexistent_directory_raises_clear_value_error(tmp_path, make_tickers_json):
+    # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
+    # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
+    # convention (README Roadmap item).
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    missing_dir=str(tmp_path/'does_not_exist')
+    with pytest.raises(ValueError, match="No such directory"):
+        Stock(missing_dir, tickers_json, 'usd')
+
+
 def test_oversell_raises_value_error(make_source_dir, make_tickers_json):
     with pytest.raises(ValueError, match="Cannot sell"):
         build_stock(
