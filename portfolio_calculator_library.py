@@ -262,8 +262,7 @@ class Portfolio(ReprMixin):
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame.
-        Equivalent of merge_dataframes(dataframes)."""
+        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame."""
         list_of_df=[df.data for df in dataframes]
         merged=pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
         return Portfolio._prepend_zero_day(merged)

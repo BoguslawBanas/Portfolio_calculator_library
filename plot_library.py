@@ -47,12 +47,13 @@ class Plot:
     ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY='directory'
 
     def __init__(self, portfolio: Portfolio):
-        """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py). If it
-        hasn't been merged yet (self.portfolio not set), merge it now so every plot method below
-        has a DataFrame to draw from."""
+        """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py) that
+        has already had calculate_irr()/resample()/calculate_money_earned_between_dates_column()
+        called on it at least once - whichever one a caller needs first, since each of them sets
+        portfolio.portfolio (the working DataFrame money_plot/performance_plot/
+        period_return_bar_plot read from) as a side effect. See the README's Usage example,
+        which always calls calculate_irr() right before constructing a Plot."""
         self.portfolio=portfolio
-        # if not hasattr(self.portfolio, 'portfolio'):
-        #     self.portfolio.portfolio=Portfolio.merge(self.portfolio.dataframes)
 
     @staticmethod
     def _render(fig: go.Figure, path_to_save_fig: str=None):

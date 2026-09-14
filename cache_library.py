@@ -1,11 +1,11 @@
 """
-Disk cache for the DataFrames Stock/Bonds/Commodity/Crypto/Currency fetch from yfinance and
-compute from the source transaction CSVs (see the README's Roadmap). Every one of those
-calculators fetches price/rate history up to datetime.today(), so a cache entry is only ever
-valid for the day it was written — a cache key doesn't need to encode "as of when", just
-"computed_on" needs to still be today. Anything that should invalidate a cache entry sooner
-(a new/edited transaction, a different ticker/currency) is instead folded into the key itself,
-via hash_dataframe/hash_file below.
+Disk cache for the DataFrames Stock/Bonds/Commodity/Crypto/Currency compute from a yfinance
+fetch, and BankAccount computes from its own interest-accrual formula (see the README's
+Roadmap). Every one of those calculators computes up to datetime.today(), so a cache entry is
+only ever valid for the day it was written — a cache key doesn't need to encode "as of when",
+just "computed_on" needs to still be today. Anything that should invalidate a cache entry sooner
+(a new/edited transaction, a different ticker/currency/rate file) is instead folded into the key
+itself, via hash_dataframe/hash_file below.
 
 Caching is opt-in: every class that can use a DiskCache takes it through a cache_dir
 constructor argument that defaults to None (disabled), so existing callers are unaffected.
