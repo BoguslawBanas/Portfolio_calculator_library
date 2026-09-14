@@ -49,7 +49,7 @@ class Portfolio:
 
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
+    def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
         """sources: a dict mapping each directory path to the asset type it holds - one of
         VALID_SOURCE_TYPES ('stock', 'bonds', 'commodities', 'crypto', 'bank_account'); any
         other value raises ValueError immediately, before any source is constructed. Each
@@ -67,10 +67,16 @@ class Portfolio:
         editing the library source (README Roadmap item). Unlike tickers_json above, never
         required - Commodity/Crypto both work with no configuration via their built-in TICKERS.
 
+        currency_to: target currency every source is converted to and summed in (self.data and
+        every total_*/distribution_by_*_current_value/_revenue figure) - defaults to 'USD'.
+        Passed straight through as each Stock/PolishRetailBonds/Commodity/Crypto source's own
+        currency_to, matching their parameter name (BankAccount has none - see its own README
+        entry on the single-currency limitation).
+
         self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
         allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
         a Polish bond's 'PLN', ...) rather than by ticker/directory - answers "how much of my
-        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency below
+        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency_to above
         (the single currency self.data itself is already converted to and summed in).
 
         cache_dir: optional directory to cache every source's computed DataFrame in — see
@@ -87,10 +93,10 @@ class Portfolio:
 
         include_native_currency: when True, Stock/Commodity/Crypto sources also compute each
         ticker/symbol's DataFrame in its own native currency, isolated from FX movement
-        against currency — collected into self.native_data/self.native_currency (keyed by
+        against currency_to — collected into self.native_data/self.native_currency (keyed by
         ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
         of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
-        currency above — see README Roadmap), but doesn't yet expose an include_native_currency
+        currency_to above — see README Roadmap), but doesn't yet expose an include_native_currency
         of its own the way Stock/Commodity/Crypto do, so there's no per-holding native-currency
         DataFrame for Portfolio to collect here."""
         self.distribution_by_directory=dict()
@@ -101,7 +107,7 @@ class Portfolio:
         self.distribution_by_ticker_revenue=dict()
         # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
         # currency field for Stock, each source's fixed QUOTE_CURRENCY/NATIVE_CURRENCY for
-        # Commodity/Crypto/PolishRetailBonds) - not by currency (this constructor's target
+        # Commodity/Crypto/PolishRetailBonds) - not by currency_to (this constructor's target
         # currency, what self.data is already summed in), so this answers "how much of my
         # portfolio is actually USD-denominated vs. EUR vs. PLN" regardless of what everything
         # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
@@ -111,7 +117,7 @@ class Portfolio:
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
-        self.total_invested_money=0.0
+        self.total_money_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
@@ -140,21 +146,21 @@ class Portfolio:
             elif type=='crypto':
                 total_units+=Crypto.count_tickers(dir)
             elif type=='bank_account':
-                total_units+=BankAccount.count_accounts(dir)
+                total_units+=BankAccount.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    source=Stock(dir, tickers_json, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='bonds':
-                    source=PolishRetailBonds(dir, currency, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -167,7 +173,7 @@ class Portfolio:
         # ZeroDivisionError (these are plain Python floats, not numpy - an unguarded division
         # raises rather than silently producing NaN).
         for key, value in self.distribution_by_directory.items():
-            self.distribution_by_directory[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -176,7 +182,7 @@ class Portfolio:
             self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_ticker.items():
-            self.distribution_by_ticker[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -185,7 +191,7 @@ class Portfolio:
             self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_currency.items():
-            self.distribution_by_currency[key]=100.0*value/self.total_invested_money if self.total_invested_money else 0.0
+            self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
             self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -202,7 +208,7 @@ class Portfolio:
         """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
         Portfolio in a REPL/notebook shows something useful instead of the default
         <...object at 0x...>."""
-        return f"{self.__class__.__name__}(invested={self.total_invested_money:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
@@ -231,7 +237,7 @@ class Portfolio:
         self.distribution_by_directory[dir]=source.total_money_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
-        self.total_invested_money+=source.total_money_invested
+        self.total_money_invested+=source.total_money_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
 

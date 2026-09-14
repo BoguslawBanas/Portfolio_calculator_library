@@ -29,7 +29,7 @@ Computes the value over time of Polish retail treasury bonds (*obligacje detalic
 - `is_swapped` (per holding) discounts the cost basis by that type's *cena zamiany* — the price of buying the bond by exchanging a maturing predecessor's redemption proceeds instead of paying cash (0.10 zł/bond for every exchange-eligible type except `OTS`, priced at par; no effect at all for `ROS`/`ROD`, which aren't exchangeable) — reflected in `Profit` from day one, not as a lump sum tacked onto the final day
 - once a bond matures, its cost basis and unrealized value both drop to 0 — nothing is left held, the redemption proceeds became cash, which this library doesn't separately track — while its accrued interest freezes at the final value and persists in `Profit`/`total_revenue`/`distribution_by_ticker_revenue` forever after, since it was realized at redemption rather than lost. Unlike `Stock`'s `total_money_invested`/`distribution_by_ticker` (which stay at their lifetime, gross-ever-bought value even for a fully-sold ticker), `PolishRetailBonds`' own `total_money_invested`/`distribution_by_ticker` track only what's currently held per type — a fully-matured type drops to 0% in both, exactly mirroring its 0% in `distribution_by_ticker_current_value`
 - interest always accrues on each bond's full nominal value (100 zł) regardless of `is_swapped`'s discount, and a flat 19% tax (`PolishRetailBonds.TAX_RATE`) is applied uniformly — neither the exact tax treatment nor the discount amount is stated in the *listy emisyjne* themselves (tax law and bank-quoted exchange pricing aren't issuance terms), so both are asserted as named constants rather than sourced per type
-- optional `currency_to` — every bond is issued in PLN (`PolishRetailBonds.NATIVE_CURRENCY`), converted via `Currency` the same way `Stock`/`Commodity`/`Crypto` convert their own native-currency prices; defaults to `'PLN'`, a no-op. Each day's own accrued interest is converted at *that day's own* FX rate before accumulating (the same convention `Stock` uses for dividends/realized profit — that event's own rate baked in once, not re-marked later), so a matured bond's frozen `Profit` stays frozen in `currency_to` terms too, instead of drifting with FX after redemption despite nothing further actually happening to it. `Portfolio` passes its own `currency` through automatically
+- optional `currency_to` — every bond is issued in PLN (`PolishRetailBonds.NATIVE_CURRENCY`), converted via `Currency` the same way `Stock`/`Commodity`/`Crypto` convert their own native-currency prices; defaults to `'PLN'`, a no-op. Each day's own accrued interest is converted at *that day's own* FX rate before accumulating (the same convention `Stock` uses for dividends/realized profit — that event's own rate baked in once, not re-marked later), so a matured bond's frozen `Profit` stays frozen in `currency_to` terms too, instead of drifting with FX after redemption despite nothing further actually happening to it. `Portfolio` passes its own `currency_to` through automatically
 - optional `cancel.csv` — records that some or all of a holding (identified by its own `date`/`isin` pair, matching its `buy.csv` row) was *actually* redeemed early in real life, and how many units (`amount_of_units`) were redeemed on `cancel_date`. A partial cancellation splits the holding into independent tranches — the cancelled units stop accruing at `cancel_date` (paying out gross accrued interest minus that type's `early_redemption_fee`, floored at 0 so redeeming early never returns less than what was originally paid in) while the rest keep accruing normally; a holding can appear more than once in `cancel.csv` for several partial cancellations over time. `OTS`'s fee forfeits *all* interest accrued that period rather than a flat zł amount (`early_redemption_fee=float('inf')`, reduced to 0 by the same floor every other type uses); the other seven types' fees (0.50 zł/bond for `ROR` up to 3.00 zł/bond for `EDO`/`ROD`) are typical values, not transcribed from one specific real issuance the way the rest of `BOND_TYPES` is — treat them the same as `TAX_RATE`/`swap_discount`: asserted, worth double-checking (see Roadmap)
 - `Dividend` column, matching `Stock`'s own — 0 while a holding is still open (its accrued value lives entirely in the unrealized column below until then), then jumps once, at redemption (natural maturity or an earlier `cancel.csv` cancellation), to everything ever accrued for that holding and stays there — mirroring a bond's real cash flow (nothing paid until redemption, then it all is), unlike `Stock`'s per-payment `dividend.csv` rows
 - `_bond_dataframe`'s per-holding accrual is numpy end to end — plain arrays addressed by integer day-offset from the holding's own purchase date, not a `pd.Series` walked via label-based `.loc`/`reindex`/`ffill` — since every date in play (period boundaries, `cancel_date`/maturity, today) is always a whole number of days apart. Several times faster per holding, more so the longer its span (~3x for a 1-year `ROR`, ~6x for a 10-year `EDO` in an internal benchmark)
@@ -44,7 +44,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 
 - builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
 - allocation by ticker/directory/currency, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
-- `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency` (the single currency `self.data`/totals are already converted to and summed in)
+- `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency_to` (the single currency `self.data`/totals are already converted to and summed in)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
@@ -184,14 +184,14 @@ sources = {
 # the day, so re-running later today skips both the yfinance calls and the recomputation.
 # force_refresh=True ignores the cache for this one run and refreshes it with fresh data —
 # a one-off cold start, e.g. Portfolio(sources, ..., cache_dir=".portfolio_cache", force_refresh=True).
-portfolio = Portfolio(sources, tickers_json="tickers.json", currency="usd", cache_dir=".portfolio_cache")
+portfolio = Portfolio(sources, tickers_json="tickers.json", currency_to="usd", cache_dir=".portfolio_cache")
 
 # To wipe the cache entirely (e.g. to reclaim space from stale/orphaned entries) instead of
 # forcing a single refresh:
 # from Portfolio_calculator_library.cache_library import DiskCache
 # DiskCache(".portfolio_cache").clear()
 
-print(f"Total invested: {portfolio.total_invested_money:.2f}")
+print(f"Total invested: {portfolio.total_money_invested:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
 print(f"Total revenue: {portfolio.total_revenue:.2f}")
 print(portfolio.distribution_by_ticker)                # allocation by amount invested
@@ -200,13 +200,13 @@ print(portfolio.distribution_by_ticker_revenue)         # allocation by share of
 
 # distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
 # position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by
-# ticker - always populated, no flag needed. Independent of currency="usd" above, which is only
+# ticker - always populated, no flag needed. Independent of currency_to="usd" above, which is only
 # what everything gets CONVERTED to for self.data/totals, not what it natively IS.
 print(portfolio.distribution_by_currency)
 
 # include_native_currency=True (pass it to Portfolio(...) above) additionally populates
 # portfolio.native_data/native_currency per Stock/Commodity/Crypto ticker or symbol, isolating
-# that instrument's own performance from FX movement against currency="usd" above:
+# that instrument's own performance from FX movement against currency_to="usd" above:
 # print(portfolio.native_currency["SPY"])                  # e.g. "usd"
 # print(portfolio.native_data["SPY"][Portfolio.PROFIT_COLUMN].iloc[-1])
 

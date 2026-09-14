@@ -171,11 +171,11 @@ def test_cache_dir_serves_an_identical_dataframe_on_the_second_construction(make
     pd.testing.assert_frame_equal(first.data, second.data)
 
 
-def test_count_accounts_reads_without_computing(make_source_dir):
+def test_count_tickers_reads_without_computing(make_source_dir):
     start=date.today()-timedelta(days=1)
     account_dir=make_source_dir('bank_account', {
         'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
                        f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n"
                        f"{start.isoformat()},emergency_fund,500.0,fixed,3.0,12,0.0\n",
     })
-    assert BankAccount.count_accounts(account_dir)==2
+    assert BankAccount.count_tickers(account_dir)==2

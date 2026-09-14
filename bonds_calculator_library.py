@@ -149,8 +149,8 @@ class PolishRetailBonds:
         'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=3.00),
     }
 
-    def __init__(self, dataframe: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
-        """dataframe: raw bonds transactions dataframe, one row per bond holding, with columns
+    def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+        """directory_path: a directory holding buy.csv, one row per bond holding, with columns
         date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
         BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
         currency_to: target currency every bond's PLN values are converted to via Currency —
@@ -159,11 +159,11 @@ class PolishRetailBonds:
         pass this keep getting exactly the PLN values they always did. See the module docstring
         for how/when each value is converted.
         interest_rate_file/inflation_rate_file: CSVs used respectively by 'interest'/'inflation'
-        rate_source types (see BOND_TYPES), resolved relative to dataframe (the bonds source
-        directory) — pass an absolute path instead to point elsewhere. progress_callback:
+        rate_source types (see BOND_TYPES), resolved relative to directory_path — pass an
+        absolute path instead to point elsewhere. progress_callback:
         optional zero-arg callback invoked once, after all bond rows have been computed, for a
         caller (e.g. Portfolio) tracking overall progress.
-        cancel.csv (optional, resolved relative to dataframe): records that some or all of a
+        cancel.csv (optional, resolved relative to directory_path): records that some or all of a
         holding was actually redeemed early — see the module docstring for its
         (date, isin, cancel_date, amount_of_units) shape, how a partial cancellation is modeled,
         and exactly what recording a cancellation does/doesn't change.
@@ -175,10 +175,10 @@ class PolishRetailBonds:
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
         recomputes everything, then overwrites the cache with the fresh result."""
         today=datetime.today()
-        interest_rate_path=os.path.join(dataframe, interest_rate_file)
-        inflation_rate_path=os.path.join(dataframe, inflation_rate_file)
-        buy_path=os.path.join(dataframe, "buy.csv")
-        cancel_path=os.path.join(dataframe, "cancel.csv")
+        interest_rate_path=os.path.join(directory_path, interest_rate_file)
+        inflation_rate_path=os.path.join(directory_path, inflation_rate_file)
+        buy_path=os.path.join(directory_path, "buy.csv")
+        cancel_path=os.path.join(directory_path, "cancel.csv")
 
         self.dataframe=pd.read_csv(buy_path)
         self.dataframe.index=pd.to_datetime(self.dataframe[self.CSV_DATE_COLUMN], format='%Y-%m-%d')
@@ -283,9 +283,11 @@ class PolishRetailBonds:
         return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @staticmethod
-    def count_bonds(directory_path: str) -> int:
+    def count_tickers(directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
-        size a progress bar before construction."""
+        size a progress bar before construction. Named count_tickers, not count_bonds, to match
+        Stock/Commodity/Crypto's equivalent method - distribution_by_ticker already uses
+        "ticker" as this library's generic per-holding term, even for a bond type code."""
         return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
 
     @classmethod
@@ -376,20 +378,21 @@ class PolishRetailBonds:
                 self._bond_dataframe(code, tranche_amount, initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, tranche_cancel_date)
                 for tranche_amount, tranche_cancel_date in tranches
             ]
-            bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self._merge(tranche_dataframes)
+            bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self.merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
 
         if progress_callback is not None:
             progress_callback()
 
-        type_dataframes={code: self._merge(holdings) for code, holdings in bonds_by_type.items()}
+        type_dataframes={code: self.merge(holdings) for code, holdings in bonds_by_type.items()}
         for code, value in type_dataframes.items():
             invested_by_type[code]=value[self.MONEY_INVESTED_COLUMN].iloc[-1]
-        return self._merge(list(type_dataframes.values())), type_dataframes, invested_by_type
+        return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type
 
     @staticmethod
-    def _merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame."""
+    def merge(dataframes: list) -> pd.DataFrame:
+        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame.
+        Equivalent of Stock.merge/Commodity.merge/Crypto.merge/BankAccount.merge."""
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
     def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:
