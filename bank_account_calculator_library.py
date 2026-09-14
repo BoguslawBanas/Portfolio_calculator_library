@@ -122,9 +122,12 @@ class BankAccount:
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
     @classmethod
-    def count_accounts(cls, directory_path: str) -> int:
+    def count_tickers(cls, directory_path: str) -> int:
         """Number of distinct accounts in a source directory's deposit.csv, without computing
-        any interest — lets a caller (e.g. Portfolio) size a progress bar before construction."""
+        any interest — lets a caller (e.g. Portfolio) size a progress bar before construction.
+        Named count_tickers, not count_accounts, to match Stock/Commodity/Crypto's equivalent
+        method - distribution_by_ticker already uses "ticker" as this library's generic
+        per-holding term, even for a bank account."""
         return cls._load_sources(directory_path)[cls.CSV_ACCOUNT_COLUMN].nunique()
 
     @classmethod

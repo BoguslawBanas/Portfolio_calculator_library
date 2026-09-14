@@ -283,9 +283,11 @@ class PolishRetailBonds:
         return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @staticmethod
-    def count_bonds(directory_path: str) -> int:
+    def count_tickers(directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
-        size a progress bar before construction."""
+        size a progress bar before construction. Named count_tickers, not count_bonds, to match
+        Stock/Commodity/Crypto's equivalent method - distribution_by_ticker already uses
+        "ticker" as this library's generic per-holding term, even for a bond type code."""
         return len(pd.read_csv(os.path.join(directory_path, "buy.csv")))
 
     @classmethod

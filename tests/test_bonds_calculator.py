@@ -780,14 +780,14 @@ def test_currency_to_is_folded_into_the_cache_key(make_source_dir, cache_dir):
     assert pln_again.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(pln.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])
 
 
-def test_count_bonds_reads_row_count_without_computing(make_source_dir):
+def test_count_tickers_reads_row_count_without_computing(make_source_dir):
     start=date.today()-timedelta(days=1)
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
         "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
         f"{start.isoformat()},TOS0929,1,0.0,4.4,False\n"
         f"{start.isoformat()},ROR0927,2,0.5,4.0,False\n"
     ))
-    assert PolishRetailBonds.count_bonds(bonds_dir)==2
+    assert PolishRetailBonds.count_tickers(bonds_dir)==2
 
 
 def test_dividend_column_is_zero_while_still_held(make_source_dir):

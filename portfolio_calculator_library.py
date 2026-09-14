@@ -140,7 +140,7 @@ class Portfolio:
             elif type=='crypto':
                 total_units+=Crypto.count_tickers(dir)
             elif type=='bank_account':
-                total_units+=BankAccount.count_accounts(dir)
+                total_units+=BankAccount.count_tickers(dir)
 
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():

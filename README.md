@@ -261,7 +261,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 Private (leading-underscore) names are exempt — these are all public API surface, found by an audit across every class:
 
-- `count_tickers` (`Stock`/`Commodity`/`Crypto`) vs. `count_bonds` (`PolishRetailBonds`) vs. `count_accounts` (`BankAccount`) — every one of these classes still names its own output `distribution_by_ticker` regardless, so "ticker" is already the established generic term everywhere except this one method
 - `CSV_ACCOUNT_COLUMN` (`BankAccount`) vs. `CSV_TICKER_COLUMN` (`Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`, and `Portfolio`'s own unused leftover constant) — `BankAccount` still populates `self.distribution_by_ticker` with account names, so this is inconsistent with itself, not just its siblings
 - `get_ticker_currency` (`Stock`) is the only `get_`-prefixed public method in the library — everywhere else skips that prefix (`merge`, `count_tickers`, `resample`, `calculate_irr`, `evict_stale`, `make_key`, `hash_file`, ...)
 - `currency_to` (`Stock`/`Commodity`/`Crypto`/`PolishRetailBonds`) vs. `currency` (`Portfolio`) for the same "target currency everything is converted to" constructor parameter — fixing this one is a breaking change to the most-used constructor, so it needs a deliberate choice of direction rather than a default
