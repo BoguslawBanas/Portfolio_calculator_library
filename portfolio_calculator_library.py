@@ -1,11 +1,9 @@
 """
-Class-based alternative to portfolio_calculator_library.py — a sketch, not wired
-into the rest of the codebase. The original module stays a set of free functions
-that each take a DataFrame; here the same logic is grouped behind a Portfolio
-class whose constructor builds each source's Stock/PolishRetailBonds/Commodity/
-Crypto/BankAccount instance once and merges their per-instrument DataFrames, and
-the rest of the methods operate on the state the constructor built instead of
-re-taking a dataframe argument every call.
+Class-based Portfolio calculator: combines one or more Stock/PolishRetailBonds/Commodity/
+Crypto/BankAccount sources into a single portfolio-level DataFrame. The constructor builds
+each source's own instance once and merges their per-instrument DataFrames, and the rest of
+the methods (calculate_irr, resample, ...) operate on the state the constructor already built
+instead of re-taking a dataframe argument every call.
 """
 
 from datetime import datetime
