@@ -83,9 +83,10 @@ import pandas as pd
 from datetime import datetime
 from .currency_calculator_library import Currency
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin, MergeMixin
 
 
-class PolishRetailBonds:
+class PolishRetailBonds(MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md).
     # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while a bond is still
@@ -303,12 +304,6 @@ class PolishRetailBonds:
             if self.total_revenue:
                 self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0
 
-    def __repr__(self) -> str:
-        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
-        PolishRetailBonds in a REPL/notebook shows something useful instead of the default
-        <...object at 0x...>."""
-        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
-
     @staticmethod
     def count_tickers(directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
@@ -435,12 +430,6 @@ class PolishRetailBonds:
         for code, value in type_dataframes.items():
             invested_by_type[code]=value[self.MONEY_INVESTED_COLUMN].iloc[-1]
         return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type
-
-    @staticmethod
-    def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-bond DataFrames by date into a single aggregate DataFrame.
-        Equivalent of Stock.merge/Commodity.merge/Crypto.merge/BankAccount.merge."""
-        return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
     def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:
         """The published rate feeding a period-2-onward rate (before that period's own margin is

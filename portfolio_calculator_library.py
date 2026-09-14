@@ -16,9 +16,10 @@ from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
 from .cache_library import DiskCache
+from .calculator_mixins import ReprMixin
 
 
-class Portfolio:
+class Portfolio(ReprMixin):
     # --- Output: self.data contract + Portfolio-specific extras. The first three form the
     # shared DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -203,12 +204,6 @@ class Portfolio:
 
         if cache_dir is not None:
             DiskCache(cache_dir).evict_stale_if_due()
-
-    def __repr__(self) -> str:
-        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
-        Portfolio in a REPL/notebook shows something useful instead of the default
-        <...object at 0x...>."""
-        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
