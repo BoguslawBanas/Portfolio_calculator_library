@@ -11,9 +11,6 @@ without depending on real market data.
 import os
 import sys
 import json
-import shutil
-import tempfile
-from datetime import datetime
 from unittest import mock
 
 import pytest
@@ -24,9 +21,7 @@ PACKAGE_PARENT=os.path.dirname(REPO_ROOT)
 if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
-import Portfolio_calculator_library as pcl  # noqa: E402
 import Portfolio_calculator_library.stock_calculator_library as stock_mod  # noqa: E402
-import Portfolio_calculator_library.currency_calculator_library as currency_mod  # noqa: E402
 
 
 class FakeTicker:

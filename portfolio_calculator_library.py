@@ -35,19 +35,6 @@ class Portfolio(ReprMixin):
     TOTAL_MONEY_COLUMN='Total_money'
     CASHFLOW_COLUMN='Cashflow'
 
-    # --- Leftover from a raw-CSV ingestion path (_load_sources/_read_directory/_split_by_isin/
-    # _replace_isin_with_ticker/get_dataframe_currency/get_earliest_date) that has since been
-    # removed as dead code: __init__ never builds a combined dataframe of its own to tag/split -
-    # it hands each sources dict entry straight to the matching Stock/PolishRetailBonds/
-    # Commodity/Crypto/BankAccount constructor, which does its own loading. Nothing in this file
-    # reads these four constants anymore (each asset-type module defines its own
-    # SOURCE_TYPE_COLUMN/CSV_TICKER_COLUMN instead - see e.g. Stock's) - kept only in case a
-    # future raw-ingestion path resurrects them; safe to delete otherwise. ---
-    SOURCE_TYPE_COLUMN='type'          # asset type ('stock'/'bonds'/...), from the sources dict
-    TRANSACTION_STATE_COLUMN='state'   # per-row state ('buy'/'sell'/...), from the CSV filename
-    CSV_TICKER_COLUMN='isin'
-    CSV_DATE_COLUMN='date'
-
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
 
     def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
