@@ -154,19 +154,18 @@ class BankAccount:
 
     @classmethod
     def _split_by_account(cls, dataframe: pd.DataFrame) -> list:
-        dataframes=dict()
-        for _, row in dataframe.iterrows():
-            if dataframes.get(row[cls.CSV_ACCOUNT_COLUMN]) is None:
-                dataframes[row[cls.CSV_ACCOUNT_COLUMN]]=pd.DataFrame()
-            dataframes[row[cls.CSV_ACCOUNT_COLUMN]]=pd.concat([dataframes[row[cls.CSV_ACCOUNT_COLUMN]], row], axis=1)
-
-        list_of_dataframes=list(dataframes.values())
-        for i in range(len(list_of_dataframes)):
-            list_of_dataframes[i]=list_of_dataframes[i].transpose()
-            list_of_dataframes[i].index=pd.to_datetime(list_of_dataframes[i][cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
-            list_of_dataframes[i].drop(columns=[cls.CSV_DATE_COLUMN], inplace=True)
-
-        return list_of_dataframes
+        """Splits the raw multi-account dataframe into one per-account DataFrame each, indexed
+        by parsed transaction date - a single groupby pass rather than iterrows()+pd.concat once
+        per row, which is O(n^2) in transaction count (each concat copies the whole growing
+        per-account frame so far) and, via the row-Series/transpose round trip, tends to coerce
+        every column to dtype=object instead of keeping each column's own read_csv dtype.
+        set_index/drop both return new frames rather than mutating dataframe in place, so the
+        caller's own copy (self.dataframe) is left untouched, same as before this rewrite."""
+        dates=pd.to_datetime(dataframe[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
+        indexed=dataframe.set_index(dates).drop(columns=[cls.CSV_DATE_COLUMN])
+        # sort=False preserves each account's first-appearance order, matching the old dict's
+        # insertion order - callers don't rely on this, but it keeps behavior identical anyway.
+        return [group for _, group in indexed.groupby(cls.CSV_ACCOUNT_COLUMN, sort=False)]
 
     def _load_interest_rate_data(self, end_date: datetime) -> pd.DataFrame:
         if self._interest_rate_data is None:
