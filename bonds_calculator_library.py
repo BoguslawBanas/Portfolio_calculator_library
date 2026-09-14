@@ -299,10 +299,8 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         for code, type_dataframe in type_dataframes.items():
             current_value=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
-            if self.total_current_value:
-                self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0
-            if self.total_revenue:
-                self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0
+            self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0 if self.total_current_value else 0.0
+            self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0 if self.total_revenue else 0.0
 
     @staticmethod
     def count_tickers(directory_path: str) -> int:
