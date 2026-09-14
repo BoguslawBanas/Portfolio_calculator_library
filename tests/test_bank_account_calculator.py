@@ -35,6 +35,20 @@ def test_fixed_rate_account_accrues_daily_interest_before_first_capitalization(m
     assert account.total_revenue==pytest.approx(expected_profit)
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    start=date.today()-timedelta(days=5)
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n",
+    })
+    account=BankAccount(account_dir)
+    representation=repr(account)
+    assert representation.startswith("BankAccount(")
+    assert f"invested={account.total_money_invested:.2f}" in representation
+    assert f"current_value={account.total_current_value:.2f}" in representation
+    assert f"revenue={account.total_revenue:.2f}" in representation
+
+
 def test_withdrawal_reduces_the_interest_bearing_balance(make_source_dir):
     start=date.today()-timedelta(days=5)
     withdrawal_date=date.today()-timedelta(days=2)

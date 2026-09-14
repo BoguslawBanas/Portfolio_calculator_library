@@ -38,6 +38,15 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    representation=repr(portfolio)
+    assert representation.startswith("Portfolio(")
+    assert f"invested={portfolio.total_invested_money:.2f}" in representation
+    assert f"current_value={portfolio.total_current_value:.2f}" in representation
+    assert f"revenue={portfolio.total_revenue:.2f}" in representation
+
+
 def test_zero_day_row_is_prepended_before_the_first_transaction(make_source_dir, make_tickers_json):
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     data=portfolio.data

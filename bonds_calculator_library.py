@@ -276,6 +276,12 @@ class PolishRetailBonds:
             if self.total_revenue:
                 self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0
 
+    def __repr__(self) -> str:
+        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
+        PolishRetailBonds in a REPL/notebook shows something useful instead of the default
+        <...object at 0x...>."""
+        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+
     @staticmethod
     def count_bonds(directory_path: str) -> int:
         """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)

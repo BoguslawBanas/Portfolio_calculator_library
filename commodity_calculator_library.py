@@ -183,6 +183,12 @@ class Commodity:
 
         self.data=self.merge(dataframes_2)
 
+    def __repr__(self) -> str:
+        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
+        Commodity in a REPL/notebook shows something useful instead of the default
+        <...object at 0x...>."""
+        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
         """Sums a list of per-instrument DataFrames by date into a single aggregate DataFrame.

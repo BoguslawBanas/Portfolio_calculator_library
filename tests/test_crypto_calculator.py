@@ -63,6 +63,18 @@ def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_ti
     assert 'BTC-USD' not in mock_yfinance.call_log
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    crypto=build_crypto(make_source_dir, {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,0.5,40000.0,0.01\n",
+    })
+    representation=repr(crypto)
+    assert representation.startswith("Crypto(")
+    assert f"invested={crypto.total_money_invested:.2f}" in representation
+    assert f"current_value={crypto.total_current_value:.2f}" in representation
+    assert f"revenue={crypto.total_revenue:.2f}" in representation
+
+
 def test_units_rounded_to_eight_decimals_not_stocks_four(make_source_dir):
     # amount_of_units itself (0.123456789) isn't what's charged — money invested is
     # amount*price*(1+fee), so the 8-decimal rounding only shows up if it happened before

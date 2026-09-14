@@ -198,6 +198,12 @@ class Portfolio:
         if cache_dir is not None:
             DiskCache(cache_dir).evict_stale_if_due()
 
+    def __repr__(self) -> str:
+        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
+        Portfolio in a REPL/notebook shows something useful instead of the default
+        <...object at 0x...>."""
+        return f"{self.__class__.__name__}(invested={self.total_invested_money:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
         """Convenience alias — the constructor already accepts a single prepared CSV."""

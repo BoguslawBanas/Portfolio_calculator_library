@@ -150,6 +150,20 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tick
     assert stock.native_data['DE0000000002'][Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(250.0)
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
+    stock=build_stock(
+        make_source_dir, make_tickers_json,
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                    "2024-01-15,US0000000001,5,100.0,0.0\n"},
+        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+    )
+    representation=repr(stock)
+    assert representation.startswith("Stock(")
+    assert f"invested={stock.total_money_invested:.2f}" in representation
+    assert f"current_value={stock.total_current_value:.2f}" in representation
+    assert f"revenue={stock.total_revenue:.2f}" in representation
+
+
 def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"

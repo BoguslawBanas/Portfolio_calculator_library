@@ -130,6 +130,12 @@ class Stock:
 
         self.data=self.merge(dataframes_2)
 
+    def __repr__(self) -> str:
+        """A quick invested/current-value/revenue summary (README Roadmap item) - so printing a
+        Stock in a REPL/notebook shows something useful instead of the default
+        <...object at 0x...>."""
+        return f"{self.__class__.__name__}(invested={self.total_money_invested:.2f}, current_value={self.total_current_value:.2f}, revenue={self.total_revenue:.2f})"
+
     @staticmethod
     def get_ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
         """Equivalent of get_ticker_currency. Only works if all rows share the same ticker/isin."""

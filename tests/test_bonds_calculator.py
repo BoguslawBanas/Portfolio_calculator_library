@@ -98,6 +98,20 @@ def test_bond_type_registry_matches_documented_taxonomy():
         assert config['period_months']*config['num_periods']==months, code
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+    representation=repr(bonds)
+    assert representation.startswith("PolishRetailBonds(")
+    assert f"invested={bonds.total_money_invested:.2f}" in representation
+    assert f"current_value={bonds.total_current_value:.2f}" in representation
+    assert f"revenue={bonds.total_revenue:.2f}" in representation
+
+
 def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir):
     start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(

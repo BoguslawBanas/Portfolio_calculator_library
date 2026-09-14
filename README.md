@@ -4,7 +4,7 @@ A Python library for tracking the performance of an investment portfolio, combin
 
 ## Features
 
-The library is organized as one class per module.
+The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
 
 ### 📈 `stock_calculator_library.Stock`
 
@@ -250,7 +250,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - provide to a portfolio condtructor a json file with tax types and values
 - `PolishRetailBonds.TAX_RATE` (19%, applied uniformly across all eight types), the `is_swapped` exchange-price discount (`BOND_TYPES`' `swap_discount`, sourced from each type's *cena zamiany*), and the `cancel.csv` early-redemption fee (`BOND_TYPES`' `early_redemption_fee`) are all asserted, not derived from the *listy emisyjne* — withholding tax, bank-quoted exchange pricing, and early-redemption fees are none of them issuance terms, so none appear in them; double-check all three against a current, authoritative source before relying on this for real tax reporting or an actual redemption
 - add a CI workflow (e.g. GitHub Actions) running the test suite (see Testing below) on push
-- no `__repr__` on `Portfolio`/`Stock`/etc. — printing one in a REPL/notebook gives the default `<...object at 0x...>` instead of a quick invested/current-value/revenue summary, which matters for a library also meant for interactive analysis
 
 ## License
 

@@ -52,6 +52,18 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     assert commodity.distribution_by_ticker['gold']==pytest.approx(100.0)
 
 
+def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
+    commodity=build_commodity(make_source_dir, {
+        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+                   "2024-01-15,gold,2,troy_ounce,0.02\n",
+    })
+    representation=repr(commodity)
+    assert representation.startswith("Commodity(")
+    assert f"invested={commodity.total_money_invested:.2f}" in representation
+    assert f"current_value={commodity.total_current_value:.2f}" in representation
+    assert f"revenue={commodity.total_revenue:.2f}" in representation
+
+
 def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     start_date, sell_date='2024-01-15', '2024-03-01'
     commodity=build_commodity(make_source_dir, {
