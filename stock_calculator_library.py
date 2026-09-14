@@ -76,30 +76,24 @@ class Stock:
 
         dataframes=self._split_by_isin(self.dataframe)
 
-        # Money invested per buy row isn't a column on the source dataframe (see _compute_data,
-        # which derives it the same way) — recompute it here instead of assuming one exists.
-        money_invested_by_ticker=dict()
-        for df in dataframes:
-            currency=Currency(self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN), currency_to, df.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
-
-            money_invested=0.0
-            for idx, row in df.iterrows():
-                if row[self.SOURCE_TYPE_COLUMN]=='buy':
-                    money_invested+=round((row[self.CSV_PENALTY_COLUMN]+1.0)*row[self.CSV_AMOUNT_OF_UNITS_COLUMN]*row[self.CSV_PRICE_OF_UNIT_COLUMN]*currency.data.loc[idx, self.CLOSE_COLUMN], 2)
-
-            money_invested_by_ticker[df[self.CSV_TICKER_COLUMN].iloc[0]]=money_invested
-            self.total_money_invested+=money_invested
-
+        # A buy row's money invested depends on that ticker's own FX rate (see _compute_data),
+        # so - same pattern Commodity._compute_data already uses - _compute_data itself returns
+        # the lifetime buy total alongside its DataFrame, computed in the very same pass, rather
+        # than a second iterrows() loop plus a second Currency(...) construction/fetch here
+        # recomputing the identical figure a second time.
         dataframes_2=list()
+        money_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
-            self.distribution_by_ticker[ticker]=(money_invested_by_ticker[ticker]/self.total_money_invested)*100.0
             ticker_currency=self.get_ticker_currency(df, stock_data, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
-            computed=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
             dataframes_2.append(computed)
+
+            money_invested_by_ticker[ticker]=total_buy_invested
+            self.total_money_invested+=total_buy_invested
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -116,11 +110,14 @@ class Stock:
                 if ticker_currency.upper()==currency_to.upper():
                     self.native_data[ticker]=computed
                 else:
-                    self.native_data[ticker]=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
                 self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
                 progress_callback()
+
+        for ticker, value in money_invested_by_ticker.items():
+            self.distribution_by_ticker[ticker]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
 
         for ticker, value in current_value_by_ticker.items():
             self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0
@@ -194,17 +191,27 @@ class Stock:
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+        """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
+        amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
+        distribution_by_ticker/total_money_invested. Returned from here (same pattern
+        Commodity._compute_data already uses) instead of recomputed independently in __init__
+        via a second iterrows() pass and a second Currency(...) fetch for the same ticker/date
+        range - this loop already computes it below while building the full DataFrame."""
         start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            cache_key=DiskCache.make_key('stock', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
+            # 'stock-v2': bumped from 'stock' when this method started returning a (dataframe,
+            # total_buy_invested) tuple instead of a bare DataFrame - the isinstance check below
+            # guards a cache entry from the older, bare-DataFrame format the same way
+            # Commodity/PolishRetailBonds guard their own tuple cache formats.
+            cache_key=DiskCache.make_key('stock-v2', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
-                if cached is not None:
+                if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
         currency=Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -272,6 +279,7 @@ class Stock:
 
         running_units=0.0
         running_money_invested=0.0
+        total_buy_invested=0.0
 
         for i in range(n):
             pos=position[i]
@@ -288,6 +296,7 @@ class Stock:
 
                 running_units+=units
                 running_money_invested+=money_invested
+                total_buy_invested+=money_invested
             elif row_state=='sell':
                 units_sold=round(amount[i], 4)
                 if units_sold>running_units+1e-9:
@@ -328,7 +337,8 @@ class Stock:
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
+        result=(data, total_buy_invested)
         if cache is not None:
-            cache.set(cache_key, data)
+            cache.set(cache_key, result)
 
-        return data
+        return result
