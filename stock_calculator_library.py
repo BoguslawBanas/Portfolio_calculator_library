@@ -22,6 +22,12 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
+    # Despite the name, this is the *unrealized* component only - current market value of units
+    # still held minus their cost basis - so it excludes REALIZED_PROFIT_COLUMN too, not just
+    # DIVIDEND_COLUMN. Load-bearing as-is: total_current_value/current_value_by_ticker below both
+    # add this to MONEY_INVESTED_COLUMN, which is only correct because realized profit (cash
+    # already taken off the table, not part of what the position is worth today) stays excluded.
+    # PROFIT_EXCLUDING_DIVIDEND_COLUMN below is the column that excludes only dividends.
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
@@ -31,6 +37,9 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # by a sell (REALIZED_PROFIT_COLUMN). Mirrors PROFIT_WITHOUT_DIVIDEND_COLUMN's naming (Profit
     # minus one component) for the complementary exclusion.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
+    # keeping both the unrealized component and REALIZED_PROFIT_COLUMN (Profit - Dividend).
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
 
@@ -323,6 +332,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN], 2)
+        data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
         result=(data, total_buy_invested)

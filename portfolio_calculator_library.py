@@ -35,6 +35,10 @@ class Portfolio(ReprMixin):
     # Every source contributes it (see each source's own PROFIT_WITHOUT_REALIZED_COLUMN), so unlike
     # DIVIDEND_COLUMN this is always present - safe to read via self.data[...] directly.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
+    # keeping realized profit (Profit - Dividend). Also always present, same as
+    # PROFIT_WITHOUT_REALIZED_COLUMN above.
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     DAILY_RETURN_COLUMN='Daily_return'
     IRR_COLUMN='Irr'
     # Working-only columns, created and dropped again within calculate_irr.

@@ -114,6 +114,10 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     # to exclude the way Stock/Commodity/Crypto do (see the comment above). Present anyway so
     # Portfolio's merge (a plain per-column sum) has something to add for every source type.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # Excludes only dividends, keeping bonds' equivalent of realized profit (post-maturity
+    # redemption proceeds) - here always equal to PROFIT_WITHOUT_DIVIDEND_COLUMN itself, since
+    # DIVIDEND_COLUMN=PROFIT_COLUMN-PROFIT_WITHOUT_DIVIDEND_COLUMN by construction (see above).
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
     CSV_TICKER_COLUMN='isin'
@@ -618,4 +622,5 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # that could drift from the two columns above.
         dataframe[self.DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_COLUMN]
+        dataframe[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         return dataframe

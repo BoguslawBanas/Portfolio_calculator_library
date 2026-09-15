@@ -32,6 +32,8 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
     # PolishRetailBonds. Present anyway so Portfolio's merge (a plain per-column sum) has
     # something to add for every source type.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # Always equal to PROFIT_COLUMN too - no dividends here to exclude.
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
 
     # --- Ingestion tag: synthesized while loading (from the CSV filename), not read from
     # inside a CSV cell — but consumed everywhere exactly like an input column. ---
@@ -231,6 +233,7 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         data[self.PROFIT_COLUMN]=profit
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=data[self.PROFIT_COLUMN]
+        data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]
 
         if cache is not None:
             cache.set(cache_key, data)

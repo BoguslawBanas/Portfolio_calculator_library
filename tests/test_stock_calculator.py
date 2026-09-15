@@ -52,6 +52,9 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     # unrealized component on what's still held) - strictly less than total Profit.
     assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
     assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1]-80.0)
+    # Profit_excluding_dividends is the opposite exclusion: it keeps that 80, and (no dividends
+    # here) equals total Profit exactly.
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
 
 
 def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir, make_tickers_json):
@@ -117,6 +120,10 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
     assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(1000.0)
     # Profit_without_realized includes the net dividend (no sell here, so it equals total Profit).
     assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
+    # Profit_excluding_dividends drops that same net dividend (no sell here, so it's the pure
+    # unrealized component - equal to Profit_without_dividends).
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]!=pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
 
 
 def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_tickers_json):

@@ -53,6 +53,10 @@ def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_d
     # The net dividend (25.0-0.0, no dividend_tax.csv here) is still included, unlike realized.
     assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+data[Portfolio.DIVIDEND_COLUMN].iloc[-1])
 
+    # Profit_excluding_dividends is the mirror image: keeps the realized 80.0, drops the dividend.
+    assert data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-data[Portfolio.DIVIDEND_COLUMN].iloc[-1])
+    assert data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+realized)
+
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
@@ -206,6 +210,9 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # this portfolio, equals total Profit (nothing realized to exclude).
     assert Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN in portfolio.data.columns
     assert portfolio.data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(portfolio.data[Portfolio.PROFIT_COLUMN].iloc[-1])
+    # Same for Profit_excluding_dividends - every source contributes it too.
+    assert Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN in portfolio.data.columns
+    assert portfolio.data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(portfolio.data[Portfolio.PROFIT_COLUMN].iloc[-1])
 
 
 def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_basis(make_source_dir, make_tickers_json):

@@ -28,6 +28,9 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
     # still held (no Dividend column here, see module docstring) - excluding gain/loss already
     # locked in by a sell (REALIZED_PROFIT_COLUMN). Mirrors Stock's own column of the same name.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # No dividends to exclude here - always equal to PROFIT_COLUMN. Present anyway so it lines up
+    # with Stock's own PROFIT_EXCLUDING_DIVIDEND_COLUMN once merged into Portfolio.
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
 
@@ -307,6 +310,8 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         # No Dividend column to add back - equal to the unrealized component alone.
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
+        # No dividends to exclude either - equal to total Profit.
+        data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
         result=(data, total_buy_invested)
