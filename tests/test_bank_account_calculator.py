@@ -33,6 +33,9 @@ def test_fixed_rate_account_accrues_daily_interest_before_first_capitalization(m
     expected_profit=round(daily_rate*n_days, 2)
     assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
     assert account.total_revenue==pytest.approx(expected_profit)
+    # No dividend/realized-profit split for a bank account - always equal to Profit.
+    assert data[BankAccount.PROFIT_WITHOUT_REALIZED_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
+    assert data[BankAccount.PROFIT_EXCLUDING_DIVIDEND_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir):

@@ -134,6 +134,12 @@ def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir
     assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(at_maturity)
     day_after_maturity=data.loc[maturity_date+pd.DateOffset(days=1), PolishRetailBonds.PROFIT_COLUMN]
     assert day_after_maturity==pytest.approx(at_maturity)
+    # Bonds have no separate realized-profit stream (see PROFIT_WITHOUT_REALIZED_COLUMN's own
+    # comment) - it always equals Profit, before and after maturity alike.
+    assert data[PolishRetailBonds.PROFIT_WITHOUT_REALIZED_COLUMN].equals(data[PolishRetailBonds.PROFIT_COLUMN])
+    # Profit_excluding_dividends drops only Dividend, which for bonds is exactly
+    # Profit-Profit_without_dividends by construction - so it equals Profit_without_dividends.
+    assert data[PolishRetailBonds.PROFIT_EXCLUDING_DIVIDEND_COLUMN].equals(data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN])
 
 
 def test_full_cancellation_freezes_profit_and_zeroes_money_invested_early(make_source_dir):

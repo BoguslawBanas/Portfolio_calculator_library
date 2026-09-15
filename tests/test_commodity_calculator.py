@@ -116,6 +116,12 @@ def test_no_dividend_column_profit_is_unrealized_plus_realized(make_source_dir):
     # No dividends -> Profit is exactly unrealized (Profit_without_dividends) plus realized gain.
     expected=data[Commodity.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]
     assert data[Commodity.PROFIT_COLUMN].iloc[-1]==pytest.approx(round(expected, 2))
+    # No dividends -> Profit_without_realized (unrealized+dividends) collapses to just the
+    # unrealized component, and excludes the realized gain that's already in Profit.
+    assert data[Commodity.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Commodity.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Commodity.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]!=pytest.approx(data[Commodity.PROFIT_COLUMN].iloc[-1])
+    # No dividends -> Profit_excluding_dividends is a no-op, equal to total Profit.
+    assert data[Commodity.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Commodity.PROFIT_COLUMN].iloc[-1])
 
 
 def test_include_native_currency_isolates_fx_movement(make_source_dir):

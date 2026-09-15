@@ -109,6 +109,12 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     data=crypto.data
     assert data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(20000.0*0.6)
     assert data[Crypto.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(4*2200.0-20000.0*0.4)
+    # No dividends -> Profit_without_realized collapses to just the unrealized component,
+    # excluding the realized gain from the partial sell above.
+    assert data[Crypto.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Crypto.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Crypto.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]!=pytest.approx(data[Crypto.PROFIT_COLUMN].iloc[-1])
+    # No dividends -> Profit_excluding_dividends is a no-op, equal to total Profit.
+    assert data[Crypto.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Crypto.PROFIT_COLUMN].iloc[-1])
 
 
 def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir):
