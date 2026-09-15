@@ -109,6 +109,11 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     # discount), mirroring a bond's real cash flow: nothing is paid out until redemption, then
     # the whole accrued amount is. See _bond_dataframe.
     DIVIDEND_COLUMN='Dividend'
+    # Profit still attributable to the position as it stands today, dividends included - here
+    # always equal to PROFIT_COLUMN itself, since bonds have no separate realized-profit stream
+    # to exclude the way Stock/Commodity/Crypto do (see the comment above). Present anyway so
+    # Portfolio's merge (a plain per-column sum) has something to add for every source type.
+    PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
     CSV_TICKER_COLUMN='isin'
@@ -612,4 +617,5 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # Stock's own three-column relationship) without a second, separately-computed accrual
         # that could drift from the two columns above.
         dataframe[self.DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
+        dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_COLUMN]
         return dataframe

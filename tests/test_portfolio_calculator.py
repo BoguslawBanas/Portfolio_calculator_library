@@ -38,6 +38,22 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
 
 
+def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    data=portfolio.data
+    from Portfolio_calculator_library import Stock
+    # Same source data, computed standalone, to read off exactly how much of Profit is the
+    # 4-unit sell's realized gain (proceeds 4*120 minus 40% of the 1000 cost basis = 80.0).
+    stock_dir=list(portfolio.distribution_by_directory)[0]
+    stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
+    realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
+    assert realized==pytest.approx(80.0)
+
+    assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-realized)
+    # The net dividend (25.0-0.0, no dividend_tax.csv here) is still included, unlike realized.
+    assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+data[Portfolio.DIVIDEND_COLUMN].iloc[-1])
+
+
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     representation=repr(portfolio)
@@ -185,6 +201,11 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
     # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
+    # Unlike Dividend, every source type contributes Profit_without_realized (see each source's
+    # own PROFIT_WITHOUT_REALIZED_COLUMN), so it's always present - and, with no sell anywhere in
+    # this portfolio, equals total Profit (nothing realized to exclude).
+    assert Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN in portfolio.data.columns
+    assert portfolio.data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(portfolio.data[Portfolio.PROFIT_COLUMN].iloc[-1])
 
 
 def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_basis(make_source_dir, make_tickers_json):

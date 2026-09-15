@@ -26,6 +26,11 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
     REALIZED_PROFIT_COLUMN='Realized_profit'
+    # Profit still attributable to the position as it stands today - unrealized gain on units
+    # still held plus dividends collected along the way - excluding gain/loss already locked in
+    # by a sell (REALIZED_PROFIT_COLUMN). Mirrors PROFIT_WITHOUT_DIVIDEND_COLUMN's naming (Profit
+    # minus one component) for the complementary exclusion.
+    PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
 
@@ -317,6 +322,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         # Unrealized profit = current market value of the held units minus their cost basis.
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
+        data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
         result=(data, total_buy_invested)

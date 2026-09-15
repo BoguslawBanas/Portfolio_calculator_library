@@ -44,7 +44,8 @@ Daily FX rates via `yfinance`, used internally by `Stock` (and usable standalone
 
 Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccount` sources into a single portfolio-level DataFrame.
 
-- builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`) across every source, regardless of asset type
+- builds and sums per-instrument DataFrames (`Money_invested`, `Profit_without_dividends`, `Profit`, `Profit_without_realized`) across every source, regardless of asset type
+- `Profit_without_realized` — profit still attributable to positions as they stand today: unrealized gain on whatever's still held plus dividends collected along the way, excluding gain/loss already locked in by a sell. Always present (unlike `Dividend` below), since every source contributes it — for `PolishRetailBonds`/`BankAccount`, which don't track a separate realized-profit stream, it's simply equal to `Profit`
 - allocation by ticker/directory/currency, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
 - `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency_to` (the single currency `self.data`/totals are already converted to and summed in)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
