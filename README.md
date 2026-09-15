@@ -124,6 +124,25 @@ Turns a set of deposit/withdrawal transactions into a daily balance/interest Dat
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) account split as `Stock`/`Commodity`/`Crypto`
 
+## Distribution metrics
+
+Every calculator (`Stock`/`Commodity`/`Crypto`/`PolishRetailBonds`/`BankAccount`, and `Portfolio` itself) exposes the same four `{key: percentage}`-shaped dicts, keyed by ticker/symbol/bond-type/account. All four are computed the same way — each key's own "value" divided by the sum of every key's value, ×100 — the only thing that differs is what "value" measures, and that measurement differs by asset class:
+
+| | `distribution_by_ticker` (amount ever invested) | `distribution_by_ticker_currently_invested` (amount currently invested) | `distribution_by_ticker_current_value` (current market value) | `distribution_by_ticker_revenue` (share of total gain) |
+|---|---|---|---|---|
+| `Stock` | Sum of every `buy` row's cost basis, ever — **never reduced by a sell** | `Money_invested`'s last value — cost basis of units still held today | `Money_invested + Profit_without_dividends` (last value) — cost basis still held plus its unrealized gain | `Profit`'s last value — all-time gain: unrealized + dividends + realized, can be negative |
+| `Commodity` | Same as `Stock`, except each buy is costed at that day's fetched market price, not a user-recorded one | Same as `Stock` | Same as `Stock` | Same as `Stock`, minus dividends (`Commodity` pays none) |
+| `Crypto` | Same as `Stock` (buy price is user-recorded, like `Stock` — unlike `Commodity`) | Same as `Stock` | Same as `Stock` | Same as `Stock`, minus dividends (`Crypto` pays none) |
+| `PolishRetailBonds` | **Identical to the "currently invested" column** — nothing here tracks a lifetime-ever-bought figure, so a matured/fully-cancelled type already reads 0% | `Money_invested`'s last value per type — drops to 0 once every holding of that type has matured or been fully cancelled | `Money_invested + Profit_without_dividends` (both 0 once matured) — also 0% past maturity | `Profit`'s last value — **persists past maturity**, since interest realized at redemption isn't lost from history |
+| `BankAccount` | **Identical to the "currently invested" column** — nothing here tracks lifetime-ever-deposited, so a fully withdrawn account already reads 0% | `Money_invested`'s last value per account — current balance, net of withdrawals | `Money_invested + Profit_without_dividends` (last value) — balance plus all interest accrued so far, capitalized or not | `Profit`'s last value — all interest ever accrued for that account |
+
+`PolishRetailBonds`/`BankAccount`'s first two columns being identical isn't a bug — see each class's own `total_money_currently_invested`/`distribution_by_ticker_currently_invested` comment: neither class ever tracked a lifetime-gross figure distinct from "what's held right now" to begin with, so the "currently invested" attribute is a plain alias of the existing one rather than an independent computation, added only so `Portfolio` can read the same attribute name off every source.
+
+`Portfolio` builds its own three dict families on top of the tables above, not by re-deriving them from scratch:
+- `distribution_by_directory*` — one entry per source directory, value = that source's own `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` (the class-level totals the table above rolls up into), not broken down further by ticker.
+- `distribution_by_ticker*` — each source's own already-computed per-ticker dict (the table above) is re-expanded back to an absolute amount and summed across every source that happens to share the same ticker/type/account key, then the combined total is renormalized to a percentage of the whole portfolio.
+- `distribution_by_currency*` — the same merge as `distribution_by_ticker*` above, but grouped by each holding's own *native* currency instead of its ticker key. `BankAccount` never contributes here — it has no per-ticker native currency to look up (everything is assumed to already be in one currency), so a `BankAccount`-only portfolio's `distribution_by_currency*` dicts stay empty.
+
 ## Project structure
 
 ```
