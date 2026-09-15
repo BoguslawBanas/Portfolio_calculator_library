@@ -13,7 +13,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from .currency_calculator_library import Currency
+from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
@@ -57,7 +57,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
         """tickers_json: path to the JSON file mapping each ISIN to {"ticker": <yfinance
         symbol>, "currency": <instrument currency>} - same shape/role as Commodity/Crypto's own
         tickers_json parameter, just required here (rather than optional) since Stock has no
@@ -76,7 +76,12 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         FX movement against currency_to. Off by default: for a foreign-currency ticker this is
         a second yfinance fetch/computation (the price history itself doesn't depend on
         currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
-        already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
+        already in currency_to it's free (the already-computed DataFrame is reused as-is).
+        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
+        PolishRetailBonds instances (Portfolio builds and passes one automatically) so tickers
+        that share a currency pair fetch its FX history once per Portfolio construction instead
+        of once each - see currency_calculator_library.get_cached_currency. None (default):
+        every ticker fetches its own, exactly as before this parameter existed."""
         self.total_money_invested=0.0
         # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
         # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
@@ -114,7 +119,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
-            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh, currency_cache)
             dataframes_2.append(computed)
 
             money_invested_by_ticker[ticker]=total_buy_invested
@@ -140,7 +145,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
                 if ticker_currency.upper()==currency_to.upper():
                     self.native_data[ticker]=computed
                 else:
-                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh, currency_cache)
                 self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
@@ -201,7 +206,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None) -> tuple:
         """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
         amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
         distribution_by_ticker/total_money_invested. Returned from here (same pattern
@@ -224,7 +229,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
                 if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
-        currency=Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+        currency=get_cached_currency(currency_cache, currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)

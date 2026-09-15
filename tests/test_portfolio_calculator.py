@@ -312,6 +312,25 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
     assert portfolio.total_money_invested>0.0
 
 
+def test_currency_fetches_are_deduplicated_across_sources_sharing_a_pair(make_source_dir, mock_yfinance):
+    # Commodity and Crypto both quote in QUOTE_CURRENCY='usd' - with currency_to='pln' (so the
+    # usd->pln pair actually needs a real fetch, not Currency's own same-currency short-circuit),
+    # Portfolio's shared currency_cache should mean that pair is only ever fetched once across
+    # both sources, not once per source (README Roadmap item, before this).
+    commodities_dir=make_source_dir('commodities', {
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
+                   "2024-01-15,gold,10.0,gram,0.0\n",
+    })
+    crypto_dir=make_source_dir('crypto', {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,0.1,40000.0,0.0\n",
+    })
+
+    Portfolio({commodities_dir: 'commodities', crypto_dir: 'crypto'}, currency_to='pln')
+
+    assert mock_yfinance.call_log.count('USDPLN=X')==1
+
+
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"

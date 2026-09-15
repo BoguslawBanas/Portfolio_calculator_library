@@ -12,7 +12,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from .currency_calculator_library import Currency
+from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
@@ -60,7 +60,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
     }
     QUOTE_CURRENCY='usd'
 
-    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
         """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
         sell_tax.csv), state inferred from filename, one row per transaction. Each row's
         CSV_TICKER_COLUMN value must be one of self.tickers's keys (e.g. 'bitcoin', 'ethereum'
@@ -83,7 +83,12 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         QUOTE_CURRENCY (self.native_data[symbol], self.native_currency[symbol]) alongside the
         currency_to-converted one in self.data — isolates that symbol's own performance from
         FX movement against currency_to. Free when currency_to is already QUOTE_CURRENCY (the
-        already-computed DataFrame is reused); otherwise a second fetch/computation."""
+        already-computed DataFrame is reused); otherwise a second fetch/computation.
+        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
+        PolishRetailBonds instances (Portfolio builds and passes one automatically) so symbols
+        that share a currency pair fetch its FX history once per Portfolio construction instead
+        of once each - see currency_calculator_library.get_cached_currency. None (default):
+        every symbol fetches its own, exactly as before this parameter existed."""
         self.tickers=self._load_tickers(tickers_json)
         self.total_money_invested=0.0
         # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
@@ -119,7 +124,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         for df in dataframes:
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
             self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
-            computed, total_buy_invested=self._compute_data(df, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, currency_to, cache_dir, force_refresh, currency_cache)
             dataframes_2.append(computed)
 
             money_invested_by_symbol[symbol]=total_buy_invested
@@ -142,7 +147,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
                 if self.QUOTE_CURRENCY.upper()==currency_to.upper():
                     self.native_data[symbol]=computed
                 else:
-                    self.native_data[symbol], _=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh)
+                    self.native_data[symbol], _=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh, currency_cache)
                 self.native_currency[symbol]=self.QUOTE_CURRENCY
 
             if progress_callback is not None:
@@ -197,7 +202,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None) -> tuple:
         """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
         amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
         distribution_by_ticker/total_money_invested. Returned from here (same pattern
@@ -220,7 +225,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
                 if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
-        currency=Currency(self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+        currency=get_cached_currency(currency_cache, self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)

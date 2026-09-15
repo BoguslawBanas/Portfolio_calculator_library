@@ -87,6 +87,14 @@ class Portfolio(ReprMixin):
         are identical only until something's actually been sold/matured/cancelled/withdrawn, since
         only the lifetime figure stays at its historical value once a position's fully closed out.
 
+        Every Stock/Commodity/Crypto/PolishRetailBonds source constructed below shares one
+        currency_cache dict, built fresh here per Portfolio construction and passed down to each
+        - so holdings that share a currency pair (several same-currency tickers within one
+        source, or two different sources converting the same pair, e.g. Commodity and Crypto both
+        quoting in usd) fetch that pair's FX history once per Portfolio construction rather than
+        once per holding (README Roadmap item, before this) - see
+        currency_calculator_library.get_cached_currency for the reuse/extension rule.
+
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
@@ -138,6 +146,10 @@ class Portfolio(ReprMixin):
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
+        # Shared across every source constructed below (see __init__'s own docstring) so a
+        # currency pair fetched by one source is reused by another that needs the same pair,
+        # instead of each independently constructing/fetching its own Currency.
+        currency_cache=dict()
 
         # Validated up front, before any (potentially slow, network-bound) source construction
         # starts, so a typo in sources (e.g. 'stocks' instead of 'stock') fails loudly right
@@ -168,16 +180,16 @@ class Portfolio(ReprMixin):
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='bonds':
-                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, currency_cache=currency_cache)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)

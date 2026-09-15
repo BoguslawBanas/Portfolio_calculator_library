@@ -237,3 +237,25 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
     assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected_total)
     assert set(stock.distribution_by_ticker)=={'US0000000001', 'US0000000003'}
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
+
+
+def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_currency(make_source_dir, make_tickers_json, mock_yfinance):
+    # Two tickers both declared 'eur' in tickers.json, converted to 'usd' - without a shared
+    # currency_cache each ticker's own Currency(...) call hits yfinance separately for the
+    # identical EURUSD=X pair (README Roadmap item, before this).
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,DE0000000001,5,100.0,0.0\n"
+                   "2024-01-20,DE0000000002,2,200.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
+        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+    })
+
+    Stock(stock_dir, tickers_json, 'usd')
+    assert mock_yfinance.call_log.count('EURUSD=X')==2
+
+    mock_yfinance.call_log=list()
+    Stock(stock_dir, tickers_json, 'usd', currency_cache=dict())
+    assert mock_yfinance.call_log.count('EURUSD=X')==1
