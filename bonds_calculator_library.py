@@ -81,7 +81,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from .currency_calculator_library import Currency
+from .currency_calculator_library import Currency, get_cached_currency
 from .cache_library import DiskCache
 from .calculator_mixins import ReprMixin, MergeMixin
 
@@ -166,7 +166,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         'ROD': dict(period_months=12, num_periods=12, compounding=True,  rate_source='inflation', swap_discount=0.0,  early_redemption_fee=3.00),
     }
 
-    def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', tax_rate: float=TAX_RATE, bond_types_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False):
+    def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', tax_rate: float=TAX_RATE, bond_types_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None):
         """directory_path: a directory holding buy.csv, one row per bond holding, with columns
         date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
         BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
@@ -206,7 +206,13 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         content of buy.csv/interest_rate_file/inflation_rate_file/cancel.csv and valid for the
         day it was written — see cache_library.DiskCache.
         force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes everything, then overwrites the cache with the fresh result."""
+        recomputes everything, then overwrites the cache with the fresh result.
+        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
+        PolishRetailBonds instances (Portfolio builds and passes one automatically) so this
+        instance's own NATIVE_CURRENCY -> currency_to FX history is reused instead of re-fetched
+        when another source already needs (or later needs) that same pair - see
+        currency_calculator_library.get_cached_currency. None (default): fetched fresh, exactly
+        as before this parameter existed."""
         # Validated up front, before any file I/O, so a malformed override raises a clear error
         # right at construction time instead of surfacing later as a cryptic failure deep inside
         # _bond_dataframe's arithmetic (README Roadmap item).
@@ -273,8 +279,11 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             # through today - Currency's own same-currency short-circuit makes this a flat
             # 1.0-rate no-op when currency_to is already NATIVE_CURRENCY, so _compute_data/
             # _bond_dataframe apply every conversion below unconditionally rather than
-            # special-casing the no-conversion case.
-            currency=Currency(self.NATIVE_CURRENCY, currency_to, self.dataframe.index.min(), today, cache_dir=cache_dir, force_refresh=force_refresh)
+            # special-casing the no-conversion case. Routed through get_cached_currency (rather
+            # than Currency directly) so this pair is reused when currency_cache is shared with
+            # another source that already fetched (or later fetches) the same PLN -> currency_to
+            # conversion, e.g. two PolishRetailBonds instances in one Portfolio.
+            currency=get_cached_currency(currency_cache, self.NATIVE_CURRENCY, currency_to, self.dataframe.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
             self.data, type_dataframes, invested_by_type, lifetime_invested_by_type=self._compute_data(today, currency, progress_callback)
             if cache is not None:
                 cache.set(cache_key, (self.data, type_dataframes, invested_by_type, lifetime_invested_by_type))

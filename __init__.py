@@ -16,7 +16,7 @@ from .stock_calculator_library import Stock
 from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
-from .currency_calculator_library import Currency
+from .currency_calculator_library import Currency, get_cached_currency
 from .cache_library import DiskCache
 from .bank_account_calculator_library import BankAccount
 
@@ -28,6 +28,7 @@ __all__=[
     'Commodity',
     'Crypto',
     'Currency',
+    'get_cached_currency',
     'DiskCache',
     'BankAccount',
 ]
