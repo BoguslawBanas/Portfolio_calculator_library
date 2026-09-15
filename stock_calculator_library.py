@@ -79,10 +79,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
         self.total_money_invested=0.0
         # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
-        # is what's still held today - the same figure PolishRetailBonds/BankAccount already
-        # expose under their own total_money_invested (README Roadmap item). Kept as a separate
-        # attribute rather than changing total_money_invested itself so existing callers relying
-        # on the lifetime figure see no behavior change.
+        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
+        # BankAccount's own total_money_currently_invested/total_money_invested pair.
         self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0

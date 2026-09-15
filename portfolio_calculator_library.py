@@ -81,12 +81,11 @@ class Portfolio(ReprMixin):
         self.total_money_currently_invested/distribution_by_directory/_ticker/_currency_currently_
         invested: the same allocation-by-amount-invested figures as total_money_invested/
         distribution_by_directory/_ticker/_currency above, but by cost basis of what's actually
-        still held today rather than lifetime-gross-ever-bought. For a Stock/Commodity/Crypto
-        source with no sells (or a PolishRetailBonds/BankAccount source, which only ever tracks
-        the current figure to begin with - see each class's own docstring) the two are identical;
-        they diverge once something's been sold/redeemed/withdrawn, since only the lifetime figure
-        stays at its historical value for a position that's now fully closed out (README Roadmap
-        item).
+        still held today rather than lifetime-gross-ever-bought (every source - Stock/Commodity/
+        Crypto's own sells, PolishRetailBonds' own maturity/cancellation, BankAccount's own
+        withdrawals - tracks both figures independently; see each class's own docstring). The two
+        are identical only until something's actually been sold/matured/cancelled/withdrawn, since
+        only the lifetime figure stays at its historical value once a position's fully closed out.
 
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
@@ -130,11 +129,11 @@ class Portfolio(ReprMixin):
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=0.0
-        # Unlike total_money_invested (lifetime gross ever bought/deposited, never reduced by a
-        # sell/withdrawal for Stock/Commodity/Crypto sources), this is what's actually still held
-        # today across every source - PolishRetailBonds/BankAccount already track only this, so
-        # for a bonds-/bank_account-only Portfolio the two totals are identical; they diverge once
-        # a Stock/Commodity/Crypto source has any sell in it (README Roadmap item).
+        # Unlike total_money_invested (lifetime gross ever bought/deposited/issued, never reduced
+        # by a sell/withdrawal/maturity), this is what's actually still held today across every
+        # source. The two are identical until something's actually been sold/matured/cancelled/
+        # withdrawn, since only the lifetime figure stays at its historical value once a position's
+        # fully closed out - see each source class's own docstring.
         self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0

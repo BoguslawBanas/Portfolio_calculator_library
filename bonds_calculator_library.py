@@ -234,38 +234,37 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         cache_key=None
         cached=None
         if cache is not None:
-            # 'bonds-v5': the cached value's shape/semantics have changed four times now (a bare
+            # 'bonds-v6': the cached value's shape/semantics have changed five times now (a bare
             # DataFrame, then a (dataframe, type_dataframes) pair, then a 3-tuple adding
             # invested_by_type, then the same 3-tuple currency-converted per currency_to instead
-            # of always PLN, now the same 3-tuple with each DataFrame gaining DIVIDEND_COLUMN) -
-            # buy.csv/the rate files aren't necessarily what changed between versions, so their
-            # content hash alone wouldn't invalidate an old-shaped/wrong-currency/missing-column,
-            # same-day entry already on disk - bump this tag again if the cached shape/semantics
-            # ever change again. currency_to/tax_rate are folded into the key itself (not just
-            # this tag) since two different target currencies (or tax rates) are both otherwise-
-            # valid, simultaneously-live cache entries for the same buy.csv - not a stale-vs-fresh
-            # case. cancel.csv is folded in the same way (a sentinel string when absent, since
-            # there's nothing to hash_file) - adding/editing/removing it must invalidate a
-            # same-day entry computed before that change, exactly like editing buy.csv itself
-            # would. bond_types_json is folded in the same sentinel-when-absent way as cancel.csv.
+            # of always PLN, then the same 3-tuple with each DataFrame gaining DIVIDEND_COLUMN,
+            # now a 4-tuple adding lifetime_invested_by_type) - buy.csv/the rate files aren't
+            # necessarily what changed between versions, so their content hash alone wouldn't
+            # invalidate an old-shaped/wrong-currency/missing-column, same-day entry already on
+            # disk - bump this tag again if the cached shape/semantics ever change again.
+            # currency_to/tax_rate are folded into the key itself (not just this tag) since two
+            # different target currencies (or tax rates) are both otherwise-valid, simultaneously-
+            # live cache entries for the same buy.csv - not a stale-vs-fresh case. cancel.csv is
+            # folded in the same way (a sentinel string when absent, since there's nothing to
+            # hash_file) - adding/editing/removing it must invalidate a same-day entry computed
+            # before that change, exactly like editing buy.csv itself would. bond_types_json is
+            # folded in the same sentinel-when-absent way as cancel.csv.
             cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
             bond_types_component=DiskCache.hash_file(bond_types_json) if bond_types_json is not None else 'default-bond-types'
-            cache_key=DiskCache.make_key('bonds-v5', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
+            cache_key=DiskCache.make_key('bonds-v6', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
                     # Explicit shape check, not bare unpacking wrapped in try/except: a stale
-                    # cache entry that's some OTHER 3-column-shaped value (e.g. a bare DataFrame
-                    # from a version of this class that cached one directly) unpacks without
-                    # raising - a plain DataFrame with 3 columns iterates as 3 column-name
-                    # strings, silently assigning garbage to self.data/type_dataframes/
-                    # invested_by_type instead of failing loudly. Belt-and-suspenders alongside
-                    # the version tag above, in case a cache entry with yet another shape ever
-                    # reaches here regardless (e.g. hand-edited, or a future change that forgets
-                    # to bump the tag) - safer to recompute than to crash construction or
-                    # silently misinterpret it.
-                    if isinstance(cached, tuple) and len(cached)==3:
-                        self.data, type_dataframes, invested_by_type=cached
+                    # cache entry that's some OTHER 4-shaped value unpacks without raising -
+                    # silently assigning garbage to self.data/type_dataframes/invested_by_type/
+                    # lifetime_invested_by_type instead of failing loudly. Belt-and-suspenders
+                    # alongside the version tag above, in case a cache entry with yet another
+                    # shape ever reaches here regardless (e.g. hand-edited, or a future change
+                    # that forgets to bump the tag) - safer to recompute than to crash
+                    # construction or silently misinterpret it.
+                    if isinstance(cached, tuple) and len(cached)==4:
+                        self.data, type_dataframes, invested_by_type, lifetime_invested_by_type=cached
                     else:
                         cached=None
 
@@ -276,9 +275,9 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             # _bond_dataframe apply every conversion below unconditionally rather than
             # special-casing the no-conversion case.
             currency=Currency(self.NATIVE_CURRENCY, currency_to, self.dataframe.index.min(), today, cache_dir=cache_dir, force_refresh=force_refresh)
-            self.data, type_dataframes, invested_by_type=self._compute_data(today, currency, progress_callback)
+            self.data, type_dataframes, invested_by_type, lifetime_invested_by_type=self._compute_data(today, currency, progress_callback)
             if cache is not None:
-                cache.set(cache_key, (self.data, type_dataframes, invested_by_type))
+                cache.set(cache_key, (self.data, type_dataframes, invested_by_type, lifetime_invested_by_type))
         elif progress_callback is not None:
             progress_callback()
 
@@ -286,20 +285,21 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # type - each entry is that type's own merged type_dataframe's last MONEY_INVESTED_COLUMN
         # row (see _compute_data's invested_by_type docstring), so it's exactly equal to
         # self.data[MONEY_INVESTED_COLUMN].iloc[-1] summed by type rather than read off the whole
-        # portfolio at once. A matured type's Money_invested has already dropped to 0 (see
-        # _bond_dataframe), so it contributes 0 here too - unlike Stock's total_money_invested/
-        # distribution_by_ticker, which stay at their lifetime (gross-ever-bought) value even for
-        # a fully-sold ticker. total_current_value/total_revenue read self.data's actual last row
+        # portfolio at once. total_current_value/total_revenue read self.data's actual last row
         # directly, which already reflects only what's still held today (Money_invested/
         # PROFIT_WITHOUT_DIVIDEND_COLUMN both go to 0 past maturity) plus whatever's been realized
         # so far (PROFIT_COLUMN, which persists past maturity).
-        self.total_money_invested=sum(invested_by_type.values())
-        # Plain alias: total_money_invested above already IS "currently held" for this class (see
-        # comment above), unlike Stock/Commodity/Crypto where it's the lifetime-gross figure and
-        # total_money_currently_invested is a genuinely separate computation. Exists here purely
-        # so Portfolio can read the same attribute name off every source uniformly (README Roadmap
-        # item), without implying this class tracks a lifetime-gross figure it doesn't.
-        self.total_money_currently_invested=self.total_money_invested
+        #
+        # total_money_invested (and distribution_by_ticker below) is the lifetime-gross figure -
+        # every holding/tranche's own cost basis at purchase, summed by type, never reduced by
+        # maturity/cancellation (lifetime_invested_by_type - see _bond_dataframe/_compute_data) -
+        # matching what Stock/Commodity/Crypto's own total_money_invested/distribution_by_ticker
+        # mean. total_money_currently_invested/distribution_by_ticker_currently_invested is the
+        # separate, genuinely different figure: what's CURRENTLY held per type (invested_by_type,
+        # each type's own merged type_dataframe's last MONEY_INVESTED_COLUMN row) - 0 for a type
+        # that's fully matured/cancelled, same as MONEY_INVESTED_COLUMN itself.
+        self.total_money_invested=sum(lifetime_invested_by_type.values())
+        self.total_money_currently_invested=sum(invested_by_type.values())
         self.total_current_value=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
 
@@ -307,15 +307,13 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # 'Polish bonds' bucket, the same way Stock/Commodity/Crypto break distribution_by_ticker
         # down by ticker/symbol - merging per type first (type_dataframes below), not per holding,
         # so two separate holdings of the same type (e.g. two different ROR issues) land in one
-        # slice instead of two. A type that's fully matured drops to 0% in distribution_by_ticker
-        # itself (Money_invested has nothing left held - see _bond_dataframe), matching its 0% in
-        # _current_value - unlike a fully-sold Stock ticker, which keeps its lifetime cost basis
-        # in distribution_by_ticker even once nothing is held. _revenue still keeps whatever a
+        # slice instead of two. distribution_by_ticker keeps a fully-matured/-cancelled type's
+        # lifetime share (same as a fully-sold Stock ticker); distribution_by_ticker_currently_
+        # invested drops it to 0% instead (Money_invested has nothing left held - see
+        # _bond_dataframe), matching its 0% in _current_value. _revenue still keeps whatever a
         # matured/cancelled type realized, regardless of what it currently holds.
-        self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_invested else dict()
-        # Same plain alias as total_money_currently_invested above - a copy, not the same dict
-        # object, so nothing downstream can mutate one and silently affect the other.
-        self.distribution_by_ticker_currently_invested=dict(self.distribution_by_ticker)
+        self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in lifetime_invested_by_type.items()} if self.total_money_invested else dict()
+        self.distribution_by_ticker_currently_invested={code: (invested/self.total_money_currently_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_currently_invested else dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Every bond type here is issued in NATIVE_CURRENCY, so this is trivial (unlike Stock's,
@@ -440,7 +438,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         return tranches
 
     def _compute_data(self, today: datetime, currency: Currency, progress_callback: Callable[[], None]=None) -> tuple:
-        """Returns (merged_dataframe, type_dataframes, invested_by_type):
+        """Returns (merged_dataframe, type_dataframes, invested_by_type, lifetime_invested_by_type):
         - merged_dataframe: the whole-portfolio DataFrame (self.data).
         - type_dataframes: {bond-type code: merged DataFrame} for that type alone, one entry per
           distinct type actually held, used for distribution_by_ticker_current_value/_revenue.
@@ -448,8 +446,15 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
           type_dataframes[code]'s own last MONEY_INVESTED_COLUMN row - so a matured/fully-
           cancelled holding contributes 0, same as MONEY_INVESTED_COLUMN itself already does (see
           _bond_dataframe). Kept as its own dict (rather than reading self.data directly) purely
-          so distribution_by_ticker can be broken down per type instead of one flat total.
-        All three are cached together (see __init__) so a cache hit doesn't lose any of them."""
+          so distribution_by_ticker_currently_invested can be broken down per type instead of one
+          flat total. Feeds total_money_currently_invested/distribution_by_ticker_currently_invested.
+        - lifetime_invested_by_type: {bond-type code: that type's own cost basis summed across
+          every holding/tranche ever bought}, never reduced by maturity/cancellation - the same
+          "lifetime gross" meaning Stock/Commodity/Crypto's own total_money_invested carries.
+          Accumulated per-holding below (see _bond_dataframe's own lifetime_invested return value),
+          not read off a column, since a matured tranche's MONEY_INVESTED_COLUMN has already
+          dropped to 0 by today. Feeds total_money_invested/distribution_by_ticker.
+        All four are cached together (see __init__) so a cache hit doesn't lose any of them."""
         # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
         # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
         # handful, not hundreds), and the real per-iteration cost is the vectorized-per-period
@@ -464,6 +469,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
         bonds_by_type=dict()
         invested_by_type=dict()
+        lifetime_invested_by_type=dict()
         for i in range(len(self.dataframe)):
             code=codes[i]
             if code not in self.bond_types:
@@ -472,10 +478,16 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
             cancellations=self.cancellations.get((dates[i], raw_codes[i]), [])
             tranches=self._build_tranches(amounts[i], cancellations, dates[i], raw_codes[i])
-            tranche_dataframes=[
+            tranche_results=[
                 self._bond_dataframe(code, tranche_amount, initial_coupons[i], additional_coupons[i], dates[i], today, is_swapped, currency, tranche_cancel_date)
                 for tranche_amount, tranche_cancel_date in tranches
             ]
+            tranche_dataframes=[df for df, _ in tranche_results]
+            # Summing each tranche's own lifetime_invested reconstructs the whole holding's cost
+            # basis exactly (price_per_bond/fx_at_purchase are identical across every tranche of
+            # one holding - only cancel_date/amount differ - and tranche amounts sum back to the
+            # holding's full amounts[i]).
+            lifetime_invested_by_type[code]=lifetime_invested_by_type.get(code, 0.0)+sum(lifetime_invested for _, lifetime_invested in tranche_results)
             bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self.merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
 
@@ -485,7 +497,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         type_dataframes={code: self.merge(holdings) for code, holdings in bonds_by_type.items()}
         for code, value in type_dataframes.items():
             invested_by_type[code]=value[self.MONEY_INVESTED_COLUMN].iloc[-1]
-        return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type
+        return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type, lifetime_invested_by_type
 
     def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:
         """The published rate feeding a period-2-onward rate (before that period's own margin is
@@ -503,7 +515,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             raw=self.inflation_rate_data.loc[lookup_date, self.CSV_INFLATION_COLUMN]
         return max(raw, 0.0)
 
-    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency, cancel_date: pd.Timestamp=None) -> pd.DataFrame:
+    def _bond_dataframe(self, code: str, amount_of_bonds: float, initial_coupon: float, additional_coupon: float, start_date: pd.Timestamp, today: datetime, is_swapped: bool, currency: Currency, cancel_date: pd.Timestamp=None) -> tuple:
         config=self.bond_types[code]
         period_months=config['period_months']
         num_periods=config['num_periods']
@@ -632,4 +644,12 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         dataframe[self.DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_COLUMN]
         dataframe[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
-        return dataframe
+
+        # This tranche's own cost basis at purchase, untouched by maturity/cancellation zeroing
+        # money_invested out above - unlike MONEY_INVESTED_COLUMN itself, this number is never
+        # reduced, the same "lifetime gross ever bought" meaning Stock/Commodity/Crypto's own
+        # total_money_invested carries. Returned alongside the DataFrame (rather than read back
+        # off a column) since summing tranches of a partially-cancelled holding needs this value
+        # even for a tranche whose MONEY_INVESTED_COLUMN has already dropped to 0 by today.
+        lifetime_invested=round(amount_of_bonds*price_per_bond*fx_at_purchase, 2)
+        return dataframe, lifetime_invested

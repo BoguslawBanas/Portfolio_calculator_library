@@ -207,9 +207,9 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
-    # No sell anywhere in this portfolio, so total_money_currently_invested merges correctly
-    # across both a Stock source (its own genuinely-computed figure) and a PolishRetailBonds
-    # source (a plain alias of its total_money_invested) to land on the same total.
+    # Nothing sold/matured/cancelled anywhere in this portfolio, so total_money_currently_invested
+    # merges correctly across both sources (each tracks it as a genuinely separate computation
+    # from its own total_money_invested) to land on the same total as the lifetime figure.
     assert portfolio.total_money_currently_invested==pytest.approx(portfolio.total_money_invested)
     assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
@@ -263,8 +263,14 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     # Profit: the bond's realized gain is still added on top, even though it matured before today.
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
-    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond.
+    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond -
+    # strictly positive (5 units * 100 nominal, FX-converted), not 0 despite nothing being held today.
+    assert bonds_only.total_money_invested>0.0
     assert mixed.total_money_invested==pytest.approx(stock_only.total_money_invested+bonds_only.total_money_invested)
+    # total_money_currently_invested, unlike total_money_invested, does drop the matured bond -
+    # the figure Money_invested (the data column, checked above) already reflects.
+    assert bonds_only.total_money_currently_invested==pytest.approx(0.0)
+    assert mixed.total_money_currently_invested==pytest.approx(stock_only.total_money_currently_invested)
 
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):

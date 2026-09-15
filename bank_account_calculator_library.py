@@ -83,6 +83,7 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
 
@@ -90,15 +91,19 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
 
         dataframes_2=list()
         money_invested_by_account=dict()
+        lifetime_invested_by_account=dict()
         current_value_by_account=dict()
         revenue_by_account=dict()
         for df in dataframes:
             account=df[self.CSV_TICKER_COLUMN].iloc[0]
-            computed=self._compute_data(df, cache_dir, force_refresh)
+            computed, lifetime_deposited=self._compute_data(df, cache_dir, force_refresh)
             dataframes_2.append(computed)
 
             money_invested_by_account[account]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
-            self.total_money_invested+=money_invested_by_account[account]
+            # Lifetime gross ever deposited, never reduced by a withdrawal - matching what Stock/
+            # Commodity/Crypto's own total_money_invested means (see _compute_data's own comment).
+            lifetime_invested_by_account[account]=lifetime_deposited
+            self.total_money_invested+=lifetime_deposited
 
             # Current value: balance still held plus its unrealized (accrued, uncapitalized-or-not) interest.
             current_value_by_account[account]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -110,17 +115,16 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
             if progress_callback is not None:
                 progress_callback()
 
-        for account, value in money_invested_by_account.items():
+        # distribution_by_ticker is the lifetime-gross figure (every deposit ever made, ignoring
+        # withdrawals) - matching Stock/Commodity/Crypto's own distribution_by_ticker meaning.
+        # distribution_by_ticker_currently_invested is the separate, genuinely different figure:
+        # each account's current balance, net of withdrawals (money_invested_by_account) - an
+        # account withdrawn down to 0 drops to 0% there while keeping its full lifetime share above.
+        for account, value in lifetime_invested_by_account.items():
             self.distribution_by_ticker[account]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
-        # total_money_invested/distribution_by_ticker above already ARE "currently held" for this
-        # class (each account's current balance, net of withdrawals) - see
-        # bonds_calculator_library.py's own comment on why total_money_currently_invested exists
-        # as a genuinely separate computation for Stock/Commodity/Crypto but not here. The two
-        # lines below are plain aliases (a dict copy, not the same object, so nothing downstream
-        # can mutate one and silently affect the other) so Portfolio can read the same attribute
-        # names off every source uniformly.
-        self.total_money_currently_invested=self.total_money_invested
-        self.distribution_by_ticker_currently_invested=dict(self.distribution_by_ticker)
+        self.total_money_currently_invested=sum(money_invested_by_account.values())
+        for account, value in money_invested_by_account.items():
+            self.distribution_by_ticker_currently_invested[account]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
         for account, value in current_value_by_account.items():
             self.distribution_by_ticker_current_value[account]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
         for account, value in revenue_by_account.items():
@@ -162,7 +166,12 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
             self._interest_rate_data=all_days.join(rate_df).ffill()
         return self._interest_rate_data
 
-    def _compute_data(self, dataframe: pd.DataFrame, cache_dir: str=None, force_refresh: bool=False) -> pd.DataFrame:
+    def _compute_data(self, dataframe: pd.DataFrame, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+        """Returns (data, lifetime_deposited): lifetime_deposited is the sum of every deposit row's
+        own amount, ignoring withdrawals entirely - the "lifetime gross" figure __init__ needs for
+        total_money_invested/distribution_by_ticker, matching what that pair already means for
+        Stock/Commodity/Crypto. Returned alongside data (rather than recomputed from it) since
+        data[MONEY_INVESTED_COLUMN] is the net, withdrawal-reduced balance, not this."""
         account=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
         start_date=dataframe.index.min()
         end_date=datetime.today()
@@ -170,10 +179,14 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            cache_key=DiskCache.make_key('bank_account', account, DiskCache.hash_dataframe(dataframe))
+            # 'bank_account-v2': bumped from 'bank_account' when this method started returning a
+            # (data, lifetime_deposited) tuple instead of a bare DataFrame - the isinstance check
+            # below guards a cache entry from the older, bare-DataFrame format the same way
+            # Stock/Commodity/Crypto guard their own tuple cache formats.
+            cache_key=DiskCache.make_key('bank_account-v2', account, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
-                if cached is not None:
+                if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
         deposit_rows=dataframe[dataframe[self.SOURCE_TYPE_COLUMN]=='deposit']
@@ -199,6 +212,10 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         raw_amount=sorted_df[self.CSV_AMOUNT_COLUMN].to_numpy(dtype=float)
         signed_amount=np.where(state=='deposit', 1.0, -1.0)*np.round(raw_amount, 2)
+        # Every deposit row's own amount, summed - ignores withdrawals entirely (see this method's
+        # own docstring). signed_amount is already +amount for a deposit row/-amount for a
+        # withdrawal row, so summing just the positive (deposit) entries gives this directly.
+        lifetime_deposited=float(signed_amount[state=='deposit'].sum())
 
         position=data.index.get_indexer(sorted_df.index)
         if (position<0).any():
@@ -244,7 +261,8 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=data[self.PROFIT_COLUMN]
         data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]
 
+        result=(data, lifetime_deposited)
         if cache is not None:
-            cache.set(cache_key, data)
+            cache.set(cache_key, result)
 
-        return data
+        return result
