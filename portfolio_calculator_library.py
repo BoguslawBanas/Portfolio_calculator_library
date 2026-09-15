@@ -331,30 +331,19 @@ class Portfolio(ReprMixin):
         return pd.concat([zero_row, dataframe]).sort_index()
 
     def resample(self, resample_rule: str) -> pd.DataFrame:
-        """resample_rule: a pandas resample offset alias, case-insensitive - 'd'/'w'/'D'/'W' as
-        -is, 'me'/'qe'/'ye' (month/quarter/year end - also fine upper-case, 'ME'/'QE'/'YE').
-        The shorter bare 'm'/'q'/'y'/'a' forms (pandas's own now-deprecated month/quarter/year/
-        annual aliases, warned on as of pandas 2.2) are still accepted too, silently normalized
-        to their 'E'-suffixed spelling here so resample() never actually emits that warning."""
         resample_rule=resample_rule.upper()
 
         timedelta_to_subtract: pd.DateOffset
-        if resample_rule[0]=='D':
+        if resample_rule=='D':
             timedelta_to_subtract=pd.DateOffset(days=1)
-        elif resample_rule[0]=='W':
+        elif resample_rule=='W':
             timedelta_to_subtract=pd.DateOffset(weeks=1)
-        elif resample_rule[0]=='M':
+        elif resample_rule=='ME':
             timedelta_to_subtract=pd.DateOffset(months=1)
-            if resample_rule=='M':
-                resample_rule='ME'
-        elif resample_rule[0]=='Q':
+        elif resample_rule=='QE':
             timedelta_to_subtract=pd.DateOffset(months=3)
-            if resample_rule=='Q':
-                resample_rule='QE'
-        elif resample_rule[0] in ('Y', 'A'):
+        elif resample_rule=='YE':
             timedelta_to_subtract=pd.DateOffset(years=1)
-            if resample_rule in ('Y', 'A'):
-                resample_rule='YE'
 
         new_row=pd.DataFrame(
             [{col: 0.0 for col in self.portfolio.columns}],
