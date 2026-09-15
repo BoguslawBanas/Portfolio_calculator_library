@@ -49,8 +49,9 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - `Profit_without_realized` — profit still attributable to positions as they stand today: unrealized gain on whatever's still held plus dividends collected along the way, excluding gain/loss already locked in by a sell
 - `Profit_excluding_dividends` — the literal complement of `Profit_without_dividends`'s name: unrealized gain plus realized gain/loss, excluding only dividends
 - Both are always present (unlike `Dividend` below), since every source contributes them — for `PolishRetailBonds`/`BankAccount`, which don't track a separate realized-profit stream, both simply equal `Profit`/`Profit_without_dividends` respectively; for `Commodity`/`Crypto`, which pay no dividends, `Profit_excluding_dividends` is a no-op equal to `Profit`
-- allocation by ticker/directory/currency, by amount invested (cost basis), by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
+- allocation by ticker/directory/currency, by amount invested (cost basis), by amount *currently* invested, by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
 - `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency_to` (the single currency `self.data`/totals are already converted to and summed in)
+- `total_money_currently_invested`/`distribution_by_directory`/`_ticker`/`_currency_currently_invested` — the same allocation-by-amount-invested figures as `total_money_invested`/`distribution_by_directory`/`_ticker`/`_currency`, but by cost basis of what's actually still held today rather than lifetime-gross-ever-bought/deposited/issued. Every source (`Stock`/`Commodity`/`Crypto` sells, `PolishRetailBonds` maturity/cancellation, `BankAccount` withdrawals) tracks both figures independently, and they diverge once anything's actually been sold/matured/cancelled/withdrawn (a fully-closed-out position drops to 0% here, while the lifetime figure keeps its historical share) — see the Distribution metrics section below
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
@@ -122,6 +123,25 @@ Turns a set of deposit/withdrawal transactions into a daily balance/interest Dat
 - tax on interest defaults to 19% (`BankAccount.DEFAULT_TAX`), overridable per account via an optional `tax` column
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - same `groupby`-based (not `iterrows()`/`pd.concat`-per-row) account split as `Stock`/`Commodity`/`Crypto`
+
+## Distribution metrics
+
+Every calculator (`Stock`/`Commodity`/`Crypto`/`PolishRetailBonds`/`BankAccount`, and `Portfolio` itself) exposes the same four `{key: percentage}`-shaped dicts, keyed by ticker/symbol/bond-type/account. All four are computed the same way — each key's own "value" divided by the sum of every key's value, ×100 — the only thing that differs is what "value" measures, and that measurement differs by asset class:
+
+| | `distribution_by_ticker` (amount ever invested) | `distribution_by_ticker_currently_invested` (amount currently invested) | `distribution_by_ticker_current_value` (current market value) | `distribution_by_ticker_revenue` (share of total gain) |
+|---|---|---|---|---|
+| `Stock` | Sum of every `buy` row's cost basis, ever — **never reduced by a sell** | `Money_invested`'s last value — cost basis of units still held today | `Money_invested + Profit_without_dividends` (last value) — cost basis still held plus its unrealized gain | `Profit`'s last value — all-time gain: unrealized + dividends + realized, can be negative |
+| `Commodity` | Same as `Stock`, except each buy is costed at that day's fetched market price, not a user-recorded one | Same as `Stock` | Same as `Stock` | Same as `Stock`, minus dividends (`Commodity` pays none) |
+| `Crypto` | Same as `Stock` (buy price is user-recorded, like `Stock` — unlike `Commodity`) | Same as `Stock` | Same as `Stock` | Same as `Stock`, minus dividends (`Crypto` pays none) |
+| `PolishRetailBonds` | Sum of every holding/tranche's own cost basis at purchase, per type — **never reduced by maturity or cancellation** | Each type's current `Money_invested` (its merged type-level DataFrame's last value) — drops to 0 once every holding of that type has matured or been fully cancelled | `Money_invested + Profit_without_dividends` (both 0 once matured) — 0% past maturity | `Profit`'s last value — **persists past maturity**, since interest realized at redemption isn't lost from history |
+| `BankAccount` | Sum of every `deposit` row's own amount, per account — **never reduced by a withdrawal** | Each account's current `Money_invested` (its own last value) — current balance, net of withdrawals | `Money_invested + Profit_without_dividends` (last value) — balance plus all interest accrued so far, capitalized or not | `Profit`'s last value — all interest ever accrued for that account |
+
+For every asset class, the first two columns coincide until something's actually been sold/matured/cancelled/withdrawn — at that point only the "amount currently invested" column drops, while "amount ever invested" keeps that position's full historical share (a fully-sold `Stock` ticker, a matured `PolishRetailBonds` type, or a fully-withdrawn `BankAccount` account all behave the same way here).
+
+`Portfolio` builds its own three dict families on top of the tables above, not by re-deriving them from scratch:
+- `distribution_by_directory*` — one entry per source directory, value = that source's own `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` (the class-level totals the table above rolls up into), not broken down further by ticker.
+- `distribution_by_ticker*` — each source's own already-computed per-ticker dict (the table above) is re-expanded back to an absolute amount and summed across every source that happens to share the same ticker/type/account key, then the combined total is renormalized to a percentage of the whole portfolio.
+- `distribution_by_currency*` — the same merge as `distribution_by_ticker*` above, but grouped by each holding's own *native* currency instead of its ticker key. `BankAccount` never contributes here — it has no per-ticker native currency to look up (everything is assumed to already be in one currency), so a `BankAccount`-only portfolio's `distribution_by_currency*` dicts stay empty.
 
 ## Project structure
 
@@ -198,12 +218,14 @@ portfolio = Portfolio(sources, tickers_json="tickers.json", currency_to="usd", c
 # from Portfolio_calculator_library.cache_library import DiskCache
 # DiskCache(".portfolio_cache").clear()
 
-print(f"Total invested: {portfolio.total_money_invested:.2f}")
+print(f"Total invested (lifetime): {portfolio.total_money_invested:.2f}")
+print(f"Total invested (currently held): {portfolio.total_money_currently_invested:.2f}")
 print(f"Current value: {portfolio.total_current_value:.2f}")
 print(f"Total revenue: {portfolio.total_revenue:.2f}")
-print(portfolio.distribution_by_ticker)                # allocation by amount invested
-print(portfolio.distribution_by_ticker_current_value)  # allocation by current market value
-print(portfolio.distribution_by_ticker_revenue)         # allocation by share of total gains
+print(portfolio.distribution_by_ticker)                     # allocation by amount ever invested (lifetime)
+print(portfolio.distribution_by_ticker_currently_invested)  # allocation by amount currently invested
+print(portfolio.distribution_by_ticker_current_value)       # allocation by current market value
+print(portfolio.distribution_by_ticker_revenue)              # allocation by share of total gains
 
 # distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
 # position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by
@@ -263,7 +285,7 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - no de-duplication of `Currency` fetches across tickers that share a currency pair within one `Stock`/`Commodity`/`Crypto` construction — several holdings denominated in the same foreign currency each build their own `Currency(...)` and, without `cache_dir`, each hits yfinance separately for the same FX pair; fixing this well is nontrivial since each ticker's own start date can differ, so only worth doing if it's actually a bottleneck in practice
 - `PolishRetailBonds`' `Dividend` column reuses Stock's name for something that behaves quite differently: it stays at 0 the entire time a bond is held, then jumps once, at redemption/cancellation, to the whole accrued amount — closer in spirit to Stock/Commodity/Crypto's `Realized_profit` (a locked-in gain, recognized once, per event) than to a real per-payment dividend. Renaming it to `Realized_profit` instead would fix the mislabeling and let bonds merge into Portfolio's own `Realized_profit`/`Profit_without_realized`/`Profit_excluding_dividends` the same way Stock/Commodity/Crypto already do, rather than being the one source that fakes a `Dividend` column to fit in — a relabeling only, no change to the numbers themselves
 - separately, and a bigger change: `PolishRetailBonds` currently treats every bond type identically — interest accrues as unrealized (`Profit_without_dividends`) continuously and is only recognized as realized once, at final redemption. That matches the four "compounding" types (`TOS`/`ROS`/`EDO`/`ROD`, which really do pay nothing until maturity), but not the four "flat" types (`OTS`/`ROR`/`DOR`/`COI`), which in real life pay interest out at the end of every period — cash that arguably should exit the position and register as realized at each period boundary instead of sitting modeled as still-unrealized for years. Worth a closer look at whether/how to model per-period realization for the flat types; unlike the renaming above, this would change actual reported numbers for those four types, not just labels
-- `total_money_invested`/`distribution_by_ticker` mean two different things depending on the source type, with no flag or docs at the `Portfolio` level to tell them apart: for `Stock`/`Commodity`/`Crypto` it's the lifetime gross amount ever bought, never reduced by a later sell; for `PolishRetailBonds` and `BankAccount` it's only what's currently held (a matured bond type or a withdrawn-down account drops toward 0%) — `PolishRetailBonds` documents this divergence from `Stock` in its own comments, but `BankAccount` doesn't call out that it follows the same "currently held" convention. A mixed `Portfolio`'s `total_money_invested` ends up silently summing "everything ever put in" and "what's in there right now" across its sources
+- `Plot.allocation_plot`'s `kind='histogram'` path — the one its own docstring recommends in place of `kind='pie'` whenever `metric='revenue'` can go negative (a pie chart has no honest way to draw a negative-share wedge) — doesn't actually make a losing position's bar stand out: it colors every bar from the fixed `CATEGORICAL_COLORS` palette regardless of sign, so a negative share just quietly dips below zero on the axis. `period_return_bar_plot` a few methods up in the same file already has this solved (`COLOR_GOOD`/`COLOR_CRITICAL` based on sign) - reusing that convention in `allocation_plot`'s histogram branch would make losing positions jump out at a glance
 
 ## License
 

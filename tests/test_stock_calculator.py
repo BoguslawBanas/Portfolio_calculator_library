@@ -46,6 +46,13 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     data=stock.data
     # Selling 4 of 10 units removes 40% of the cost basis (1000 -> 600), average price unchanged.
     assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
+    # total_money_invested stays at the lifetime-gross 1000 (unreduced by the sell), while
+    # total_money_currently_invested drops to the 600 actually still held - the two diverge
+    # exactly once a sell happens.
+    assert stock.total_money_invested==pytest.approx(1000.0)
+    assert stock.total_money_currently_invested==pytest.approx(600.0)
+    assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
+    assert stock.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
     # Realized profit = proceeds (4*120) - cost basis removed (400) = 80.
     assert data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(80.0)
     # Profit_without_realized excludes that locked-in 80 (no dividends here, so it's just the
@@ -77,6 +84,12 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     assert stock.total_revenue==pytest.approx(0.0)
     assert stock.distribution_by_ticker_current_value==pytest.approx({'US0000000001': 0.0})
     assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
+    # Same 0/0-guarded shape for currently_invested: nothing is left held (full sell), so
+    # total_money_currently_invested is exactly 0.0 while total_money_invested (lifetime gross)
+    # stays at 1000 - distribution_by_ticker_currently_invested must land on 0.0, not NaN.
+    assert stock.total_money_invested==pytest.approx(1000.0)
+    assert stock.total_money_currently_invested==pytest.approx(0.0)
+    assert stock.distribution_by_ticker_currently_invested==pytest.approx({'US0000000001': 0.0})
 
 
 def test_nonexistent_directory_raises_clear_value_error(tmp_path, make_tickers_json):

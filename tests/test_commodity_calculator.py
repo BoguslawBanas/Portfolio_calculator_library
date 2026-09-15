@@ -90,6 +90,12 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     proceeds=4*fake_close(start_date, sell_date)
     assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(round(money_invested-money_invested_removed, 2))
     assert data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(round(proceeds-money_invested_removed, 2))
+    # total_money_invested stays at the lifetime-gross buy total, while
+    # total_money_currently_invested drops to what's still held (post-sell cost basis) - the two
+    # diverge exactly once a sell happens, same as Stock.
+    assert commodity.total_money_invested==pytest.approx(round(money_invested, 2))
+    assert commodity.total_money_currently_invested==pytest.approx(round(money_invested-money_invested_removed, 2))
+    assert commodity.distribution_by_ticker_currently_invested['gold']==pytest.approx(100.0)
 
 
 def test_oversell_raises_value_error(make_source_dir):

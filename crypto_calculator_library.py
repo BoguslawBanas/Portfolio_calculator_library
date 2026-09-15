@@ -86,9 +86,14 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         already-computed DataFrame is reused); otherwise a second fetch/computation."""
         self.tickers=self._load_tickers(tickers_json)
         self.total_money_invested=0.0
+        # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
+        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
+        # BankAccount's own total_money_currently_invested/total_money_invested pair.
+        self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Every symbol here quotes in QUOTE_CURRENCY, so this is trivial (unlike Stock's, which
@@ -108,6 +113,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         # recomputing the identical figure a second time.
         dataframes_2=list()
         money_invested_by_symbol=dict()
+        currently_invested_by_symbol=dict()
         current_value_by_symbol=dict()
         revenue_by_symbol=dict()
         for df in dataframes:
@@ -118,6 +124,11 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
 
             money_invested_by_symbol[symbol]=total_buy_invested
             self.total_money_invested+=total_buy_invested
+
+            # Cost basis of what's still held today - unlike total_buy_invested above, reduced by
+            # any sell (see MONEY_INVESTED_COLUMN itself). 0 for a symbol that's been fully sold.
+            currently_invested_by_symbol[symbol]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
+            self.total_money_currently_invested+=currently_invested_by_symbol[symbol]
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_symbol[symbol]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -139,6 +150,9 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for symbol, value in money_invested_by_symbol.items():
             self.distribution_by_ticker[symbol]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+
+        for symbol, value in currently_invested_by_symbol.items():
+            self.distribution_by_ticker_currently_invested[symbol]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
 
         for symbol, value in current_value_by_symbol.items():
             self.distribution_by_ticker_current_value[symbol]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0

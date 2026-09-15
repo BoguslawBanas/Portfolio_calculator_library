@@ -31,11 +31,16 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     # by later sells — the two track different things (position size vs. lifetime capital in).
     assert data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
     assert portfolio.total_money_invested==pytest.approx(1000.0)
+    # total_money_currently_invested tracks the same "still held" figure data[Money_invested]
+    # already does - unlike total_money_invested, reduced by the 4-unit sell.
+    assert portfolio.total_money_currently_invested==pytest.approx(600.0)
     # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
     # by the CSV's isin column, not the yfinance ticker symbol.
     assert 'US0000000001' in portfolio.distribution_by_ticker
     assert portfolio.distribution_by_directory
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    assert portfolio.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
 
 
 def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_dir, make_tickers_json):
@@ -202,6 +207,11 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    # Nothing sold/matured/cancelled anywhere in this portfolio, so total_money_currently_invested
+    # merges correctly across both sources (each tracks it as a genuinely separate computation
+    # from its own total_money_invested) to land on the same total as the lifetime figure.
+    assert portfolio.total_money_currently_invested==pytest.approx(portfolio.total_money_invested)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
     # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
@@ -253,8 +263,14 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     # Profit: the bond's realized gain is still added on top, even though it matured before today.
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
-    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond.
+    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond -
+    # strictly positive (5 units * 100 nominal, FX-converted), not 0 despite nothing being held today.
+    assert bonds_only.total_money_invested>0.0
     assert mixed.total_money_invested==pytest.approx(stock_only.total_money_invested+bonds_only.total_money_invested)
+    # total_money_currently_invested, unlike total_money_invested, does drop the matured bond -
+    # the figure Money_invested (the data column, checked above) already reflects.
+    assert bonds_only.total_money_currently_invested==pytest.approx(0.0)
+    assert mixed.total_money_currently_invested==pytest.approx(stock_only.total_money_currently_invested)
 
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):

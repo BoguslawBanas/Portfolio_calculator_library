@@ -78,9 +78,14 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
         already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
         self.total_money_invested=0.0
+        # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
+        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
+        # BankAccount's own total_money_currently_invested/total_money_invested pair.
+        self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Each ticker's own native currency (tickers.json's currency field) — always populated,
@@ -102,6 +107,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         # recomputing the identical figure a second time.
         dataframes_2=list()
         money_invested_by_ticker=dict()
+        currently_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
         for df in dataframes:
@@ -113,6 +119,11 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
             money_invested_by_ticker[ticker]=total_buy_invested
             self.total_money_invested+=total_buy_invested
+
+            # Cost basis of what's still held today - unlike total_buy_invested above, reduced by
+            # any sell (see MONEY_INVESTED_COLUMN itself). 0 for a ticker that's been fully sold.
+            currently_invested_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
+            self.total_money_currently_invested+=currently_invested_by_ticker[ticker]
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -137,6 +148,9 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for ticker, value in money_invested_by_ticker.items():
             self.distribution_by_ticker[ticker]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+
+        for ticker, value in currently_invested_by_ticker.items():
+            self.distribution_by_ticker_currently_invested[ticker]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
 
         for ticker, value in current_value_by_ticker.items():
             self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
