@@ -28,6 +28,17 @@ class Portfolio(ReprMixin):
     # Only present when at least one Stock source contributed (the only asset type that
     # produces a Dividend column) — read via self.data.get(DIVIDEND_COLUMN, 0.0), not [].
     DIVIDEND_COLUMN='Dividend'
+    # Profit still attributable to positions as they stand today - unrealized gain on whatever's
+    # still held plus dividends collected along the way - excluding gain/loss already locked in
+    # by a sell (each source's own Realized_profit, where that source tracks one; PolishRetailBonds/
+    # BankAccount fold straight into this since neither has a separate realized-profit stream).
+    # Every source contributes it (see each source's own PROFIT_WITHOUT_REALIZED_COLUMN), so unlike
+    # DIVIDEND_COLUMN this is always present - safe to read via self.data[...] directly.
+    PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
+    # keeping realized profit (Profit - Dividend). Also always present, same as
+    # PROFIT_WITHOUT_REALIZED_COLUMN above.
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     DAILY_RETURN_COLUMN='Daily_return'
     IRR_COLUMN='Irr'
     # Working-only columns, created and dropped again within calculate_irr.
@@ -67,6 +78,23 @@ class Portfolio(ReprMixin):
         portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency_to above
         (the single currency self.data itself is already converted to and summed in).
 
+        self.total_money_currently_invested/distribution_by_directory/_ticker/_currency_currently_
+        invested: the same allocation-by-amount-invested figures as total_money_invested/
+        distribution_by_directory/_ticker/_currency above, but by cost basis of what's actually
+        still held today rather than lifetime-gross-ever-bought (every source - Stock/Commodity/
+        Crypto's own sells, PolishRetailBonds' own maturity/cancellation, BankAccount's own
+        withdrawals - tracks both figures independently; see each class's own docstring). The two
+        are identical only until something's actually been sold/matured/cancelled/withdrawn, since
+        only the lifetime figure stays at its historical value once a position's fully closed out.
+
+        Every Stock/Commodity/Crypto/PolishRetailBonds source constructed below shares one
+        currency_cache dict, built fresh here per Portfolio construction and passed down to each
+        - so holdings that share a currency pair (several same-currency tickers within one
+        source, or two different sources converting the same pair, e.g. Commodity and Crypto both
+        quoting in usd) fetch that pair's FX history once per Portfolio construction rather than
+        once per holding (README Roadmap item, before this) - see
+        currency_calculator_library.get_cached_currency for the reuse/extension rule.
+
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
@@ -88,9 +116,11 @@ class Portfolio(ReprMixin):
         Stock/Commodity/Crypto do, so there's no per-holding native-currency DataFrame for
         Portfolio to collect here."""
         self.distribution_by_directory=dict()
+        self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
@@ -101,14 +131,25 @@ class Portfolio(ReprMixin):
         # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
         # (a differently-cased source) land in the same bucket.
         self.distribution_by_currency=dict()
+        self.distribution_by_currency_currently_invested=dict()
         self.distribution_by_currency_current_value=dict()
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=0.0
+        # Unlike total_money_invested (lifetime gross ever bought/deposited/issued, never reduced
+        # by a sell/withdrawal/maturity), this is what's actually still held today across every
+        # source. The two are identical until something's actually been sold/matured/cancelled/
+        # withdrawn, since only the lifetime figure stays at its historical value once a position's
+        # fully closed out - see each source class's own docstring.
+        self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
+        # Shared across every source constructed below (see __init__'s own docstring) so a
+        # currency pair fetched by one source is reused by another that needs the same pair,
+        # instead of each independently constructing/fetching its own Currency.
+        currency_cache=dict()
 
         # Validated up front, before any (potentially slow, network-bound) source construction
         # starts, so a typo in sources (e.g. 'stocks' instead of 'stock') fails loudly right
@@ -139,16 +180,16 @@ class Portfolio(ReprMixin):
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='bonds':
-                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
+                    source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, currency_cache=currency_cache)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
+                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -163,6 +204,9 @@ class Portfolio(ReprMixin):
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
+        for key, value in self.distribution_by_directory_currently_invested.items():
+            self.distribution_by_directory_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
@@ -172,6 +216,9 @@ class Portfolio(ReprMixin):
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
+        for key, value in self.distribution_by_ticker_currently_invested.items():
+            self.distribution_by_ticker_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
@@ -180,6 +227,9 @@ class Portfolio(ReprMixin):
 
         for key, value in self.distribution_by_currency.items():
             self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
+
+        for key, value in self.distribution_by_currency_currently_invested.items():
+            self.distribution_by_currency_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
             self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -217,14 +267,17 @@ class Portfolio(ReprMixin):
         source type that supports it (Stock/Commodity/Crypto) - PolishRetailBonds/BankAccount
         never pass True here since neither exposes native_data/native_currency."""
         self.distribution_by_directory[dir]=source.total_money_invested
+        self.distribution_by_directory_currently_invested[dir]=source.total_money_currently_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
         self.total_money_invested+=source.total_money_invested
+        self.total_money_currently_invested+=source.total_money_currently_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
 
         per_metric=(
             (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested),
+            (self.distribution_by_ticker_currently_invested, self.distribution_by_currency_currently_invested, source.distribution_by_ticker_currently_invested, source.total_money_currently_invested),
             (self.distribution_by_ticker_current_value, self.distribution_by_currency_current_value, source.distribution_by_ticker_current_value, source.total_current_value),
             (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue),
         )
@@ -277,27 +330,19 @@ class Portfolio(ReprMixin):
         )
         return pd.concat([zero_row, dataframe]).sort_index()
 
-    # pandas deprecated the bare 'M'/'Q'/'Y'/'A' resample offset aliases in favor of 'ME'/'QE'/
-    # 'YE' (FutureWarning as of pandas 2.2, eventual removal) - only remaps an exact match so a
-    # still-valid alias (e.g. 'MS'/month-start, or an already-'ME'-style spelling) passes through
-    # untouched.
-    _DEPRECATED_RESAMPLE_ALIASES={'M': 'ME', 'Q': 'QE', 'Y': 'YE', 'A': 'YE'}
-
     def resample(self, resample_rule: str) -> pd.DataFrame:
-        """resample_rule: a pandas resample offset alias - 'D'/'W' as-is, or 'M'/'Q'/'Y' (also
-        accepted as their non-deprecated 'ME'/'QE'/'YE' spellings, which this normalizes to)."""
-        resample_rule=self._DEPRECATED_RESAMPLE_ALIASES.get(resample_rule, resample_rule)
+        resample_rule=resample_rule.upper()
 
         timedelta_to_subtract: pd.DateOffset
-        if resample_rule[0]=='D':
+        if resample_rule=='D':
             timedelta_to_subtract=pd.DateOffset(days=1)
-        elif resample_rule[0]=='W':
+        elif resample_rule=='W':
             timedelta_to_subtract=pd.DateOffset(weeks=1)
-        elif resample_rule[0]=='M':
+        elif resample_rule=='ME':
             timedelta_to_subtract=pd.DateOffset(months=1)
-        elif resample_rule[0]=='Q':
+        elif resample_rule=='QE':
             timedelta_to_subtract=pd.DateOffset(months=3)
-        elif resample_rule[0]=='Y':
+        elif resample_rule=='YE':
             timedelta_to_subtract=pd.DateOffset(years=1)
 
         new_row=pd.DataFrame(

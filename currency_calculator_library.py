@@ -67,3 +67,36 @@ class Currency:
             self._cache.set(cache_key, result)
 
         return result
+
+
+def get_cached_currency(currency_cache: dict, currency_from: str, currency_to: str, start_date, cache_dir: str=None, force_refresh: bool=False) -> Currency:
+    """Looks up/fetches a Currency for (currency_from, currency_to) through a caller-supplied,
+    shared currency_cache dict (keyed by the upper-cased pair) instead of every caller
+    constructing its own - Stock/Commodity/Crypto/PolishRetailBonds all call this instead of
+    Currency(...) directly, so several holdings that share a currency pair (multiple same-
+    currency tickers within one Stock, or two different asset classes converting the same pair -
+    e.g. Commodity and Crypto both quoting in usd) fetch it once per Portfolio construction
+    instead of once each (README Roadmap item, before this).
+
+    currency_cache=None (the default) skips this entirely and always constructs a fresh Currency,
+    identical to calling Currency(...) directly - so passing nothing keeps every class's prior
+    behavior unchanged.
+
+    A cached entry is reused as-is when its own start_date already covers the range this call
+    needs (cached.start_date<=start_date) - Currency.data is always looked up by date label, so a
+    wider-than-needed cached range is harmless. Otherwise (no entry yet, or the cached one starts
+    too late for this call's own earliest transaction) a fresh Currency is fetched covering the
+    union of both ranges and replaces the cache entry, so a later call starting even earlier still
+    only re-fetches once more rather than on every call."""
+    if currency_cache is None:
+        return Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+
+    key=(currency_from.upper(), currency_to.upper())
+    cached=currency_cache.get(key)
+    if cached is not None and not force_refresh and cached.start_date<=start_date:
+        return cached
+
+    fetch_start=start_date if cached is None else min(cached.start_date, start_date)
+    currency=Currency(currency_from, currency_to, fetch_start, cache_dir=cache_dir, force_refresh=force_refresh)
+    currency_cache[key]=currency
+    return currency

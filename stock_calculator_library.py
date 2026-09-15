@@ -13,7 +13,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from .currency_calculator_library import Currency
+from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
 
@@ -22,10 +22,24 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
+    # Despite the name, this is the *unrealized* component only - current market value of units
+    # still held minus their cost basis - so it excludes REALIZED_PROFIT_COLUMN too, not just
+    # DIVIDEND_COLUMN. Load-bearing as-is: total_current_value/current_value_by_ticker below both
+    # add this to MONEY_INVESTED_COLUMN, which is only correct because realized profit (cash
+    # already taken off the table, not part of what the position is worth today) stays excluded.
+    # PROFIT_EXCLUDING_DIVIDEND_COLUMN below is the column that excludes only dividends.
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
     REALIZED_PROFIT_COLUMN='Realized_profit'
+    # Profit still attributable to the position as it stands today - unrealized gain on units
+    # still held plus dividends collected along the way - excluding gain/loss already locked in
+    # by a sell (REALIZED_PROFIT_COLUMN). Mirrors PROFIT_WITHOUT_DIVIDEND_COLUMN's naming (Profit
+    # minus one component) for the complementary exclusion.
+    PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
+    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
+    # keeping both the unrealized component and REALIZED_PROFIT_COLUMN (Profit - Dividend).
+    PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
 
@@ -38,12 +52,12 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
     CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
-    CSV_PENALTY_COLUMN='penalty'
+    CSV_FEE_COLUMN='fee'
     CSV_SELL_TAX_COLUMN='sell_tax'
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False):
+    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
         """tickers_json: path to the JSON file mapping each ISIN to {"ticker": <yfinance
         symbol>, "currency": <instrument currency>} - same shape/role as Commodity/Crypto's own
         tickers_json parameter, just required here (rather than optional) since Stock has no
@@ -62,11 +76,21 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         FX movement against currency_to. Off by default: for a foreign-currency ticker this is
         a second yfinance fetch/computation (the price history itself doesn't depend on
         currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
-        already in currency_to it's free (the already-computed DataFrame is reused as-is)."""
+        already in currency_to it's free (the already-computed DataFrame is reused as-is).
+        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
+        PolishRetailBonds instances (Portfolio builds and passes one automatically) so tickers
+        that share a currency pair fetch its FX history once per Portfolio construction instead
+        of once each - see currency_calculator_library.get_cached_currency. None (default):
+        every ticker fetches its own, exactly as before this parameter existed."""
         self.total_money_invested=0.0
+        # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
+        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
+        # BankAccount's own total_money_currently_invested/total_money_invested pair.
+        self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Each ticker's own native currency (tickers.json's currency field) — always populated,
@@ -88,17 +112,23 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         # recomputing the identical figure a second time.
         dataframes_2=list()
         money_invested_by_ticker=dict()
+        currently_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
         for df in dataframes:
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
             self.currency_by_ticker[ticker]=ticker_currency
-            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh)
+            computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh, currency_cache)
             dataframes_2.append(computed)
 
             money_invested_by_ticker[ticker]=total_buy_invested
             self.total_money_invested+=total_buy_invested
+
+            # Cost basis of what's still held today - unlike total_buy_invested above, reduced by
+            # any sell (see MONEY_INVESTED_COLUMN itself). 0 for a ticker that's been fully sold.
+            currently_invested_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
+            self.total_money_currently_invested+=currently_invested_by_ticker[ticker]
 
             # Current market value of the position: cost basis still held plus its unrealized gain.
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -115,7 +145,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
                 if ticker_currency.upper()==currency_to.upper():
                     self.native_data[ticker]=computed
                 else:
-                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh)
+                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh, currency_cache)
                 self.native_currency[ticker]=ticker_currency
 
             if progress_callback is not None:
@@ -123,6 +153,9 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for ticker, value in money_invested_by_ticker.items():
             self.distribution_by_ticker[ticker]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+
+        for ticker, value in currently_invested_by_ticker.items():
+            self.distribution_by_ticker_currently_invested[ticker]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
 
         for ticker, value in current_value_by_ticker.items():
             self.distribution_by_ticker_current_value[ticker]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
@@ -173,7 +206,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         return pd.concat(dataframes)
 
-    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False) -> tuple:
+    def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None) -> tuple:
         """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
         amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
         distribution_by_ticker/total_money_invested. Returned from here (same pattern
@@ -196,7 +229,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
                 if isinstance(cached, tuple) and len(cached)==2:
                     return cached
 
-        currency=Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+        currency=get_cached_currency(currency_cache, currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
@@ -239,7 +272,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
         price=column_or_nan(self.CSV_PRICE_OF_UNIT_COLUMN)
-        penalty=column_or_nan(self.CSV_PENALTY_COLUMN)
+        fee=column_or_nan(self.CSV_FEE_COLUMN)
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
         dividend=column_or_nan(self.CSV_DIVIDEND_COLUMN)
         dividend_tax=column_or_nan(self.CSV_DIVIDEND_TAX_COLUMN)
@@ -271,7 +304,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             if row_state=='buy':
                 units=round(amount[i], 4)
                 raw_money_invested=amount[i]*price[i]*row_fx
-                money_invested=round((penalty[i]+1.0)*raw_money_invested, 2)
+                money_invested=round((fee[i]+1.0)*raw_money_invested, 2)
 
                 money_invested_by_day[pos]+=money_invested
                 units_by_day[pos]+=units
@@ -317,6 +350,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         # Unrealized profit = current market value of the held units minus their cost basis.
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
         data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
+        data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.DIVIDEND_COLUMN], 2)
+        data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
         data.drop(columns=[self.CLOSE_COLUMN, self.UNITS_COLUMN], inplace=True)
 
         result=(data, total_buy_invested)

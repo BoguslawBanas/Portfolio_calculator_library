@@ -4,7 +4,6 @@ the integration layer on top of the individual Stock/Bonds/Commodity/Crypto suit
 """
 
 from datetime import date, timedelta
-import warnings
 
 import pytest
 
@@ -13,7 +12,7 @@ from Portfolio_calculator_library import Portfolio
 
 def build_single_stock_portfolio(make_source_dir, make_tickers_json, currency_to='usd'):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
         'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                     "2024-03-01,US0000000001,4,120.0\n",
@@ -31,11 +30,36 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     # by later sells — the two track different things (position size vs. lifetime capital in).
     assert data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
     assert portfolio.total_money_invested==pytest.approx(1000.0)
+    # total_money_currently_invested tracks the same "still held" figure data[Money_invested]
+    # already does - unlike total_money_invested, reduced by the 4-unit sell.
+    assert portfolio.total_money_currently_invested==pytest.approx(600.0)
     # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
     # by the CSV's isin column, not the yfinance ticker symbol.
     assert 'US0000000001' in portfolio.distribution_by_ticker
     assert portfolio.distribution_by_directory
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    assert portfolio.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
+
+
+def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    data=portfolio.data
+    from Portfolio_calculator_library import Stock
+    # Same source data, computed standalone, to read off exactly how much of Profit is the
+    # 4-unit sell's realized gain (proceeds 4*120 minus 40% of the 1000 cost basis = 80.0).
+    stock_dir=list(portfolio.distribution_by_directory)[0]
+    stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
+    realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
+    assert realized==pytest.approx(80.0)
+
+    assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-realized)
+    # The net dividend (25.0-0.0, no dividend_tax.csv here) is still included, unlike realized.
+    assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+data[Portfolio.DIVIDEND_COLUMN].iloc[-1])
+
+    # Profit_excluding_dividends is the mirror image: keeps the realized 80.0, drops the dividend.
+    assert data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-data[Portfolio.DIVIDEND_COLUMN].iloc[-1])
+    assert data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+realized)
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
@@ -66,7 +90,7 @@ def test_distribution_by_currency_single_stock_source(make_source_dir, make_tick
 
 def test_distribution_by_currency_splits_across_two_stock_native_currencies(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"   # 500, native usd
                    "2024-01-20,DE0000000002,2,150.0,0.0\n",  # 300, native eur
     })
@@ -89,7 +113,7 @@ def test_distribution_by_currency_splits_across_two_stock_native_currencies(make
 
 def test_distribution_by_currency_groups_same_currency_tickers_together(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"
                    "2024-01-20,US0000000003,2,100.0,0.0\n",
     })
@@ -111,11 +135,11 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
     # amount instead of adding to it, silently dropping the first source's contribution even
     # though total_money_invested itself stayed correct (README Roadmap item).
     stock_dir1=make_source_dir('broker_a', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n",
     })
     stock_dir2=make_source_dir('broker_b', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-20,US0000000001,5,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -133,7 +157,7 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
 
 def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -159,7 +183,7 @@ def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, 
 
 def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -182,9 +206,22 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    # Nothing sold/matured/cancelled anywhere in this portfolio, so total_money_currently_invested
+    # merges correctly across both sources (each tracks it as a genuinely separate computation
+    # from its own total_money_invested) to land on the same total as the lifetime figure.
+    assert portfolio.total_money_currently_invested==pytest.approx(portfolio.total_money_invested)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
     # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
+    # Unlike Dividend, every source type contributes Profit_without_realized (see each source's
+    # own PROFIT_WITHOUT_REALIZED_COLUMN), so it's always present - and, with no sell anywhere in
+    # this portfolio, equals total Profit (nothing realized to exclude).
+    assert Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN in portfolio.data.columns
+    assert portfolio.data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(portfolio.data[Portfolio.PROFIT_COLUMN].iloc[-1])
+    # Same for Profit_excluding_dividends - every source contributes it too.
+    assert Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN in portfolio.data.columns
+    assert portfolio.data[Portfolio.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(portfolio.data[Portfolio.PROFIT_COLUMN].iloc[-1])
 
 
 def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_basis(make_source_dir, make_tickers_json):
@@ -195,7 +232,7 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     against a stock-only portfolio built from the exact same stock data, so the bond's isolated
     contribution can be read off as a plain difference rather than hardcoded expected totals."""
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -225,8 +262,14 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     # Profit: the bond's realized gain is still added on top, even though it matured before today.
     assert mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]==pytest.approx(stock_only.data[Portfolio.PROFIT_COLUMN].iloc[-1]+matured_bond_revenue)
 
-    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond.
+    # total_money_invested is lifetime (like Stock's own), so it still counts the matured bond -
+    # strictly positive (5 units * 100 nominal, FX-converted), not 0 despite nothing being held today.
+    assert bonds_only.total_money_invested>0.0
     assert mixed.total_money_invested==pytest.approx(stock_only.total_money_invested+bonds_only.total_money_invested)
+    # total_money_currently_invested, unlike total_money_invested, does drop the matured bond -
+    # the figure Money_invested (the data column, checked above) already reflects.
+    assert bonds_only.total_money_currently_invested==pytest.approx(0.0)
+    assert mixed.total_money_currently_invested==pytest.approx(stock_only.total_money_currently_invested)
 
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
@@ -251,7 +294,7 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
     crypto_tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
 
     commodities_dir=make_source_dir('commodities', {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,tin,100.0,gram,0.0\n",
     })
     crypto_dir=make_source_dir('crypto', {
@@ -268,9 +311,28 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
     assert portfolio.total_money_invested>0.0
 
 
+def test_currency_fetches_are_deduplicated_across_sources_sharing_a_pair(make_source_dir, mock_yfinance):
+    # Commodity and Crypto both quote in QUOTE_CURRENCY='usd' - with currency_to='pln' (so the
+    # usd->pln pair actually needs a real fetch, not Currency's own same-currency short-circuit),
+    # Portfolio's shared currency_cache should mean that pair is only ever fetched once across
+    # both sources, not once per source (README Roadmap item, before this).
+    commodities_dir=make_source_dir('commodities', {
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
+                   "2024-01-15,gold,10.0,gram,0.0\n",
+    })
+    crypto_dir=make_source_dir('crypto', {
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,0.1,40000.0,0.0\n",
+    })
+
+    Portfolio({commodities_dir: 'commodities', crypto_dir: 'crypto'}, currency_to='pln')
+
+    assert mock_yfinance.call_log.count('USDPLN=X')==1
+
+
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -284,7 +346,7 @@ def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, mak
 
 def test_force_refresh_ignores_the_cache(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -316,27 +378,24 @@ def test_calculate_money_earned_between_dates_matches_column_version(make_source
     assert row_at_end_date==pytest.approx(round(single_value/days_between, 2))
 
 
-def test_resample_accepts_deprecated_month_quarter_year_aliases(make_source_dir, make_tickers_json):
-    """pandas deprecated the bare 'M'/'Q'/'Y' resample offset aliases (FutureWarning since
-    pandas 2.2, in favor of 'ME'/'QE'/'YE') - Portfolio.resample() normalizes them internally
-    so the old, still commonly documented single-letter spelling doesn't warn/eventually break."""
-    for old, new in (('M', 'ME'), ('Q', 'QE'), ('Y', 'YE')):
-        portfolio_old=build_single_stock_portfolio(make_source_dir, make_tickers_json)
-        portfolio_old.calculate_irr()
-        with warnings.catch_warnings():
-            warnings.simplefilter('error', FutureWarning)
-            resampled_old=portfolio_old.resample(old)
+def test_resample_is_case_insensitive(make_source_dir, make_tickers_json):
+    # resample_rule is upper-cased internally, so the lower-case spelling of a new-style alias
+    # ('me'/'qe'/'ye') resamples identically to its upper-case ('ME'/'QE'/'YE') counterpart.
+    for lower, upper in (('me', 'ME'), ('qe', 'QE'), ('ye', 'YE'), ('d', 'D'), ('w', 'W')):
+        portfolio_lower=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_lower.calculate_irr()
+        resampled_lower=portfolio_lower.resample(lower)
 
-        portfolio_new=build_single_stock_portfolio(make_source_dir, make_tickers_json)
-        portfolio_new.calculate_irr()
-        resampled_new=portfolio_new.resample(new)
+        portfolio_upper=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_upper.calculate_irr()
+        resampled_upper=portfolio_upper.resample(upper)
 
-        assert resampled_old.index.equals(resampled_new.index)
+        assert resampled_lower.index.equals(resampled_upper.index)
 
 
 def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})

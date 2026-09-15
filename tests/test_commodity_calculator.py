@@ -35,7 +35,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeyp
     monkeypatch.setitem(Commodity.TICKERS, 'unobtainium', 'INVALIDXYZ=F')
     with pytest.raises(ValueError, match="INVALIDXYZ=F"):
         build_commodity(make_source_dir, {
-            'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+            'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                        "2024-01-15,unobtainium,2,troy_ounce,0.02\n",
         })
 
@@ -51,7 +51,7 @@ def test_nonexistent_directory_raises_clear_value_error(tmp_path):
 
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,gold,2,troy_ounce,0.02\n",
     })
     data=commodity.data
@@ -63,7 +63,7 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,gold,2,troy_ounce,0.02\n",
     })
     representation=repr(commodity)
@@ -76,13 +76,13 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
 def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     start_date, sell_date='2024-01-15', '2024-03-01'
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': f"date,symbol,amount_of_units,unit,fee\n"
                    f"{start_date},gold,10,troy_ounce,0.0\n",
         'sell.csv': f"date,symbol,amount_of_units\n"
                     f"{sell_date},gold,4\n",
     })
     data=commodity.data
-    # 10 troy ounces bought at day-0's fake close (99.5, no premium) -> cost basis 995.0;
+    # 10 troy ounces bought at day-0's fake close (99.5, no fee) -> cost basis 995.0;
     # selling 4/10 removes 4/10 of that cost basis (398.0), leaving 597.0. sell.csv carries no
     # price of its own anymore either - proceeds come from that sell date's own fake close.
     money_invested=10*DAY_0_CLOSE
@@ -90,12 +90,18 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     proceeds=4*fake_close(start_date, sell_date)
     assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(round(money_invested-money_invested_removed, 2))
     assert data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(round(proceeds-money_invested_removed, 2))
+    # total_money_invested stays at the lifetime-gross buy total, while
+    # total_money_currently_invested drops to what's still held (post-sell cost basis) - the two
+    # diverge exactly once a sell happens, same as Stock.
+    assert commodity.total_money_invested==pytest.approx(round(money_invested, 2))
+    assert commodity.total_money_currently_invested==pytest.approx(round(money_invested-money_invested_removed, 2))
+    assert commodity.distribution_by_ticker_currently_invested['gold']==pytest.approx(100.0)
 
 
 def test_oversell_raises_value_error(make_source_dir):
     with pytest.raises(ValueError, match="Cannot sell"):
         build_commodity(make_source_dir, {
-            'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+            'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                        "2024-01-15,silver,5,troy_ounce,0.0\n",
             'sell.csv': "date,symbol,amount_of_units\n"
                         "2024-02-01,silver,999\n",
@@ -106,7 +112,7 @@ def test_no_dividend_column_profit_is_unrealized_plus_realized(make_source_dir):
     # Sell part (not all) of the position — selling to zero would leave total_current_value at
     # 0, an unrelated pre-existing division-by-zero edge case this test isn't about.
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,gold,10,troy_ounce,0.0\n",
         'sell.csv': "date,symbol,amount_of_units\n"
                     "2024-02-01,gold,4\n",
@@ -116,12 +122,18 @@ def test_no_dividend_column_profit_is_unrealized_plus_realized(make_source_dir):
     # No dividends -> Profit is exactly unrealized (Profit_without_dividends) plus realized gain.
     expected=data[Commodity.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]+data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]
     assert data[Commodity.PROFIT_COLUMN].iloc[-1]==pytest.approx(round(expected, 2))
+    # No dividends -> Profit_without_realized (unrealized+dividends) collapses to just the
+    # unrealized component, and excludes the realized gain that's already in Profit.
+    assert data[Commodity.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Commodity.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Commodity.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]!=pytest.approx(data[Commodity.PROFIT_COLUMN].iloc[-1])
+    # No dividends -> Profit_excluding_dividends is a no-op, equal to total Profit.
+    assert data[Commodity.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Commodity.PROFIT_COLUMN].iloc[-1])
 
 
 def test_include_native_currency_isolates_fx_movement(make_source_dir):
     commodity=build_commodity(
         make_source_dir,
-        {'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        {'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                     "2024-01-15,gold,2,troy_ounce,0.0\n"},
         currency_to='eur', include_native_currency=True,
     )
@@ -135,11 +147,11 @@ def test_gram_and_troy_ounce_units_convert_to_the_same_money_invested(make_sourc
     quantity recorded in troy ounces - the whole point of CSV_UNIT_COLUMN/UNIT_TO_GRAMS."""
     two_troy_ounces_in_grams=2*Commodity.GRAMS_PER_TROY_OUNCE
     commodity_oz=build_commodity(make_source_dir, {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,gold,2,troy_ounce,0.0\n",
     })
     commodity_g=build_commodity(make_source_dir, {
-        'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': f"date,symbol,amount_of_units,unit,fee\n"
                    f"2024-01-15,gold,{two_troy_ounces_in_grams},gram,0.0\n",
     })
     assert commodity_g.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(
@@ -153,7 +165,7 @@ def test_copper_quote_unit_is_pounds_not_troy_ounce(make_source_dir):
     one per symbol, not a single hardcoded unit for every commodity."""
     one_pound_in_grams=Commodity.GRAMS_PER_POUND
     commodity=build_commodity(make_source_dir, {
-        'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': f"date,symbol,amount_of_units,unit,fee\n"
                    f"2024-01-15,copper,{one_pound_in_grams},gram,0.0\n",
     })
     # 1 pound of copper converts to exactly 1.0 unit in copper's own quoted unit.
@@ -170,7 +182,7 @@ def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_
     )
     commodity=build_commodity(
         make_source_dir,
-        {'buy.csv': f"date,symbol,amount_of_units,unit,premium\n"
+        {'buy.csv': f"date,symbol,amount_of_units,unit,fee\n"
                     f"2024-01-15,tin,{Commodity.GRAMS_PER_POUND},gram,0.0\n"},
         tickers_json=tickers_path,
     )
@@ -186,7 +198,7 @@ def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_ti
     tickers_path=make_tickers_json({"gold": {"ticker": "CUSTOM-GOLD=F", "quote_unit": "troy_ounce"}})
     build_commodity(
         make_source_dir,
-        {'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        {'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                     "2024-01-15,gold,2,troy_ounce,0.0\n"},
         tickers_json=tickers_path,
     )
@@ -197,6 +209,6 @@ def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_ti
 def test_unknown_unit_raises_value_error(make_source_dir):
     with pytest.raises(ValueError, match="[Uu]nit"):
         build_commodity(make_source_dir, {
-            'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+            'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                        "2024-01-15,gold,2,kilogram,0.0\n",
         })

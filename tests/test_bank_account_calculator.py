@@ -33,6 +33,9 @@ def test_fixed_rate_account_accrues_daily_interest_before_first_capitalization(m
     expected_profit=round(daily_rate*n_days, 2)
     assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
     assert account.total_revenue==pytest.approx(expected_profit)
+    # No dividend/realized-profit split for a bank account - always equal to Profit.
+    assert data[BankAccount.PROFIT_WITHOUT_REALIZED_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
+    assert data[BankAccount.PROFIT_EXCLUDING_DIVIDEND_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
@@ -66,6 +69,14 @@ def test_withdrawal_reduces_the_interest_bearing_balance(make_source_dir):
     daily_rate_full=1000.0*(6.0/100.0)/365.0
     n_days=(date.today()-start).days+1
     assert data[BankAccount.PROFIT_COLUMN].iloc[-1]<round(daily_rate_full*n_days, 2)
+    # total_money_invested is the lifetime-gross figure (the deposit alone, 1000 - matching
+    # Stock/Commodity/Crypto's own meaning), never reduced by the withdrawal.
+    # total_money_currently_invested is the separate, genuinely different figure: the current
+    # (post-withdrawal) balance, 600.
+    assert account.total_money_invested==pytest.approx(1000.0)
+    assert account.total_money_currently_invested==pytest.approx(600.0)
+    assert account.distribution_by_ticker['savings']==pytest.approx(100.0)
+    assert account.distribution_by_ticker_currently_invested['savings']==pytest.approx(100.0)
 
 
 def test_capitalization_folds_accrued_interest_into_the_balance(make_source_dir):

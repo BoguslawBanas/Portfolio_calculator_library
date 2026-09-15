@@ -14,7 +14,7 @@ def build_stock(make_source_dir, make_tickers_json, csv_files, tickers, currency
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-02-01,US0000000001,3,110.0,0.01\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
@@ -36,7 +36,7 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,4,120.0\n",
@@ -46,8 +46,22 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     data=stock.data
     # Selling 4 of 10 units removes 40% of the cost basis (1000 -> 600), average price unchanged.
     assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
+    # total_money_invested stays at the lifetime-gross 1000 (unreduced by the sell), while
+    # total_money_currently_invested drops to the 600 actually still held - the two diverge
+    # exactly once a sell happens.
+    assert stock.total_money_invested==pytest.approx(1000.0)
+    assert stock.total_money_currently_invested==pytest.approx(600.0)
+    assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
+    assert stock.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
     # Realized profit = proceeds (4*120) - cost basis removed (400) = 80.
     assert data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(80.0)
+    # Profit_without_realized excludes that locked-in 80 (no dividends here, so it's just the
+    # unrealized component on what's still held) - strictly less than total Profit.
+    assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1]-80.0)
+    # Profit_excluding_dividends is the opposite exclusion: it keeps that 80, and (no dividends
+    # here) equals total Profit exactly.
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
 
 
 def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir, make_tickers_json):
@@ -59,7 +73,7 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,10,100.0\n",
@@ -70,6 +84,12 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     assert stock.total_revenue==pytest.approx(0.0)
     assert stock.distribution_by_ticker_current_value==pytest.approx({'US0000000001': 0.0})
     assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
+    # Same 0/0-guarded shape for currently_invested: nothing is left held (full sell), so
+    # total_money_currently_invested is exactly 0.0 while total_money_invested (lifetime gross)
+    # stays at 1000 - distribution_by_ticker_currently_invested must land on 0.0, not NaN.
+    assert stock.total_money_invested==pytest.approx(1000.0)
+    assert stock.total_money_currently_invested==pytest.approx(0.0)
+    assert stock.distribution_by_ticker_currently_invested==pytest.approx({'US0000000001': 0.0})
 
 
 def test_nonexistent_directory_raises_clear_value_error(tmp_path, make_tickers_json):
@@ -87,7 +107,7 @@ def test_oversell_raises_value_error(make_source_dir, make_tickers_json):
         build_stock(
             make_source_dir, make_tickers_json,
             {
-                'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                            "2024-01-15,US0000000001,5,100.0,0.0\n",
                 'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                             "2024-02-01,US0000000001,999,100.0\n",
@@ -100,7 +120,7 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
             'dividend_tax.csv': "date,isin,dividend_tax\n2024-06-01,US0000000001,4.75\n",
@@ -111,12 +131,18 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
     assert data[Stock.DIVIDEND_COLUMN].iloc[-1]==pytest.approx(25.0-4.75)
     # Money invested/units are untouched by a dividend.
     assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(1000.0)
+    # Profit_without_realized includes the net dividend (no sell here, so it equals total Profit).
+    assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
+    # Profit_excluding_dividends drops that same net dividend (no sell here, so it's the pure
+    # unrealized component - equal to Profit_without_dividends).
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]!=pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
 
 
 def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
@@ -131,7 +157,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_ti
     with pytest.raises(ValueError, match="INVALIDTICKER"):
         build_stock(
             make_source_dir, make_tickers_json,
-            {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                         "2024-01-15,US0000000001,5,100.0,0.0\n"},
             {"US0000000001": {"ticker": "INVALIDTICKER", "currency": "usd"}},
         )
@@ -140,7 +166,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_ti
 def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
         {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
         currency_to='usd',
@@ -153,7 +179,7 @@ def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json
 def test_currency_by_ticker_is_always_populated_regardless_of_include_native_currency(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-01-20,DE0000000002,2,150.0,0.0\n"},
         {
@@ -171,7 +197,7 @@ def test_currency_by_ticker_is_always_populated_regardless_of_include_native_cur
 def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
         {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
         currency_to='usd', include_native_currency=True,
@@ -185,7 +211,7 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tick
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
@@ -198,7 +224,7 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tic
 
 def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"
                    "2024-01-20,US0000000003,2,200.0,0.0\n",
     })
@@ -211,3 +237,25 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
     assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected_total)
     assert set(stock.distribution_by_ticker)=={'US0000000001', 'US0000000003'}
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
+
+
+def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_currency(make_source_dir, make_tickers_json, mock_yfinance):
+    # Two tickers both declared 'eur' in tickers.json, converted to 'usd' - without a shared
+    # currency_cache each ticker's own Currency(...) call hits yfinance separately for the
+    # identical EURUSD=X pair (README Roadmap item, before this).
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,DE0000000001,5,100.0,0.0\n"
+                   "2024-01-20,DE0000000002,2,200.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
+        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+    })
+
+    Stock(stock_dir, tickers_json, 'usd')
+    assert mock_yfinance.call_log.count('EURUSD=X')==2
+
+    mock_yfinance.call_log=list()
+    Stock(stock_dir, tickers_json, 'usd', currency_cache=dict())
+    assert mock_yfinance.call_log.count('EURUSD=X')==1
