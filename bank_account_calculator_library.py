@@ -112,6 +112,15 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for account, value in money_invested_by_account.items():
             self.distribution_by_ticker[account]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+        # total_money_invested/distribution_by_ticker above already ARE "currently held" for this
+        # class (each account's current balance, net of withdrawals) - see
+        # bonds_calculator_library.py's own comment on why total_money_currently_invested exists
+        # as a genuinely separate computation for Stock/Commodity/Crypto but not here. The two
+        # lines below are plain aliases (a dict copy, not the same object, so nothing downstream
+        # can mutate one and silently affect the other) so Portfolio can read the same attribute
+        # names off every source uniformly.
+        self.total_money_currently_invested=self.total_money_invested
+        self.distribution_by_ticker_currently_invested=dict(self.distribution_by_ticker)
         for account, value in current_value_by_account.items():
             self.distribution_by_ticker_current_value[account]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
         for account, value in revenue_by_account.items():

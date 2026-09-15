@@ -78,6 +78,16 @@ class Portfolio(ReprMixin):
         portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency_to above
         (the single currency self.data itself is already converted to and summed in).
 
+        self.total_money_currently_invested/distribution_by_directory/_ticker/_currency_currently_
+        invested: the same allocation-by-amount-invested figures as total_money_invested/
+        distribution_by_directory/_ticker/_currency above, but by cost basis of what's actually
+        still held today rather than lifetime-gross-ever-bought. For a Stock/Commodity/Crypto
+        source with no sells (or a PolishRetailBonds/BankAccount source, which only ever tracks
+        the current figure to begin with - see each class's own docstring) the two are identical;
+        they diverge once something's been sold/redeemed/withdrawn, since only the lifetime figure
+        stays at its historical value for a position that's now fully closed out (README Roadmap
+        item).
+
         cache_dir: optional directory to cache every source's computed DataFrame in — see
         cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
         constructed below; disabled (no caching) when left as None. Once every source is
@@ -99,9 +109,11 @@ class Portfolio(ReprMixin):
         Stock/Commodity/Crypto do, so there's no per-holding native-currency DataFrame for
         Portfolio to collect here."""
         self.distribution_by_directory=dict()
+        self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_ticker=dict()
+        self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
@@ -112,11 +124,18 @@ class Portfolio(ReprMixin):
         # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
         # (a differently-cased source) land in the same bucket.
         self.distribution_by_currency=dict()
+        self.distribution_by_currency_currently_invested=dict()
         self.distribution_by_currency_current_value=dict()
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=0.0
+        # Unlike total_money_invested (lifetime gross ever bought/deposited, never reduced by a
+        # sell/withdrawal for Stock/Commodity/Crypto sources), this is what's actually still held
+        # today across every source - PolishRetailBonds/BankAccount already track only this, so
+        # for a bonds-/bank_account-only Portfolio the two totals are identical; they diverge once
+        # a Stock/Commodity/Crypto source has any sell in it (README Roadmap item).
+        self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
@@ -174,6 +193,9 @@ class Portfolio(ReprMixin):
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
+        for key, value in self.distribution_by_directory_currently_invested.items():
+            self.distribution_by_directory_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+
         for key, value in self.distribution_by_directory_current_value.items():
             self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
@@ -183,6 +205,9 @@ class Portfolio(ReprMixin):
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
+        for key, value in self.distribution_by_ticker_currently_invested.items():
+            self.distribution_by_ticker_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+
         for key, value in self.distribution_by_ticker_current_value.items():
             self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
 
@@ -191,6 +216,9 @@ class Portfolio(ReprMixin):
 
         for key, value in self.distribution_by_currency.items():
             self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
+
+        for key, value in self.distribution_by_currency_currently_invested.items():
+            self.distribution_by_currency_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
             self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
@@ -228,14 +256,17 @@ class Portfolio(ReprMixin):
         source type that supports it (Stock/Commodity/Crypto) - PolishRetailBonds/BankAccount
         never pass True here since neither exposes native_data/native_currency."""
         self.distribution_by_directory[dir]=source.total_money_invested
+        self.distribution_by_directory_currently_invested[dir]=source.total_money_currently_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
         self.total_money_invested+=source.total_money_invested
+        self.total_money_currently_invested+=source.total_money_currently_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
 
         per_metric=(
             (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested),
+            (self.distribution_by_ticker_currently_invested, self.distribution_by_currency_currently_invested, source.distribution_by_ticker_currently_invested, source.total_money_currently_invested),
             (self.distribution_by_ticker_current_value, self.distribution_by_currency_current_value, source.distribution_by_ticker_current_value, source.total_current_value),
             (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue),
         )

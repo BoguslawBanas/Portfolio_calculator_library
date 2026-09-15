@@ -113,6 +113,24 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir):
     assert f"revenue={bonds.total_revenue:.2f}" in representation
 
 
+def test_currently_invested_is_a_plain_alias_of_total_money_invested(make_source_dir):
+    # PolishRetailBonds' own total_money_invested/distribution_by_ticker already track only what's
+    # CURRENTLY held (see __init__'s own comment) - unlike Stock/Commodity/Crypto, there's no
+    # separate lifetime-gross figure here, so total_money_currently_invested/distribution_by_
+    # ticker_currently_invested are plain aliases with identical values, not an independent
+    # computation (README Roadmap item).
+    start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{start.isoformat()},TOS0327,1,0.0,6.0,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+    assert bonds.total_money_currently_invested==pytest.approx(bonds.total_money_invested)
+    assert bonds.distribution_by_ticker_currently_invested==pytest.approx(bonds.distribution_by_ticker)
+    # A copy, not the same dict object - mutating one must not affect the other.
+    assert bonds.distribution_by_ticker_currently_invested is not bonds.distribution_by_ticker
+
+
 def test_money_invested_zeroes_and_profit_freezes_after_maturity(make_source_dir):
     start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(

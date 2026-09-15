@@ -69,6 +69,12 @@ def test_withdrawal_reduces_the_interest_bearing_balance(make_source_dir):
     daily_rate_full=1000.0*(6.0/100.0)/365.0
     n_days=(date.today()-start).days+1
     assert data[BankAccount.PROFIT_COLUMN].iloc[-1]<round(daily_rate_full*n_days, 2)
+    # total_money_invested already tracks the current (post-withdrawal) balance for this class -
+    # total_money_currently_invested is a plain alias of it, same value, not an independent
+    # lifetime-vs-current split the way Stock/Commodity/Crypto have (README Roadmap item).
+    assert account.total_money_invested==pytest.approx(600.0)
+    assert account.total_money_currently_invested==pytest.approx(account.total_money_invested)
+    assert account.distribution_by_ticker_currently_invested==pytest.approx(account.distribution_by_ticker)
 
 
 def test_capitalization_folds_accrued_interest_into_the_balance(make_source_dir):

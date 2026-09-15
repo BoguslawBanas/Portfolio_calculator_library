@@ -31,11 +31,16 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     # by later sells — the two track different things (position size vs. lifetime capital in).
     assert data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
     assert portfolio.total_money_invested==pytest.approx(1000.0)
+    # total_money_currently_invested tracks the same "still held" figure data[Money_invested]
+    # already does - unlike total_money_invested, reduced by the 4-unit sell.
+    assert portfolio.total_money_currently_invested==pytest.approx(600.0)
     # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
     # by the CSV's isin column, not the yfinance ticker symbol.
     assert 'US0000000001' in portfolio.distribution_by_ticker
     assert portfolio.distribution_by_directory
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    assert portfolio.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
 
 
 def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_dir, make_tickers_json):
@@ -202,6 +207,11 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
+    # No sell anywhere in this portfolio, so total_money_currently_invested merges correctly
+    # across both a Stock source (its own genuinely-computed figure) and a PolishRetailBonds
+    # source (a plain alias of its total_money_invested) to land on the same total.
+    assert portfolio.total_money_currently_invested==pytest.approx(portfolio.total_money_invested)
+    assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
     # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
     # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns

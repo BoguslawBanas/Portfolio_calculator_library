@@ -109,6 +109,11 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     data=crypto.data
     assert data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(20000.0*0.6)
     assert data[Crypto.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(4*2200.0-20000.0*0.4)
+    # total_money_invested stays at the lifetime-gross 20000, while total_money_currently_invested
+    # drops to the 60% still held - the two diverge exactly once a sell happens, same as Stock.
+    assert crypto.total_money_invested==pytest.approx(20000.0)
+    assert crypto.total_money_currently_invested==pytest.approx(20000.0*0.6)
+    assert crypto.distribution_by_ticker_currently_invested['ethereum']==pytest.approx(100.0)
     # No dividends -> Profit_without_realized collapses to just the unrealized component,
     # excluding the realized gain from the partial sell above.
     assert data[Crypto.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Crypto.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])

@@ -294,6 +294,12 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # PROFIT_WITHOUT_DIVIDEND_COLUMN both go to 0 past maturity) plus whatever's been realized
         # so far (PROFIT_COLUMN, which persists past maturity).
         self.total_money_invested=sum(invested_by_type.values())
+        # Plain alias: total_money_invested above already IS "currently held" for this class (see
+        # comment above), unlike Stock/Commodity/Crypto where it's the lifetime-gross figure and
+        # total_money_currently_invested is a genuinely separate computation. Exists here purely
+        # so Portfolio can read the same attribute name off every source uniformly (README Roadmap
+        # item), without implying this class tracks a lifetime-gross figure it doesn't.
+        self.total_money_currently_invested=self.total_money_invested
         self.total_current_value=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
 
@@ -307,6 +313,9 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # in distribution_by_ticker even once nothing is held. _revenue still keeps whatever a
         # matured/cancelled type realized, regardless of what it currently holds.
         self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_invested else dict()
+        # Same plain alias as total_money_currently_invested above - a copy, not the same dict
+        # object, so nothing downstream can mutate one and silently affect the other.
+        self.distribution_by_ticker_currently_invested=dict(self.distribution_by_ticker)
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Every bond type here is issued in NATIVE_CURRENCY, so this is trivial (unlike Stock's,
