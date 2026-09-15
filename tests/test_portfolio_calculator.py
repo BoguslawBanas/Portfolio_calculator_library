@@ -13,7 +13,7 @@ from Portfolio_calculator_library import Portfolio
 
 def build_single_stock_portfolio(make_source_dir, make_tickers_json, currency_to='usd'):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
         'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                     "2024-03-01,US0000000001,4,120.0\n",
@@ -86,7 +86,7 @@ def test_distribution_by_currency_single_stock_source(make_source_dir, make_tick
 
 def test_distribution_by_currency_splits_across_two_stock_native_currencies(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"   # 500, native usd
                    "2024-01-20,DE0000000002,2,150.0,0.0\n",  # 300, native eur
     })
@@ -109,7 +109,7 @@ def test_distribution_by_currency_splits_across_two_stock_native_currencies(make
 
 def test_distribution_by_currency_groups_same_currency_tickers_together(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"
                    "2024-01-20,US0000000003,2,100.0,0.0\n",
     })
@@ -131,11 +131,11 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
     # amount instead of adding to it, silently dropping the first source's contribution even
     # though total_money_invested itself stayed correct (README Roadmap item).
     stock_dir1=make_source_dir('broker_a', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n",
     })
     stock_dir2=make_source_dir('broker_b', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-20,US0000000001,5,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -153,7 +153,7 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
 
 def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -179,7 +179,7 @@ def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, 
 
 def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -223,7 +223,7 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     against a stock-only portfolio built from the exact same stock data, so the bond's isolated
     contribution can be read off as a plain difference rather than hardcoded expected totals."""
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -279,7 +279,7 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
     crypto_tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
 
     commodities_dir=make_source_dir('commodities', {
-        'buy.csv': "date,symbol,amount_of_units,unit,premium\n"
+        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
                    "2024-01-15,tin,100.0,gram,0.0\n",
     })
     crypto_dir=make_source_dir('crypto', {
@@ -298,7 +298,7 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
 
 def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -312,7 +312,7 @@ def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, mak
 
 def test_force_refresh_ignores_the_cache(make_source_dir, make_tickers_json, cache_dir, mock_yfinance):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
@@ -364,7 +364,7 @@ def test_resample_accepts_deprecated_month_quarter_year_aliases(make_source_dir,
 
 def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})

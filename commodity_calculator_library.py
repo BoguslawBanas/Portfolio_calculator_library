@@ -57,7 +57,7 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
     CSV_UNIT_COLUMN='unit'
-    CSV_PREMIUM_COLUMN='premium'
+    CSV_FEE_COLUMN='fee'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
     # Every one of these yfinance futures tickers is USD-quoted, so unlike Stock/Bonds there's
@@ -104,7 +104,7 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         Neither buy.csv nor sell.csv carries a price_of_unit: every transaction's market price is
         always that day's own yfinance close, not a manually recorded one. buy.csv rows carry
         amount_of_units alongside CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see UNIT_TO_GRAMS)
-        and premium; sell.csv rows carry just amount_of_units (already in that symbol's own
+        and fee; sell.csv rows carry just amount_of_units (already in that symbol's own
         native quote unit, same as the units tracked internally - see module docstring).
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
         tickers_json: optional path to a JSON file of {symbol: {"ticker": <yfinance futures
@@ -301,7 +301,7 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
         unit=column_or_none(self.CSV_UNIT_COLUMN)
-        premium=column_or_nan(self.CSV_PREMIUM_COLUMN)
+        fee=column_or_nan(self.CSV_FEE_COLUMN)
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
         fx=currency.data.loc[sorted_df.index, self.CLOSE_COLUMN].to_numpy(dtype=float)
 
@@ -337,7 +337,7 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
                 grams=amount[i]*self.UNIT_TO_GRAMS[row_unit]
                 units=round(grams/self.quote_unit_grams[symbol], 4)
                 raw_money_invested=units*market_price[i]
-                money_invested=round((premium[i]+1.0)*raw_money_invested, 2)
+                money_invested=round((fee[i]+1.0)*raw_money_invested, 2)
 
                 money_invested_by_day[pos]+=money_invested
                 units_by_day[pos]+=units

@@ -62,7 +62,7 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         interest_rate_file's base rate when variable), capitalization_months (how often accrued
         interest is folded into the interest-bearing balance), and optional tax (%, defaults to
         DEFAULT_TAX) — read once per account from its first deposit row, the same convention
-        Stock uses for a ticker's per-row penalty column.
+        Stock uses for a ticker's per-row fee column.
         interest_rate_file: CSV of a variable base rate over time (date,rate — daily YYYY-MM-DD
         rows, forward-filled for any gaps so a row is only needed on days the rate actually
         changes; a finer-grained format than PolishRetailBonds' interest_rate.csv, which uses

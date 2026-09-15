@@ -1146,7 +1146,7 @@ def test_dividend_column_merges_with_stocks_dividend_column_in_portfolio(make_so
     from Portfolio_calculator_library import Portfolio
 
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
         'dividend.csv': "date,isin,dividend\n"
                         "2024-06-01,US0000000001,25.0\n",

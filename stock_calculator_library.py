@@ -52,7 +52,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
     CSV_PRICE_OF_UNIT_COLUMN='price_of_unit'
-    CSV_PENALTY_COLUMN='penalty'
+    CSV_FEE_COLUMN='fee'
     CSV_SELL_TAX_COLUMN='sell_tax'
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
@@ -253,7 +253,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         amount=column_or_nan(self.CSV_AMOUNT_OF_UNITS_COLUMN)
         price=column_or_nan(self.CSV_PRICE_OF_UNIT_COLUMN)
-        penalty=column_or_nan(self.CSV_PENALTY_COLUMN)
+        fee=column_or_nan(self.CSV_FEE_COLUMN)
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
         dividend=column_or_nan(self.CSV_DIVIDEND_COLUMN)
         dividend_tax=column_or_nan(self.CSV_DIVIDEND_TAX_COLUMN)
@@ -285,7 +285,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             if row_state=='buy':
                 units=round(amount[i], 4)
                 raw_money_invested=amount[i]*price[i]*row_fx
-                money_invested=round((penalty[i]+1.0)*raw_money_invested, 2)
+                money_invested=round((fee[i]+1.0)*raw_money_invested, 2)
 
                 money_invested_by_day[pos]+=money_invested
                 units_by_day[pos]+=units

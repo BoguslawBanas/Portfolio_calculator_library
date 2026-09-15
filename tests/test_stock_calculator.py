@@ -14,7 +14,7 @@ def build_stock(make_source_dir, make_tickers_json, csv_files, tickers, currency
 def test_buy_only_accumulates_money_invested_and_units(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-02-01,US0000000001,3,110.0,0.01\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
@@ -36,7 +36,7 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,4,120.0\n",
@@ -66,7 +66,7 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,10,100.0\n",
@@ -94,7 +94,7 @@ def test_oversell_raises_value_error(make_source_dir, make_tickers_json):
         build_stock(
             make_source_dir, make_tickers_json,
             {
-                'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+                'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                            "2024-01-15,US0000000001,5,100.0,0.0\n",
                 'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                             "2024-02-01,US0000000001,999,100.0\n",
@@ -107,7 +107,7 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
     stock=build_stock(
         make_source_dir, make_tickers_json,
         {
-            'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,US0000000001,10,100.0,0.0\n",
             'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
             'dividend_tax.csv': "date,isin,dividend_tax\n2024-06-01,US0000000001,4.75\n",
@@ -129,7 +129,7 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
 def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
@@ -144,7 +144,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_ti
     with pytest.raises(ValueError, match="INVALIDTICKER"):
         build_stock(
             make_source_dir, make_tickers_json,
-            {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+            {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                         "2024-01-15,US0000000001,5,100.0,0.0\n"},
             {"US0000000001": {"ticker": "INVALIDTICKER", "currency": "usd"}},
         )
@@ -153,7 +153,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_ti
 def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
         {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
         currency_to='usd',
@@ -166,7 +166,7 @@ def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json
 def test_currency_by_ticker_is_always_populated_regardless_of_include_native_currency(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-01-20,DE0000000002,2,150.0,0.0\n"},
         {
@@ -184,7 +184,7 @@ def test_currency_by_ticker_is_always_populated_regardless_of_include_native_cur
 def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
         {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
         currency_to='usd', include_native_currency=True,
@@ -198,7 +198,7 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tick
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
     stock=build_stock(
         make_source_dir, make_tickers_json,
-        {'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
@@ -211,7 +211,7 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tic
 
 def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
-        'buy.csv': "date,isin,amount_of_units,price_of_unit,penalty\n"
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n"
                    "2024-01-20,US0000000003,2,200.0,0.0\n",
     })
