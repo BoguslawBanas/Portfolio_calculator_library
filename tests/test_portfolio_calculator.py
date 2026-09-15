@@ -397,6 +397,21 @@ def test_resample_accepts_deprecated_month_quarter_year_aliases(make_source_dir,
         assert resampled_old.index.equals(resampled_new.index)
 
 
+def test_resample_is_case_insensitive(make_source_dir, make_tickers_json):
+    # resample_rule is upper-cased internally, so the lower-case spelling of a new-style alias
+    # ('me'/'qe'/'ye') resamples identically to its upper-case ('ME'/'QE'/'YE') counterpart.
+    for lower, upper in (('me', 'ME'), ('qe', 'QE'), ('ye', 'YE'), ('d', 'D'), ('w', 'W')):
+        portfolio_lower=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_lower.calculate_irr()
+        resampled_lower=portfolio_lower.resample(lower)
+
+        portfolio_upper=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+        portfolio_upper.calculate_irr()
+        resampled_upper=portfolio_upper.resample(upper)
+
+        assert resampled_lower.index.equals(resampled_upper.index)
+
+
 def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_source_dir, make_tickers_json):
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"

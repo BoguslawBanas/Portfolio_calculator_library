@@ -330,16 +330,13 @@ class Portfolio(ReprMixin):
         )
         return pd.concat([zero_row, dataframe]).sort_index()
 
-    # pandas deprecated the bare 'M'/'Q'/'Y'/'A' resample offset aliases in favor of 'ME'/'QE'/
-    # 'YE' (FutureWarning as of pandas 2.2, eventual removal) - only remaps an exact match so a
-    # still-valid alias (e.g. 'MS'/month-start, or an already-'ME'-style spelling) passes through
-    # untouched.
-    _DEPRECATED_RESAMPLE_ALIASES={'M': 'ME', 'Q': 'QE', 'Y': 'YE', 'A': 'YE'}
-
     def resample(self, resample_rule: str) -> pd.DataFrame:
-        """resample_rule: a pandas resample offset alias - 'D'/'W' as-is, or 'M'/'Q'/'Y' (also
-        accepted as their non-deprecated 'ME'/'QE'/'YE' spellings, which this normalizes to)."""
-        resample_rule=self._DEPRECATED_RESAMPLE_ALIASES.get(resample_rule, resample_rule)
+        """resample_rule: a pandas resample offset alias, case-insensitive - 'd'/'w'/'D'/'W' as
+        -is, 'me'/'qe'/'ye' (month/quarter/year end - also fine upper-case, 'ME'/'QE'/'YE').
+        The shorter bare 'm'/'q'/'y'/'a' forms (pandas's own now-deprecated month/quarter/year/
+        annual aliases, warned on as of pandas 2.2) are still accepted too, silently normalized
+        to their 'E'-suffixed spelling here so resample() never actually emits that warning."""
+        resample_rule=resample_rule.upper()
 
         timedelta_to_subtract: pd.DateOffset
         if resample_rule[0]=='D':
@@ -348,10 +345,16 @@ class Portfolio(ReprMixin):
             timedelta_to_subtract=pd.DateOffset(weeks=1)
         elif resample_rule[0]=='M':
             timedelta_to_subtract=pd.DateOffset(months=1)
+            if resample_rule=='M':
+                resample_rule='ME'
         elif resample_rule[0]=='Q':
             timedelta_to_subtract=pd.DateOffset(months=3)
-        elif resample_rule[0]=='Y':
+            if resample_rule=='Q':
+                resample_rule='QE'
+        elif resample_rule[0] in ('Y', 'A'):
             timedelta_to_subtract=pd.DateOffset(years=1)
+            if resample_rule in ('Y', 'A'):
+                resample_rule='YE'
 
         new_row=pd.DataFrame(
             [{col: 0.0 for col in self.portfolio.columns}],
