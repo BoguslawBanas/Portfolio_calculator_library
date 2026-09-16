@@ -294,8 +294,8 @@ def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir,
     crypto_tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
 
     commodities_dir=make_source_dir('commodities', {
-        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
-                   "2024-01-15,tin,100.0,gram,0.0\n",
+        'buy.csv': "date,symbol,amount_of_units,unit,money_invested,currency\n"
+                   "2024-01-15,tin,100.0,gram,500.0,usd\n",
     })
     crypto_dir=make_source_dir('crypto', {
         'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
@@ -317,8 +317,8 @@ def test_currency_fetches_are_deduplicated_across_sources_sharing_a_pair(make_so
     # Portfolio's shared currency_cache should mean that pair is only ever fetched once across
     # both sources, not once per source (README Roadmap item, before this).
     commodities_dir=make_source_dir('commodities', {
-        'buy.csv': "date,symbol,amount_of_units,unit,fee\n"
-                   "2024-01-15,gold,10.0,gram,0.0\n",
+        'buy.csv': "date,symbol,amount_of_units,unit,money_invested,currency\n"
+                   "2024-01-15,gold,10.0,gram,500.0,usd\n",
     })
     crypto_dir=make_source_dir('crypto', {
         'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
