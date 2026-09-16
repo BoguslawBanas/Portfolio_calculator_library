@@ -1,78 +1,59 @@
 """
-PolishRetailBonds models Polish retail treasury bonds (obligacje detaliczne) — bought directly
+PolishRetailBonds models Polish retail treasury bonds (obligacje detaliczne) - bought directly
 from the Treasury, no secondary market or observable price, only redeemable early at a fixed
 penalty rather than sold. That's why this class looks nothing like Stock/Commodity/Crypto: no
 yfinance fetch, just each bond type's own accrual formula keyed off the bond code's three-letter
-prefix. Every bond is issued in PLN (NOMINAL_VALUE), but — unlike the pre-rework version, which
-never imported Currency at all — currency_to converts every PLN amount via Currency, the same
+prefix. Every bond is issued in PLN (NOMINAL_VALUE); currency_to converts via Currency, the same
 way Stock/Commodity/Crypto convert their own native-currency prices.
 
 Each day's own accrued interest is converted at THAT day's own FX rate before accumulating (see
-_bond_dataframe), not re-marked to today's rate afterward — the same convention Stock uses for
-dividends/realized profit (row_fx baked in once, at the time of the event). That's what makes a
-matured bond's frozen Profit stay frozen in currency_to terms too, instead of drifting with FX
-after redemption despite nothing further actually happening to it.
+_bond_dataframe) - same convention Stock uses for dividends/realized profit. That's what keeps a
+matured bond's frozen Profit frozen in currency_to terms too, instead of drifting with FX after
+redemption.
 
 The accrual rules below (period length/count, compounding vs. flat payout, rate source, and the
 'cena zamiany' exchange discount) are transcribed from the Ministry of Finance's own listy
 emisyjne (emission letters) for one real issuance of each of the eight bond types currently
-sold, supplied for review as bonds_lists/*.pdf (not bundled with this repo — see README). Every
+sold, supplied for review as bonds_lists/*.pdf (not bundled with this repo - see README). Every
 one of those eight follows one of two accrual shapes:
 
-- "flat": each period's interest is paid out at the period's end, computed off the bond's fixed
-  NOMINAL_VALUE (not compounded into a growing base) — O = N*r/100*a/(D*F), where r is that
-  period's annual rate, a is the actual number of days elapsed in the period so far, D is the
-  actual number of days in the period, and F is the number of periods per year (so D*F
-  approximates a 365-day year). ROR, DOR, and COI use this shape.
-- "compounding": interest is only ever paid at final redemption, and each period's base is the
-  previous period's base plus that period's own interest — W = N*(1+r_1)*(1+r_2)*...*(1+r_k).
-  TOS, ROS, EDO, and ROD use this shape. Day-to-day, the currently-accruing period still adds a
-  flat per-day amount (base*r/100/(D*F)), same as the "flat" shape — only the base each period
-  starts from differs.
+- "flat": each period's interest is paid out at the period's end, off the bond's fixed
+  NOMINAL_VALUE (not compounded) - O = N*r/100*a/(D*F), where r is that period's annual rate, a
+  is days elapsed in the period so far, D is days in the period, F is periods/year. ROR, DOR,
+  COI use this shape.
+- "compounding": interest is only ever paid at final redemption, each period's base is the
+  previous period's base plus its own interest - W = N*(1+r_1)*(1+r_2)*...*(1+r_k). TOS, ROS,
+  EDO, ROD use this shape; day-to-day, the currently-accruing period still adds a flat per-day
+  amount, same as "flat" - only the base each period starts from differs.
 
 OTS (a single 3-month period, always at its CSV_INITIAL_COUPON_COLUMN rate) is a degenerate case
 of "flat" with only one period.
 
-Every bond type's rate for its first period comes straight from CSV_INITIAL_COUPON_COLUMN — a
-promotional rate fixed at issuance, not derived from any external rate history. TOS reuses that
-same rate for every later period too (truly fixed-for-life); every other multi-period type looks
-up interest_rate_data (ROR/DOR, NBP reference rate) or inflation_rate_data (COI/ROS/EDO/ROD, CPI)
-for each later period's base rate and adds CSV_ADDITIONAL_COUPON_COLUMN as that period's margin —
-both quoted per-issuance in each type's own list emisyjny, so both belong in the per-holding CSV
-row rather than as a class constant.
+Every bond type's first-period rate comes from CSV_INITIAL_COUPON_COLUMN - a promotional rate
+fixed at issuance. TOS reuses it for every later period too (fixed-for-life); every other
+multi-period type looks up interest_rate_data (ROR/DOR, NBP reference rate) or
+inflation_rate_data (COI/ROS/EDO/ROD, CPI) for each later period's base rate plus
+CSV_ADDITIONAL_COUPON_COLUMN as margin - both quoted per-issuance, so both belong in the CSV row.
 
-None of the eight letters mention withholding tax at all — that's tax law, not an issuance term,
-so it's asserted here as one flat rate applied uniformly to every type, defaulting to TAX_RATE
-(19%, the standard 'podatek Belki' rate) but overridable per construction via the tax_rate
-constructor argument — e.g. tax_rate=0.0 for a tax-exempt account (IKE/IKZE) — rather than
-inferred per type (the prior version of this class applied 19% to variable-rate bonds and 0%
-to fixed-rate ones, a split that had no documented basis and is not carried forward).
+Withholding tax isn't an issuance term, so it's asserted here as one flat rate applied uniformly,
+defaulting to TAX_RATE (19%, 'podatek Belki') but overridable via tax_rate - e.g. 0.0 for a
+tax-exempt account (IKE/IKZE).
 
-cancel.csv (optional) records that some or all of a holding was ACTUALLY redeemed early in real
-life — a holding is identified by its own (date, isin) pair, the same values as its buy.csv row,
-and each cancel.csv row also carries amount_of_units: how many of that holding's bonds were
-redeemed on cancel_date (not necessarily all of them - see _build_tranches). Every unit accrues
-identically regardless of how many units are in play (the accrual formulas below are linear in
-amount_of_bonds), so a partial cancellation is modeled by splitting a holding into tranches - one
-per cancellation (each stopping at its own cancel_date) plus a final tranche for whatever was
-never cancelled (still accruing to natural maturity) - and summing their independently-computed
-DataFrames back together. A holding can also appear more than once in cancel.csv (multiple
-partial cancellations over time); tranches are built in cancel_date order regardless of file
-order.
+cancel.csv (optional) records that some or all of a holding was ACTUALLY redeemed early - a
+holding is identified by its own (date, isin) pair, and each row also carries amount_of_units
+(not necessarily the whole holding - see _build_tranches). Every unit accrues identically
+regardless of amount (the formulas below are linear in amount_of_bonds), so a partial
+cancellation is modeled by splitting a holding into tranches - one per cancellation plus a final
+tranche for whatever's never cancelled - summed back together. A holding can appear more than
+once in cancel.csv; tranches are built in cancel_date order regardless of file order.
 
-A cancelled tranche's frozen Profit isn't just the plain held-to-maturity accrual, either - real
-early redemption (przedterminowy wykup) pays out gross accrued interest minus a per-bond
-redemption fee (BOND_TYPES' early_redemption_fee), applied once on cancel_date itself, floored at
-0 so redeeming early never returns less than what was originally paid in (the fee only ever eats
-into interest, never principal). OTS is a special case: its fee isn't a flat zł amount but
-forfeiting ALL interest accrued in the then-current period - modeled as early_redemption_fee=inf,
-which the same floor-at-0 formula reduces to correctly with no separate branch needed. Every
-other type's fee is a flat zł/bond figure - these are typical values, not transcribed from one
-specific real issuance's own list emisyjny the way the rest of BOND_TYPES is (early-redemption
-fees have varied somewhat across issuances/years), so treat them the same as swap_discount:
-asserted, worth double-checking against a current, authoritative source - and, like TAX_RATE,
-overridable per construction (bond_types_json) rather than trusted as-is for real money, for a
-type/issuance where the built-in default doesn't hold.
+A cancelled tranche's frozen Profit isn't just the plain held-to-maturity accrual: real early
+redemption (przedterminowy wykup) pays gross accrued interest minus a per-bond redemption fee
+(BOND_TYPES' early_redemption_fee), applied once on cancel_date, floored at 0 (never eats into
+principal). OTS forfeits ALL interest accrued that period instead of a flat zł fee - modeled as
+early_redemption_fee=inf, reduced to 0 by the same floor formula. Every other type's fee is a
+typical zł/bond figure, not transcribed from a specific issuance - treat it like swap_discount:
+worth double-checking against an authoritative source, overridable via bond_types_json.
 """
 
 import os
@@ -87,37 +68,26 @@ from .calculator_mixins import ReprMixin, MergeMixin
 
 
 class PolishRetailBonds(MergeMixin, ReprMixin):
-    # --- Output: self.data / working DataFrame columns. The first three form the shared
-    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md).
-    # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while a bond is still
-    # held (bonds don't separately track a realized component day to day), but diverge once it
-    # matures: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized, nothing left held) drops to 0, while
-    # PROFIT_COLUMN (realized, persists) freezes at its final accrued value - see
-    # _bond_dataframe. REALIZED_PROFIT_COLUMN is derived from those two (PROFIT_COLUMN minus
-    # PROFIT_WITHOUT_DIVIDEND_COLUMN), not accrued independently - see _bond_dataframe's own
-    # comment. No DIVIDEND_COLUMN at all: bonds pay no real per-payment dividend, matching
-    # Commodity/Crypto's own precedent of just not having one when there's nothing real to
-    # report, rather than faking one out of what's actually realized profit. ---
+    # --- Output: self.data columns. First three: shared contract (see CLAUDE.md).
+    # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while held, but diverge at
+    # maturity: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized) drops to 0, PROFIT_COLUMN (realized)
+    # freezes at its final value - see _bond_dataframe. REALIZED_PROFIT_COLUMN is derived from
+    # those two, not accrued independently. No DIVIDEND_COLUMN - bonds pay no real per-payment
+    # dividend, matching Commodity/Crypto's precedent of not faking one. ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
-    # Bond interest/redemption proceeds, matching Stock/Commodity/Crypto's own Realized_profit
-    # column: 0 while a bond is still held (its accrued interest is entirely embedded in the
-    # still-fluctuating PROFIT_WITHOUT_DIVIDEND_COLUMN), then - at the same moment
-    # PROFIT_WITHOUT_DIVIDEND_COLUMN drops to 0 (maturity or an early cancellation) - jumps to and
-    # freezes at everything that was ever accrued (interest plus, if is_swapped, the swap
-    # discount), mirroring a bond's real cash flow: nothing is paid out until redemption, then
-    # the whole accrued amount is, recognized once, per event - a locked-in gain, not a real
-    # per-payment dividend. See _bond_dataframe.
+    # Bond interest/redemption proceeds, matching Stock/Commodity/Crypto's Realized_profit: 0
+    # while held, then jumps once - at maturity/cancellation - to everything ever accrued
+    # (interest plus, if is_swapped, the swap discount) and freezes, mirroring real cash flow:
+    # nothing paid until redemption, then it all is, recognized once per event. See
+    # _bond_dataframe.
     REALIZED_PROFIT_COLUMN='Realized_profit'
-    # Profit still attributable to the position as it stands today, excluding gain already locked
-    # in by redemption/cancellation (REALIZED_PROFIT_COLUMN) - here always equal to
-    # PROFIT_WITHOUT_DIVIDEND_COLUMN itself, since there's no real dividend to add back (no
-    # DIVIDEND_COLUMN, see above) - the same "no dividends" pattern Commodity/Crypto use.
+    # Excludes gain already locked in (REALIZED_PROFIT_COLUMN) - equals PROFIT_WITHOUT_DIVIDEND_
+    # COLUMN, no real dividend to add back - the "no dividends" pattern Commodity/Crypto use.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
-    # Excludes only dividends, keeping realized profit - here always equal to PROFIT_COLUMN
-    # itself, since there's no real dividend to exclude - the same "no dividends" pattern
-    # Commodity/Crypto use.
+    # Excludes only dividends, keeping realized profit - equals PROFIT_COLUMN, no real dividend
+    # to exclude.
     PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
@@ -133,29 +103,21 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
     NOMINAL_VALUE=100.0  # zł per bond, every type (every list emisyjny's ust. 2)
     NATIVE_CURRENCY='PLN'  # every bond is issued in PLN — see module docstring
-    TAX_RATE=19.0  # % 'podatek Belki' on interest income — see module docstring: not sourced from
-                   # the listy emisyjne (they don't set tax law), asserted as one uniform rate.
-                   # Default for the tax_rate constructor argument, not read directly elsewhere -
-                   # self.tax_rate (instance attribute) is what accrual actually uses.
+    TAX_RATE=19.0  # % 'podatek Belki', asserted per module docstring. Default for the tax_rate
+                   # constructor arg - self.tax_rate is what accrual actually uses.
 
-    # One entry per bond-type code (the CSV isin/code's first three letters — e.g. 'ROR' out of
-    # 'ROR0927'). period_months/num_periods: length of one interest period and the bond's full
-    # term in periods (period_months*num_periods = the term listed in each type's own list
-    # emisyjny — e.g. ROR = 1*12 = 12 months). compounding: see module docstring's two accrual
-    # shapes. rate_source: None — every period reuses CSV_INITIAL_COUPON_COLUMN unchanged (only
-    # TOS: truly fixed-for-life); 'interest'/'inflation' — only period 1 uses
-    # CSV_INITIAL_COUPON_COLUMN, every later period looks up interest_rate_data/
-    # inflation_rate_data and adds CSV_ADDITIONAL_COUPON_COLUMN as that period's margin.
-    # swap_discount: zł/bond subtracted from NOMINAL_VALUE when CSV_IS_SWAPPED_COLUMN is set —
-    # the 'cena zamiany' discount for a bond bought by exchanging a maturing predecessor's
-    # redemption proceeds instead of paying cash. 0.0 where a type's list emisyjny either prices
-    # that exchange at par (OTS) or doesn't offer one at all (ROS/ROD — family bonds restricted
-    # to child-benefit recipients, not tradable or exchangeable; see their own list emisyjny's
-    # absence of a 'zamiana' section, unlike every other type here).
+    # One entry per bond-type code (isin's first three letters, e.g. 'ROR' out of 'ROR0927').
+    # period_months/num_periods: one period's length and the bond's term in periods (e.g. ROR =
+    # 1*12 = 12 months). compounding: see module docstring's two accrual shapes. rate_source:
+    # None - every period reuses CSV_INITIAL_COUPON_COLUMN (only TOS); 'interest'/'inflation' -
+    # only period 1 uses it, later periods look up interest_rate_data/inflation_rate_data plus
+    # CSV_ADDITIONAL_COUPON_COLUMN as margin.
+    # swap_discount: zł/bond subtracted from NOMINAL_VALUE when CSV_IS_SWAPPED_COLUMN is set -
+    # the 'cena zamiany' discount for buying by exchange instead of cash. 0.0 where a type prices
+    # exchange at par (OTS) or doesn't offer one (ROS/ROD - family bonds, not exchangeable).
     # early_redemption_fee: zł/bond subtracted from a cancelled tranche's gross accrued interest
-    # on its own cancel_date (see module docstring and _bond_dataframe) — float('inf') for OTS
-    # encodes "forfeit all interest accrued this period" via the same floor-at-0 formula every
-    # other type uses, rather than a separate branch.
+    # on cancel_date - float('inf') for OTS encodes "forfeit all interest this period" via the
+    # same floor-at-0 formula every other type uses.
     BOND_TYPES={
         'OTS': dict(period_months=3,  num_periods=1,  compounding=False, rate_source=None,       swap_discount=0.0,  early_redemption_fee=float('inf')),
         'ROR': dict(period_months=1,  num_periods=12, compounding=False, rate_source='interest',  swap_discount=0.10, early_redemption_fee=0.50),
@@ -168,55 +130,34 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     }
 
     def __init__(self, directory_path: str, currency_to: str=NATIVE_CURRENCY, interest_rate_file: str='interest_rate.csv', inflation_rate_file: str='inflation_rate.csv', tax_rate: float=TAX_RATE, bond_types_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None):
-        """directory_path: a directory holding buy.csv, one row per bond holding, with columns
-        date, isin (the bond code, e.g. 'ROR0927' — its first three letters select the type, see
-        BOND_TYPES), amount_of_units, additional_coupon, initial_coupon, is_swapped.
-        currency_to: target currency every bond's PLN values are converted to via Currency —
-        defaults to NATIVE_CURRENCY ('PLN'), a no-op (Currency's own same-currency short-circuit
-        makes every conversion below a flat 1.0-rate multiply), so existing callers that never
-        pass this keep getting exactly the PLN values they always did. See the module docstring
-        for how/when each value is converted.
-        interest_rate_file/inflation_rate_file: CSVs used respectively by 'interest'/'inflation'
-        rate_source types (see BOND_TYPES), resolved relative to directory_path — pass an
-        absolute path instead to point elsewhere.
-        tax_rate: % withholding tax applied uniformly to every bond's interest — defaults to
-        TAX_RATE (19%, the standard 'podatek Belki' rate), the same value every existing caller
-        that never passes this already got. Override it for a situation the flat default doesn't
-        fit - e.g. tax_rate=0.0 for a tax-exempt account (IKE/IKZE). See the module docstring for
-        why this is asserted rather than sourced from the listy emisyjne.
-        bond_types_json: optional path to a JSON file of {code: {"swap_discount": <float>,
-        "early_redemption_fee": <float>}} - e.g. {"EDO": {"early_redemption_fee": 2.00}} - merged
-        on top of the built-in BOND_TYPES's swap_discount/early_redemption_fee, per type, for a
-        real issuance where the built-in (asserted, not derived from any specific list emisyjny -
-        see module docstring) default doesn't hold. Either field may be omitted to leave that one
-        at its built-in value; a code not already in BOND_TYPES, or any field other than those
-        two, raises ValueError - this overrides the two asserted per-type values, not the
-        taxonomy itself (period_months/num_periods/compounding/rate_source are issuance facts,
-        not assertions, so there's nothing to override there). None (default): self.bond_types is
+        """directory_path: buy.csv, one row per bond holding - date, isin (e.g. 'ROR0927', first
+        three letters select the type, see BOND_TYPES), amount_of_units, additional_coupon,
+        initial_coupon, is_swapped.
+        currency_to: target currency every bond's PLN values are converted to - defaults to
+        NATIVE_CURRENCY ('PLN'), a no-op via Currency's own same-currency short-circuit.
+        interest_rate_file/inflation_rate_file: CSVs for 'interest'/'inflation' rate_source
+        types (see BOND_TYPES), resolved relative to directory_path.
+        tax_rate: % withholding tax applied uniformly - defaults to TAX_RATE (19%, 'podatek
+        Belki'). Override for a situation the flat default doesn't fit, e.g. tax_rate=0.0 for a
+        tax-exempt account (IKE/IKZE).
+        bond_types_json: optional {code: {"swap_discount": <float>, "early_redemption_fee":
+        <float>}} merged on top of BOND_TYPES's own values per type, for a real issuance where
+        the built-in default doesn't hold. Either field may be omitted; an unknown code or field
+        raises ValueError. Doesn't touch the taxonomy itself (period_months/num_periods/
+        compounding/rate_source are issuance facts, not assertions). None: self.bond_types is
         exactly BOND_TYPES.
-        progress_callback:
-        optional zero-arg callback invoked once, after all bond rows have been computed, for a
-        caller (e.g. Portfolio) tracking overall progress.
-        cancel.csv (optional, resolved relative to directory_path): records that some or all of a
-        holding was actually redeemed early — see the module docstring for its
-        (date, isin, cancel_date, amount_of_units) shape, how a partial cancellation is modeled,
-        and exactly what recording a cancellation does/doesn't change.
-        cache_dir: optional directory to cache the fully computed bonds data in (self.data plus
-        the per-bond-type breakdown behind distribution_by_ticker/_current_value/_revenue — see
-        _compute_data's return value), keyed by currency_to/tax_rate/bond_types_json plus the
-        content of buy.csv/interest_rate_file/inflation_rate_file/cancel.csv and valid for the
-        day it was written — see cache_library.DiskCache.
-        force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes everything, then overwrites the cache with the fresh result.
-        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
-        PolishRetailBonds instances (Portfolio builds and passes one automatically) so this
-        instance's own NATIVE_CURRENCY -> currency_to FX history is reused instead of re-fetched
-        when another source already needs (or later needs) that same pair - see
-        currency_calculator_library.get_cached_currency. None (default): fetched fresh, exactly
-        as before this parameter existed."""
+        progress_callback: optional zero-arg callback, once, after all bond rows are computed.
+        cancel.csv (optional): records that some or all of a holding was actually redeemed early
+        - see the module docstring for its shape and how a partial cancellation is modeled.
+        cache_dir: caches the fully computed bonds data, keyed by currency_to/tax_rate/
+        bond_types_json plus buy.csv/interest_rate_file/inflation_rate_file/cancel.csv content,
+        valid for the day written.
+        force_refresh: ignores any cached entry, recomputes, overwrites the cache.
+        currency_cache: optional dict shared across sources (Portfolio passes one automatically)
+        so this instance's NATIVE_CURRENCY -> currency_to history is reused instead of re-fetched
+        - see get_cached_currency. None: fetched fresh."""
         # Validated up front, before any file I/O, so a malformed override raises a clear error
-        # right at construction time instead of surfacing later as a cryptic failure deep inside
-        # _bond_dataframe's arithmetic (README Roadmap item).
+        # at construction time instead of a cryptic failure deep inside _bond_dataframe.
         if isinstance(tax_rate, bool) or not isinstance(tax_rate, (int, float)):
             raise ValueError(f"tax_rate must be a number (percent), got {tax_rate!r}.")
         if not (0.0<=tax_rate<=100.0):
@@ -241,45 +182,30 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         cache_key=None
         cached=None
         if cache is not None:
-            # Version tag - bump it whenever this method's cached return shape/semantics change
-            # (each type_dataframe's own column set included), so an old-shaped/missing-column
-            # entry already on disk doesn't get silently misinterpreted; the isinstance check
-            # below is the actual guard. currency_to/tax_rate are folded into the key itself (not
-            # just this tag) since two
-            # different target currencies (or tax rates) are both otherwise-valid, simultaneously-
-            # live cache entries for the same buy.csv - not a stale-vs-fresh case. cancel.csv is
-            # folded in the same way (a sentinel string when absent, since there's nothing to
-            # hash_file) - adding/editing/removing it must invalidate a same-day entry computed
-            # before that change, exactly like editing buy.csv itself would. bond_types_json is
-            # folded in the same sentinel-when-absent way as cancel.csv.
+            # Version tag - the isinstance check below is the actual guard against an old-shaped
+            # entry. currency_to/tax_rate are folded into the key itself (not just this tag)
+            # since two different values are both otherwise-valid, simultaneously-live entries
+            # for the same buy.csv - not a stale-vs-fresh case. cancel.csv/bond_types_json are
+            # folded in the same way, sentinel string when absent.
             cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
             bond_types_component=DiskCache.hash_file(bond_types_json) if bond_types_json is not None else 'default-bond-types'
             cache_key=DiskCache.make_key('bonds-v7', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
-                    # Explicit shape check, not bare unpacking wrapped in try/except: a stale
-                    # cache entry that's some OTHER 4-shaped value unpacks without raising -
-                    # silently assigning garbage to self.data/type_dataframes/invested_by_type/
-                    # lifetime_invested_by_type instead of failing loudly. Belt-and-suspenders
-                    # alongside the version tag above, in case a cache entry with yet another
-                    # shape ever reaches here regardless (e.g. hand-edited, or a future change
-                    # that forgets to bump the tag) - safer to recompute than to crash
-                    # construction or silently misinterpret it.
+                    # Explicit shape check, not bare unpacking in try/except: a stale entry that's
+                    # some other 4-shaped value would unpack without raising, silently assigning
+                    # garbage - safer to recompute than to crash or misinterpret it.
                     if isinstance(cached, tuple) and len(cached)==4:
                         self.data, type_dataframes, invested_by_type, lifetime_invested_by_type=cached
                     else:
                         cached=None
 
         if cached is None:
-            # One shared FX history for every holding, spanning the earliest holding's start date
-            # through today - Currency's own same-currency short-circuit makes this a flat
-            # 1.0-rate no-op when currency_to is already NATIVE_CURRENCY, so _compute_data/
-            # _bond_dataframe apply every conversion below unconditionally rather than
-            # special-casing the no-conversion case. Routed through get_cached_currency (rather
-            # than Currency directly) so this pair is reused when currency_cache is shared with
-            # another source that already fetched (or later fetches) the same PLN -> currency_to
-            # conversion, e.g. two PolishRetailBonds instances in one Portfolio.
+            # One shared FX history for every holding, spanning the earliest start date through
+            # today - a flat 1.0-rate no-op when currency_to is already NATIVE_CURRENCY, so
+            # _compute_data/_bond_dataframe apply conversion unconditionally. Routed through
+            # get_cached_currency so this pair is reused when shared with another source.
             currency=get_cached_currency(currency_cache, self.NATIVE_CURRENCY, currency_to, self.dataframe.index.min(), cache_dir=cache_dir, force_refresh=force_refresh)
             self.data, type_dataframes, invested_by_type, lifetime_invested_by_type=self._compute_data(today, currency, progress_callback)
             if cache is not None:
@@ -287,44 +213,29 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         elif progress_callback is not None:
             progress_callback()
 
-        # total_money_invested (and distribution_by_ticker below) is what's CURRENTLY held per
-        # type - each entry is that type's own merged type_dataframe's last MONEY_INVESTED_COLUMN
-        # row (see _compute_data's invested_by_type docstring), so it's exactly equal to
-        # self.data[MONEY_INVESTED_COLUMN].iloc[-1] summed by type rather than read off the whole
-        # portfolio at once. total_current_value/total_revenue read self.data's actual last row
-        # directly, which already reflects only what's still held today (Money_invested/
-        # PROFIT_WITHOUT_DIVIDEND_COLUMN both go to 0 past maturity) plus whatever's been realized
-        # so far (PROFIT_COLUMN, which persists past maturity).
-        #
-        # total_money_invested (and distribution_by_ticker below) is the lifetime-gross figure -
-        # every holding/tranche's own cost basis at purchase, summed by type, never reduced by
-        # maturity/cancellation (lifetime_invested_by_type - see _bond_dataframe/_compute_data) -
-        # matching what Stock/Commodity/Crypto's own total_money_invested/distribution_by_ticker
-        # mean. total_money_currently_invested/distribution_by_ticker_currently_invested is the
-        # separate, genuinely different figure: what's CURRENTLY held per type (invested_by_type,
-        # each type's own merged type_dataframe's last MONEY_INVESTED_COLUMN row) - 0 for a type
-        # that's fully matured/cancelled, same as MONEY_INVESTED_COLUMN itself.
+        # total_money_invested/distribution_by_ticker: lifetime-gross figure - every holding/
+        # tranche's own cost basis at purchase, summed by type, never reduced by maturity/
+        # cancellation (lifetime_invested_by_type) - matches Stock's own meaning.
+        # total_money_currently_invested/distribution_by_ticker_currently_invested: the separate
+        # figure of what's CURRENTLY held per type (invested_by_type, each type's own last
+        # MONEY_INVESTED_COLUMN row) - 0 for a fully matured/cancelled type.
+        # total_current_value/total_revenue read self.data's last row directly: Money_invested/
+        # PROFIT_WITHOUT_DIVIDEND_COLUMN both 0 past maturity, PROFIT_COLUMN persists.
         self.total_money_invested=sum(lifetime_invested_by_type.values())
         self.total_money_currently_invested=sum(invested_by_type.values())
         self.total_current_value=self.data[self.MONEY_INVESTED_COLUMN].iloc[-1]+self.data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
         self.total_revenue=self.data[self.PROFIT_COLUMN].iloc[-1]
 
-        # Broken down by bond type (its three-letter code, e.g. 'ROR') rather than one flat
-        # 'Polish bonds' bucket, the same way Stock/Commodity/Crypto break distribution_by_ticker
-        # down by ticker/symbol - merging per type first (type_dataframes below), not per holding,
-        # so two separate holdings of the same type (e.g. two different ROR issues) land in one
-        # slice instead of two. distribution_by_ticker keeps a fully-matured/-cancelled type's
-        # lifetime share (same as a fully-sold Stock ticker); distribution_by_ticker_currently_
-        # invested drops it to 0% instead (Money_invested has nothing left held - see
-        # _bond_dataframe), matching its 0% in _current_value. _revenue still keeps whatever a
-        # matured/cancelled type realized, regardless of what it currently holds.
+        # Broken down by bond type (e.g. 'ROR'), not one flat bucket, same as Stock breaks down
+        # by ticker - merging per type (type_dataframes) so two holdings of the same type land in
+        # one slice. distribution_by_ticker keeps a fully-matured type's lifetime share;
+        # _currently_invested drops it to 0% instead; _revenue keeps whatever was realized.
         self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in lifetime_invested_by_type.items()} if self.total_money_invested else dict()
         self.distribution_by_ticker_currently_invested={code: (invested/self.total_money_currently_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_currently_invested else dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
-        # Every bond type here is issued in NATIVE_CURRENCY, so this is trivial (unlike Stock's,
-        # which varies per ticker) — kept as a per-type dict anyway so Portfolio's
-        # distribution_by_currency aggregation has one uniform shape to read across every source.
+        # Trivial (every type is issued in NATIVE_CURRENCY, unlike Stock's per-ticker currency) -
+        # kept as a dict anyway so Portfolio's distribution_by_currency has one uniform shape.
         self.currency_by_ticker={code: self.NATIVE_CURRENCY for code in invested_by_type}
         for code, type_dataframe in type_dataframes.items():
             current_value=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
@@ -334,18 +245,14 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
     @classmethod
     def count_tickers(cls, directory_path: str) -> int:
-        """Number of bond rows in a source directory's buy.csv — lets a caller (e.g. Portfolio)
-        size a progress bar before construction. Named count_tickers, not count_bonds, to match
-        Stock/Commodity/Crypto's equivalent method - distribution_by_ticker already uses
-        "ticker" as this library's generic per-holding term, even for a bond type code."""
+        """Number of bond rows in buy.csv - lets a caller size a progress bar before
+        construction. Named count_tickers, matching Stock/Commodity/Crypto's equivalent."""
         return len(pd.read_csv(cls._resolve_buy_path(directory_path)))
 
     @classmethod
     def _resolve_buy_path(cls, directory_path: str) -> str:
-        """Validates directory_path/buy.csv exist, raising this library's own established
-        clear-error ValueError convention instead of a raw FileNotFoundError straight from
-        pd.read_csv ([WinError 3]/[Errno 2]) — shared by __init__ and count_tickers, the two
-        entry points that read buy.csv directly (README Roadmap item)."""
+        """Validates directory_path/buy.csv exist, raising this library's own clear-error
+        ValueError instead of a raw FileNotFoundError - shared by __init__ and count_tickers."""
         if not os.path.isdir(directory_path):
             raise ValueError(f"No such directory: {directory_path!r}")
         buy_path=os.path.join(directory_path, "buy.csv")
@@ -355,10 +262,8 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
     @classmethod
     def _load_bond_types(cls, bond_types_json: str=None) -> dict:
-        """{code: config-dict}, starting from a fresh per-type copy of the built-in BOND_TYPES
-        (so a partial override below never mutates the class-level dict, which every other
-        instance still reads from) and merging bond_types_json's swap_discount/
-        early_redemption_fee overrides (if given) on top, per type - see __init__'s docstring."""
+        """{code: config-dict}, a fresh per-type copy of BOND_TYPES (never mutates the class-
+        level dict) with bond_types_json's overrides merged on top - see __init__'s docstring."""
         bond_types={code: dict(config) for code, config in cls.BOND_TYPES.items()}
         if bond_types_json is not None:
             with open(bond_types_json, 'r') as f:
@@ -374,10 +279,8 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
                 unknown_fields=set(override)-overridable_fields
                 if unknown_fields:
                     raise ValueError(f"bond_types_json for {code!r} sets unknown field(s) {sorted(unknown_fields)} (expected one of {sorted(overridable_fields)}).")
-                # swap_discount/early_redemption_fee are both zl/bond amounts arithmetic below
-                # subtracts from NOMINAL_VALUE/gross accrued interest - a non-numeric or
-                # out-of-range value would otherwise only surface as a cryptic failure (or a
-                # silently nonsensical negative price/fee) deep inside _bond_dataframe.
+                # A non-numeric or out-of-range value would otherwise only surface as a cryptic
+                # failure (or a silently nonsensical negative price/fee) deep in _bond_dataframe.
                 for field, value in override.items():
                     if isinstance(value, bool) or not isinstance(value, (int, float)):
                         raise ValueError(f"bond_types_json for {code!r} field {field!r} must be a number, got {value!r}.")
@@ -399,18 +302,11 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     @classmethod
     def _load_cancellations(cls, path: str) -> dict:
         """{(purchase_date, isin): [(cancel_date, amount_of_units), ...]}, sorted by cancel_date -
-        every row in cancel.csv, grouped by the holding it applies to (its own (date, isin) pair,
-        the same values as its buy.csv row - two identical (date, isin) rows in buy.csv, an edge
-        case real data is unlikely to have, would both match every cancellation recorded against
-        that pair here, since nothing else distinguishes them). A holding can have more than one
-        row (several partial cancellations over time) - see _build_tranches for how these turn
-        into per-tranche accrual."""
-        # Grouped via pandas' own (vectorized) groupby instead of a per-row .iterrows() loop
-        # (README Roadmap item) - low-impact in practice since cancel.csv is typically small, but
-        # the same pattern as every other transaction-walking loop in this package. Sorting by
-        # cancel_date up front, before grouping, means each group's rows already come out in
-        # cancel_date order (groupby preserves within-group row order) - equivalent to the old
-        # per-key entries.sort(...) pass after the fact.
+        every cancel.csv row grouped by the holding it applies to (its own (date, isin) pair). A
+        holding can have more than one row (several partial cancellations) - see _build_tranches
+        for how these turn into per-tranche accrual."""
+        # Vectorized groupby, not a per-row .iterrows() loop. Sorting by cancel_date before
+        # grouping means each group's rows already come out in cancel_date order.
         cancel_df=pd.read_csv(path)
         cancel_df[cls.CSV_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_DATE_COLUMN], format='%Y-%m-%d')
         cancel_df[cls.CSV_CANCEL_DATE_COLUMN]=pd.to_datetime(cancel_df[cls.CSV_CANCEL_DATE_COLUMN], format='%Y-%m-%d')
@@ -422,12 +318,10 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
 
     @classmethod
     def _build_tranches(cls, total_amount: float, cancellations: list, start_date: pd.Timestamp, isin: str) -> list:
-        """Splits a holding's total_amount into (tranche_amount, tranche_cancel_date) pairs: one
-        per cancellation (in cancel_date order), each stopping accrual at its own cancel_date,
-        plus a final (remaining_amount, None) tranche for whatever was never cancelled - omitted
-        if the holding was cancelled in full. Every unit within a tranche accrues identically
-        (see module docstring), so summing each tranche's own _bond_dataframe reproduces exactly
-        what a holding with one or more partial early redemptions actually earns."""
+        """Splits total_amount into (tranche_amount, tranche_cancel_date) pairs: one per
+        cancellation (in cancel_date order), each stopping accrual at its own cancel_date, plus a
+        final (remaining_amount, None) tranche for whatever was never cancelled (omitted if
+        cancelled in full)."""
         remaining=total_amount
         cumulative_cancelled=0.0
         tranches=list()
@@ -446,25 +340,19 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     def _compute_data(self, today: datetime, currency: Currency, progress_callback: Callable[[], None]=None) -> tuple:
         """Returns (merged_dataframe, type_dataframes, invested_by_type, lifetime_invested_by_type):
         - merged_dataframe: the whole-portfolio DataFrame (self.data).
-        - type_dataframes: {bond-type code: merged DataFrame} for that type alone, one entry per
-          distinct type actually held, used for distribution_by_ticker_current_value/_revenue.
-        - invested_by_type: {bond-type code: that type's own CURRENT Money_invested}, read off
-          type_dataframes[code]'s own last MONEY_INVESTED_COLUMN row - so a matured/fully-
-          cancelled holding contributes 0, same as MONEY_INVESTED_COLUMN itself already does (see
-          _bond_dataframe). Kept as its own dict (rather than reading self.data directly) purely
-          so distribution_by_ticker_currently_invested can be broken down per type instead of one
-          flat total. Feeds total_money_currently_invested/distribution_by_ticker_currently_invested.
-        - lifetime_invested_by_type: {bond-type code: that type's own cost basis summed across
-          every holding/tranche ever bought}, never reduced by maturity/cancellation - the same
-          "lifetime gross" meaning Stock/Commodity/Crypto's own total_money_invested carries.
-          Accumulated per-holding below (see _bond_dataframe's own lifetime_invested return value),
-          not read off a column, since a matured tranche's MONEY_INVESTED_COLUMN has already
-          dropped to 0 by today. Feeds total_money_invested/distribution_by_ticker.
-        All four are cached together (see __init__) so a cache hit doesn't lose any of them."""
-        # See Stock._compute_data's equivalent comment on why plain numpy arrays are pulled out
-        # up front. Here it matters less — this loop runs once per bond HOLDING (typically a
-        # handful, not hundreds), and the real per-iteration cost is the vectorized-per-period
-        # accrual math inside _bond_dataframe, not the row access itself.
+        - type_dataframes: {bond-type code: merged DataFrame} for that type alone, used for
+          distribution_by_ticker_current_value/_revenue.
+        - invested_by_type: {code: that type's CURRENT Money_invested}, its last
+          MONEY_INVESTED_COLUMN row - 0 for a matured/fully-cancelled type. Feeds
+          total_money_currently_invested/distribution_by_ticker_currently_invested.
+        - lifetime_invested_by_type: {code: cost basis summed across every holding/tranche ever
+          bought}, never reduced by maturity/cancellation - the "lifetime gross" meaning Stock's
+          own total_money_invested carries. Accumulated per-holding (see _bond_dataframe's own
+          lifetime_invested), not read off a column, since a matured MONEY_INVESTED_COLUMN is
+          already 0. Feeds total_money_invested/distribution_by_ticker.
+        All four are cached together (see __init__)."""
+        # Numpy arrays pulled out up front matters less here than in Stock - this loop runs once
+        # per HOLDING (a handful, not hundreds); the real cost is _bond_dataframe's own accrual math.
         codes=self.dataframe[self.CSV_TICKER_COLUMN].str[:3].to_numpy()
         raw_codes=self.dataframe[self.CSV_TICKER_COLUMN].to_numpy()
         amounts=self.dataframe[self.CSV_AMOUNT_OF_UNITS_COLUMN].to_numpy()
@@ -490,9 +378,8 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             ]
             tranche_dataframes=[df for df, _ in tranche_results]
             # Summing each tranche's own lifetime_invested reconstructs the whole holding's cost
-            # basis exactly (price_per_bond/fx_at_purchase are identical across every tranche of
-            # one holding - only cancel_date/amount differ - and tranche amounts sum back to the
-            # holding's full amounts[i]).
+            # basis exactly - price_per_bond/fx_at_purchase are identical across tranches, and
+            # tranche amounts sum back to amounts[i].
             lifetime_invested_by_type[code]=lifetime_invested_by_type.get(code, 0.0)+sum(lifetime_invested for _, lifetime_invested in tranche_results)
             bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self.merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
@@ -506,14 +393,12 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         return self.merge(list(type_dataframes.values())), type_dataframes, invested_by_type, lifetime_invested_by_type
 
     def _external_rate(self, source: str, period_start: pd.Timestamp) -> float:
-        """The published rate feeding a period-2-onward rate (before that period's own margin is
-        added) — interest_rate_data (NBP reference rate) for 'interest', inflation_rate_data (CPI)
-        for 'inflation'. Floored at 0 per every list emisyjny's 'w przypadku gdy i<0 przyjmuje się
-        że i=0' clause. CPI is looked up a month before period_start (it's published in arrears
-        for the prior 12 months); the NBP reference rate is looked up at period_start itself —
-        both external rate files only carry monthly-resolution, forward-filled data, coarser than
-        each list emisyjny's precise 'Nth business day before' lookup rule, so this takes the
-        rate already in effect at the relevant date rather than reproducing that day-count."""
+        """The published rate feeding a period-2-onward rate, before that period's own margin -
+        interest_rate_data (NBP reference rate) for 'interest', inflation_rate_data (CPI) for
+        'inflation'. Floored at 0 per every list emisyjny's 'i<0 -> i=0' clause. CPI is looked up
+        a month before period_start (published in arrears); the NBP rate at period_start itself -
+        both files are monthly-resolution, forward-filled, coarser than each list emisyjny's
+        precise lookup rule, so this takes the rate already in effect rather than the exact day."""
         if source=='interest':
             raw=self.interest_rate_data.loc[period_start, self.CSV_INTEREST_RATE_COLUMN]
         else:
@@ -529,29 +414,23 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         rate_source=config['rate_source']
         payments_per_year=12//period_months
 
-        # accrual_cutoff, not today, bounds how far this holding has actually accrued - the two
-        # differ only when it was cancelled (recorded in cancel.csv) before today, in which case
-        # accrual simply stops at cancel_date instead of continuing to natural maturity/today.
-        # full_index below still spans to the real today regardless, so a cancelled holding's
-        # post-cancellation days zero out/freeze via the same reindex/ffill mechanics that
-        # already handle natural maturity - cancellation is just an earlier "effective maturity".
+        # accrual_cutoff, not today, bounds how far this holding actually accrued - differs from
+        # today only when cancelled before today, in which case accrual stops at cancel_date.
+        # full_index below still spans to the real today, so post-cancellation days zero
+        # out/freeze via the same mechanics that handle natural maturity - cancellation is just
+        # an earlier "effective maturity".
         accrual_cutoff=min(today, cancel_date) if cancel_date is not None else today
 
-        # end_date/last_accrual_date/n_days below replace what used to be a pd.date_range
-        # (maturity_index) driving a pd.Series-based accrual - everything from here through the
-        # period loop instead works on plain numpy arrays, addressed by integer day-offset from
-        # start_date, since every date in play (period boundaries, accrual_cutoff, today) is
-        # always a whole number of days from start_date. This avoids constructing a fresh
-        # pd.date_range and doing label-based .loc alignment once per period (up to num_periods
-        # times per holding) - the actual hot part of this method, since Stock/Commodity/Crypto's
-        # own per-row loops are already numpy-first (see _compute_data's comment) while this one
-        # previously wasn't.
+        # end_date/last_accrual_date/n_days work on plain numpy arrays addressed by integer
+        # day-offset from start_date (every date in play is a whole number of days from it) -
+        # avoids a fresh pd.date_range and label-based .loc alignment per period, the hot part of
+        # this method.
         end_date=start_date+pd.DateOffset(months=period_months*num_periods)-pd.DateOffset(days=1)
         last_accrual_date=min(end_date, accrual_cutoff)
         n_days=(last_accrual_date-start_date).days+1
 
         # Interest always accrues on the bond's full NOMINAL_VALUE, whether bought for cash or
-        # (at a discount) by exchange — only the cost basis below differs.
+        # at a discount by exchange - only the cost basis below differs.
         base=self.NOMINAL_VALUE*amount_of_bonds
         daily_interest=np.zeros(n_days)
 
@@ -576,56 +455,40 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         discount=config['swap_discount'] if is_swapped else 0.0
         price_per_bond=self.NOMINAL_VALUE-discount
         # Frozen at the historical rate on this holding's own purchase date, same as Stock's own
-        # Money_invested - a cost basis converted once, at acquisition, not re-marked to today's
-        # rate afterward (unlike a mark-to-market price, which Stock's Close *does* re-apply
-        # every day, but a bond has no such observable price to begin with - see module docstring).
+        # Money_invested - converted once, at acquisition, not re-marked to today's rate (a bond
+        # has no observable mark-to-market price to begin with).
         fx_at_purchase=currency.data.loc[start_date, Currency.CLOSE_COLUMN]
 
-        # Convert each day's own PLN interest to currency_to at THAT day's own FX rate, before
-        # accumulating - same convention Stock uses for dividends/realized profit (that event's
-        # own row_fx baked in once, not re-applied later). This is what makes a matured bond's
-        # frozen accrued_profit below stay frozen in currency_to terms too, rather than silently
-        # drifting with FX after redemption despite nothing further actually happening to it.
-        # Currency.data itself is still a DataFrame (out of scope here) - .to_numpy() pulls this
-        # one holding's slice of it out as a plain array once, so the multiply/cumsum below are
-        # numpy end to end instead of pandas elementwise ops.
+        # Convert each day's own PLN interest to currency_to at THAT day's own FX rate before
+        # accumulating - same convention Stock uses for dividends/realized profit. This is what
+        # keeps a matured bond's frozen accrued_profit frozen in currency_to terms too, instead
+        # of drifting with FX after redemption. .to_numpy() pulls this holding's FX slice out
+        # once so the multiply/cumsum below are numpy end to end.
         maturity_index=pd.date_range(start=start_date, periods=n_days)
         fx_rates=currency.data.loc[maturity_index, Currency.CLOSE_COLUMN].to_numpy()
         daily_interest=daily_interest*fx_rates
 
-        # Redemption value is always based on NOMINAL_VALUE regardless of what was actually paid
-        # (see base above), so a lower cost basis (money_invested, below) needs a matching credit
-        # here to keep this contract's Money_invested + Profit = current total value true up to
-        # maturity - not just a lump sum tacked onto the final day, as the pre-rework version did
-        # it. Untaxed: it's a purchase-price discount, not interest income. Converted at
-        # fx_at_purchase for the same "locked in when it happened" reason as Money_invested below.
+        # Redemption value is always based on NOMINAL_VALUE regardless of what was actually paid,
+        # so a lower cost basis (money_invested, below) needs a matching credit here to keep
+        # Money_invested + Profit = current total value true up to maturity. Untaxed: it's a
+        # purchase-price discount, not interest income. Converted at fx_at_purchase, same "locked
+        # in when it happened" reason as Money_invested below.
         accrued_profit=np.round(np.cumsum(daily_interest)*(1-self.tax_rate/100.0), 2)+amount_of_bonds*discount*fx_at_purchase
 
-        # A genuine early redemption pays out gross accrued interest minus early_redemption_fee,
-        # not the plain held-to-maturity accrual — applied once, to the single frozen value every
-        # day from cancel_date onward inherits (every day BEFORE cancel_date still shows the
-        # gross value, since no redemption has happened on those days yet). Floored at 0, so this
-        # only ever reduces interest, never principal. last_accrual_date==cancel_date (not just
-        # "cancel_date is not None") is what actually confirms the cancellation governed this
-        # tranche's cutoff, rather than natural maturity/today (see accrual_cutoff above) - a
-        # cancel_date recorded well after natural maturity, or not yet reached, is a no-op here
-        # too, since nothing was actually redeemed early in either case.
+        # A genuine early redemption pays gross accrued interest minus early_redemption_fee, not
+        # the plain held-to-maturity accrual - applied once, to the frozen value every day from
+        # cancel_date onward inherits. Floored at 0, so this only reduces interest, never
+        # principal. last_accrual_date==cancel_date (not just "is not None") confirms the
+        # cancellation actually governed this tranche's cutoff, not natural maturity/today.
         if cancel_date is not None and last_accrual_date==cancel_date:
             fee=config['early_redemption_fee']*amount_of_bonds*currency.data.loc[cancel_date, Currency.CLOSE_COLUMN]
             accrued_profit[-1]=round(max(0.0, accrued_profit[-1]-fee), 2)
 
-        # Extend to today - a no-op if the bond hasn't matured/been cancelled yet, since n_days
-        # already reaches today in that case. Past accrual_cutoff (natural maturity OR an earlier
-        # recorded cancellation - both handled identically from here on), the bond has been
-        # redeemed: Money_invested and the unrealized component (PROFIT_WITHOUT_DIVIDEND_COLUMN)
-        # drop to 0 - nothing is left held, the proceeds became cash, which this library doesn't
-        # separately track - while total Profit freezes at its final accrued value forever, since
-        # it was realized at redemption and doesn't disappear from historical totals. Mirrors how
-        # a fully-sold Stock position's running cost basis and unrealized profit both go to 0
-        # while its cumulative realized profit persists in PROFIT_COLUMN. n_days is always <=
-        # full_days (last_accrual_date can't be later than today), so every slice below is safe -
-        # plain numpy fill/copy in place of what used to be three separate pandas reindex/ffill
-        # calls, each re-walking the whole date range on its own.
+        # Extend to today - a no-op if not yet matured/cancelled. Past accrual_cutoff, the bond
+        # has been redeemed: Money_invested and PROFIT_WITHOUT_DIVIDEND_COLUMN drop to 0 (nothing
+        # left held, proceeds became cash, not separately tracked), while Profit freezes at its
+        # final value forever. Mirrors a fully-sold Stock position. n_days is always <= full_days,
+        # so every slice below is safe.
         full_index=pd.date_range(start=start_date, end=today)
         full_days=len(full_index)
         money_invested=np.zeros(full_days)
@@ -641,24 +504,18 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             self.PROFIT_WITHOUT_DIVIDEND_COLUMN: profit_without_dividend,
             self.PROFIT_COLUMN: profit,
         }, index=full_index)
-        # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still carries
-        # the (fluctuating-until-redemption) accrued value, then exactly whatever
-        # PROFIT_WITHOUT_DIVIDEND_COLUMN just dropped the moment it drops to 0 - so this is always
-        # consistent with PROFIT_COLUMN=PROFIT_WITHOUT_DIVIDEND_COLUMN+REALIZED_PROFIT_COLUMN
-        # (matching Stock's own three-column relationship, minus the dividend term bonds don't
-        # have) without a second, separately-computed accrual that could drift from the two
-        # columns above. PROFIT_WITHOUT_REALIZED_COLUMN/PROFIT_EXCLUDING_DIVIDEND_COLUMN follow
-        # Commodity/Crypto's own "no dividends" pattern (no DIVIDEND_COLUMN term to add back/
-        # exclude) rather than Stock's three-term one.
+        # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still
+        # carries the fluctuating accrued value, then whatever it just dropped the moment it
+        # hits 0 - always consistent with PROFIT_COLUMN=PROFIT_WITHOUT_DIVIDEND_COLUMN+
+        # REALIZED_PROFIT_COLUMN. PROFIT_WITHOUT_REALIZED_COLUMN/PROFIT_EXCLUDING_DIVIDEND_COLUMN
+        # follow Commodity/Crypto's "no dividends" pattern, not Stock's three-term one.
         dataframe[self.REALIZED_PROFIT_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         dataframe[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]
 
         # This tranche's own cost basis at purchase, untouched by maturity/cancellation zeroing
-        # money_invested out above - unlike MONEY_INVESTED_COLUMN itself, this number is never
-        # reduced, the same "lifetime gross ever bought" meaning Stock/Commodity/Crypto's own
-        # total_money_invested carries. Returned alongside the DataFrame (rather than read back
-        # off a column) since summing tranches of a partially-cancelled holding needs this value
-        # even for a tranche whose MONEY_INVESTED_COLUMN has already dropped to 0 by today.
+        # money_invested above - the "lifetime gross" meaning Stock's total_money_invested
+        # carries. Returned alongside the DataFrame since summing a partially-cancelled holding's
+        # tranches needs this even once MONEY_INVESTED_COLUMN has dropped to 0.
         lifetime_invested=round(amount_of_bonds*price_per_bond*fx_at_purchase, 2)
         return dataframe, lifetime_invested

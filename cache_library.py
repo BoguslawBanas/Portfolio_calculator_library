@@ -1,14 +1,11 @@
 """
-Disk cache for the DataFrames Stock/Bonds/Commodity/Crypto/Currency compute from a yfinance
-fetch, and BankAccount computes from its own interest-accrual formula (see the README's
-Roadmap). Every one of those calculators computes up to datetime.today(), so a cache entry is
-only ever valid for the day it was written — a cache key doesn't need to encode "as of when",
-just "computed_on" needs to still be today. Anything that should invalidate a cache entry sooner
-(a new/edited transaction, a different ticker/currency/rate file) is instead folded into the key
-itself, via hash_dataframe/hash_file below.
+Disk cache for the DataFrames Stock/Bonds/Commodity/Crypto/Currency/BankAccount compute. Every
+calculator computes up to datetime.today(), so an entry is only ever valid for the day it was
+written - the key doesn't encode "as of when", just needs "computed_on" to still be today.
+Anything that should invalidate sooner (an edited transaction, a different ticker/currency/rate
+file) is folded into the key itself via hash_dataframe/hash_file below.
 
-Caching is opt-in: every class that can use a DiskCache takes it through a cache_dir
-constructor argument that defaults to None (disabled), so existing callers are unaffected.
+Opt-in: every class takes a cache_dir argument defaulting to None (disabled).
 """
 
 import os
@@ -19,9 +16,8 @@ import pandas as pd
 
 
 class DiskCache:
-    # Marker file recording the last date evict_stale_if_due() actually ran the scan — doesn't
-    # end in '.pkl', so get()/set()/clear()/evict_stale() (which all filter on that extension)
-    # never touch it.
+    # Marker recording the last date evict_stale_if_due() ran - not '.pkl', so the other methods
+    # (which filter on that extension) never touch it.
     _EVICT_STALE_MARKER='.evict_stale_last_run'
 
     def __init__(self, cache_dir: str):
@@ -51,11 +47,9 @@ class DiskCache:
             pickle.dump({'computed_on': datetime.today().date(), 'data': dataframe}, f)
 
     def clear(self):
-        """Deletes every cached entry in cache_dir, plus evict_stale_if_due()'s marker file if
-        present (the directory itself is left in place). Use this to reclaim space from
-        orphaned entries — one whose key (ticker/currency/transactions hash) is no longer
-        recomputed by anything, so it would otherwise never get overwritten or removed on its
-        own — or simply to force a clean slate."""
+        """Deletes every cached entry (plus the evict_stale_if_due marker), directory left in
+        place. Reclaims orphaned entries - ones no key ever recomputes anymore - or forces a
+        clean slate."""
         if not os.path.isdir(self.cache_dir):
             return
         for filename in os.listdir(self.cache_dir):
@@ -63,15 +57,11 @@ class DiskCache:
                 os.remove(os.path.join(self.cache_dir, filename))
 
     def evict_stale(self) -> int:
-        """Deletes every entry not computed today, reclaiming disk space from orphaned
-        entries (see clear()'s docstring) without needing to track which keys are still
-        'live'. Safe to call at any point, including mid-run: an entry not computed today is
-        already worthless to get() (a cache miss), so removing it changes no caller's
-        behavior — either nothing will ever recompute that key again (truly orphaned, so
-        deleting it is pure cleanup), or something will recompute it later today, at which
-        point set() writes a fresh file to the same path regardless of whether the old one
-        was still there. A corrupted/unreadable entry (see get()'s docstring) is removed the
-        same way — it's equally worthless. Returns the number of files removed."""
+        """Deletes every entry not computed today - reclaims orphaned entries with no need to
+        track which keys are still live. Safe mid-run: a not-today entry is already a cache miss
+        to get(), so removing it changes no behavior - set() just writes a fresh file later if
+        something recomputes that key. Corrupted/unreadable entries are removed the same way.
+        Returns the number removed."""
         if not os.path.isdir(self.cache_dir):
             return 0
 
@@ -93,12 +83,10 @@ class DiskCache:
         return removed
 
     def evict_stale_if_due(self) -> int:
-        """Like evict_stale(), but skips the scan entirely if it already ran today, remembered
-        via a small marker file in cache_dir — throttles the otherwise O(cache size) sweep
-        (open+unpickle every entry) to once per calendar day instead of once per call. Use this
-        for an automatic/repeated sweep (e.g. once per Portfolio construction); call
-        evict_stale() directly instead when you specifically want an unconditional sweep right
-        now. Returns the number of files removed (0 when the scan was skipped)."""
+        """Like evict_stale(), but skips the scan if a marker file shows it already ran today -
+        throttles the O(cache size) sweep to once per day. Use for an automatic/repeated sweep
+        (e.g. per Portfolio construction); call evict_stale() directly for an unconditional one.
+        Returns files removed (0 if skipped)."""
         if not os.path.isdir(self.cache_dir):
             return 0
 

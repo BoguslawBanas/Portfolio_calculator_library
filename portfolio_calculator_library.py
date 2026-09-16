@@ -1,9 +1,8 @@
 """
-Class-based Portfolio calculator: combines one or more Stock/PolishRetailBonds/Commodity/
-Crypto/BankAccount sources into a single portfolio-level DataFrame. The constructor builds
-each source's own instance once and merges their per-instrument DataFrames, and the rest of
-the methods (calculate_irr, resample, ...) operate on the state the constructor already built
-instead of re-taking a dataframe argument every call.
+Portfolio calculator: combines one or more Stock/PolishRetailBonds/Commodity/Crypto/BankAccount
+sources into a single portfolio-level DataFrame. The constructor builds each source once and
+merges their DataFrames; other methods (calculate_irr, resample, ...) operate on that state
+instead of retaking a dataframe argument each call.
 """
 
 from datetime import datetime
@@ -20,25 +19,18 @@ from .calculator_mixins import ReprMixin
 
 
 class Portfolio(ReprMixin):
-    # --- Output: self.data contract + Portfolio-specific extras. The first three form the
-    # shared DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    # --- Output: self.data contract + Portfolio-specific extras (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
-    # Only present when at least one Stock source contributed (the only asset type that
-    # produces a Dividend column) — read via self.data.get(DIVIDEND_COLUMN, 0.0), not [].
+    # Only present when a Stock source contributed - read via self.data.get(DIVIDEND_COLUMN,
+    # 0.0), not [].
     DIVIDEND_COLUMN='Dividend'
-    # Profit still attributable to positions as they stand today - unrealized gain on whatever's
-    # still held plus dividends collected along the way - excluding gain/loss already locked in
-    # by a sell (each source's own Realized_profit; BankAccount folds straight into this since it
-    # has no separate realized-profit stream to exclude - every other source, PolishRetailBonds
-    # included, does track one). Every source contributes it (see each source's own
-    # PROFIT_WITHOUT_REALIZED_COLUMN), so unlike DIVIDEND_COLUMN this is always present - safe to
-    # read via self.data[...] directly.
+    # Unrealized gain plus dividends, excluding gain already locked in by a sell (each source's
+    # own Realized_profit; only BankAccount has none to exclude). Every source contributes it,
+    # so unlike DIVIDEND_COLUMN this is always present - safe to read via self.data[...] directly.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
-    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
-    # keeping realized profit (Profit - Dividend). Also always present, same as
-    # PROFIT_WITHOUT_REALIZED_COLUMN above.
+    # Excludes only dividends, keeping realized profit (Profit - Dividend). Also always present.
     PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     DAILY_RETURN_COLUMN='Daily_return'
     IRR_COLUMN='Irr'
@@ -50,72 +42,46 @@ class Portfolio(ReprMixin):
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
 
     def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
-        """sources: a dict mapping each directory path to the asset type it holds - one of
-        VALID_SOURCE_TYPES ('stock', 'bonds', 'commodities', 'crypto', 'bank_account'); any
-        other value raises ValueError immediately, before any source is constructed. Each
-        directory is handed straight to the matching Stock/PolishRetailBonds/Commodity/Crypto/
-        BankAccount constructor below, which does its own loading/splitting of the CSVs inside
-        it - Portfolio itself never builds a combined raw dataframe to tag/split.
+        """sources: dict mapping each directory to its asset type, one of VALID_SOURCE_TYPES;
+        any other value raises ValueError immediately, before any source is constructed. Each
+        directory goes straight to the matching source class, which does its own CSV loading.
 
-        tickers_json: required when sources includes a 'stock' entry - path to the JSON file
-        (see CLAUDE.md / stock_calculator_library) mapping each ISIN to {"ticker": <yfinance
-        symbol>, "currency": <instrument currency>}, passed straight through to Stock.
+        tickers_json: required for a 'stock' entry - JSON mapping each ISIN to {"ticker":
+        <yfinance symbol>, "currency": <instrument currency>}, passed through to Stock.
 
-        commodity_tickers_json/crypto_tickers_json: optional, passed straight through to every
-        Commodity/Crypto source's own tickers_json (see their docstrings) - lets a caller track
-        a commodity/crypto symbol beyond each class's small built-in TICKERS dict without
-        editing the library source (README Roadmap item). Unlike tickers_json above, never
-        required - Commodity/Crypto both work with no configuration via their built-in TICKERS.
+        commodity_tickers_json/crypto_tickers_json: optional, passed through to every
+        Commodity/Crypto source's own tickers_json - lets a caller track a symbol beyond each
+        class's built-in TICKERS without editing the source. Never required, unlike tickers_json.
 
-        currency_to: target currency every source is converted to and summed in (self.data and
-        every total_*/distribution_by_*_current_value/_revenue figure) - defaults to 'USD'.
-        Passed straight through as each Stock/PolishRetailBonds/Commodity/Crypto source's own
-        currency_to, matching their parameter name (BankAccount has none - see its own README
-        entry on the single-currency limitation).
+        currency_to: target currency every source is converted to and summed in - defaults to
+        'USD'. Passed through as each source's own currency_to (BankAccount has none - single-
+        currency only, see its own README entry).
 
-        self.distribution_by_currency/_current_value/_revenue (always populated, no flag needed):
-        allocation by each ticker/symbol/bond-type's own NATIVE currency (a US stock's 'usd',
-        a Polish bond's 'PLN', ...) rather than by ticker/directory - answers "how much of my
-        portfolio is actually USD-denominated vs. EUR vs. PLN", independent of currency_to above
-        (the single currency self.data itself is already converted to and summed in).
+        self.distribution_by_currency/_current_value/_revenue (always populated): allocation by
+        each position's own NATIVE currency (a US stock's 'usd', a Polish bond's 'PLN', ...)
+        rather than by ticker/directory - independent of currency_to, the single currency
+        self.data is converted to and summed in.
 
         self.total_money_currently_invested/distribution_by_directory/_ticker/_currency_currently_
-        invested: the same allocation-by-amount-invested figures as total_money_invested/
-        distribution_by_directory/_ticker/_currency above, but by cost basis of what's actually
-        still held today rather than lifetime-gross-ever-bought (every source - Stock/Commodity/
-        Crypto's own sells, PolishRetailBonds' own maturity/cancellation, BankAccount's own
-        withdrawals - tracks both figures independently; see each class's own docstring). The two
-        are identical only until something's actually been sold/matured/cancelled/withdrawn, since
-        only the lifetime figure stays at its historical value once a position's fully closed out.
+        invested: the same allocation figures as their lifetime-gross counterparts above, but by
+        cost basis of what's actually still held today. Every source tracks both independently;
+        they diverge once anything's actually been sold/matured/cancelled/withdrawn.
 
-        Every Stock/Commodity/Crypto/PolishRetailBonds source constructed below shares one
-        currency_cache dict, built fresh here per Portfolio construction and passed down to each
-        - so holdings that share a currency pair (several same-currency tickers within one
-        source, or two different sources converting the same pair, e.g. Commodity and Crypto both
-        quoting in usd) fetch that pair's FX history once per Portfolio construction rather than
-        once per holding (README Roadmap item, before this) - see
-        currency_calculator_library.get_cached_currency for the reuse/extension rule.
+        Every Stock/Commodity/Crypto/PolishRetailBonds source below shares one currency_cache
+        dict, built fresh here and passed down to each, so a currency pair shared across
+        holdings/sources is fetched once per Portfolio construction - see get_cached_currency.
 
-        cache_dir: optional directory to cache every source's computed DataFrame in — see
-        cache_library.DiskCache. Passed straight through to each Stock/Bonds/Commodity/Crypto
-        constructed below; disabled (no caching) when left as None. Once every source is
-        loaded, __init__ also sweeps cache_dir via DiskCache.evict_stale_if_due() — reclaiming
-        orphaned entries automatically, at most once per calendar day regardless of how many
-        times Portfolio is constructed that day, rather than requiring a manual
-        DiskCache(cache_dir).clear().
+        cache_dir: caches every source's computed DataFrame - see cache_library.DiskCache.
+        Disabled when None. Once every source is loaded, also sweeps cache_dir via
+        DiskCache.evict_stale_if_due(), at most once per calendar day.
 
-        force_refresh: when True (and cache_dir is set), every source ignores its cached
-        entry and recomputes/re-fetches from scratch, then overwrites the cache with the
-        fresh result — a one-off "cold start" without deleting cache_dir yourself.
+        force_refresh: every source ignores its cached entry, recomputes, overwrites the cache -
+        a one-off cold start without deleting cache_dir yourself.
 
-        include_native_currency: when True, Stock/Commodity/Crypto sources also compute each
-        ticker/symbol's DataFrame in its own native currency, isolated from FX movement
-        against currency_to — collected into self.native_data/self.native_currency (keyed by
-        ticker/symbol), alongside the always-converted, summable self.data. Bonds are left out
-        of this: PolishRetailBonds now does convert (via its own currency_to, passed through as
-        currency_to above), but doesn't yet expose an include_native_currency of its own the way
-        Stock/Commodity/Crypto do, so there's no per-holding native-currency DataFrame for
-        Portfolio to collect here."""
+        include_native_currency: Stock/Commodity/Crypto sources also compute each ticker/
+        symbol's DataFrame in its own native currency (self.native_data/native_currency),
+        alongside the always-converted self.data. PolishRetailBonds is left out - it converts via
+        its own currency_to but doesn't yet expose an include_native_currency of its own."""
         self.distribution_by_directory=dict()
         self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
@@ -124,13 +90,9 @@ class Portfolio(ReprMixin):
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
-        # Allocation by each ticker/symbol/bond-type's own NATIVE currency (tickers.json's
-        # currency field for Stock, each source's fixed QUOTE_CURRENCY/NATIVE_CURRENCY for
-        # Commodity/Crypto/PolishRetailBonds) - not by currency_to (this constructor's target
-        # currency, what self.data is already summed in), so this answers "how much of my
-        # portfolio is actually USD-denominated vs. EUR vs. PLN" regardless of what everything
-        # gets converted to for reporting. Keyed uppercase so e.g. 'usd' (Stock) and 'USD'
-        # (a differently-cased source) land in the same bucket.
+        # Allocation by each position's own NATIVE currency, not currency_to - answers "how much
+        # of my portfolio is actually USD/EUR/PLN" regardless of reporting currency. Keyed
+        # uppercase so differently-cased sources land in the same bucket.
         self.distribution_by_currency=dict()
         self.distribution_by_currency_currently_invested=dict()
         self.distribution_by_currency_current_value=dict()
@@ -138,33 +100,25 @@ class Portfolio(ReprMixin):
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=0.0
-        # Unlike total_money_invested (lifetime gross ever bought/deposited/issued, never reduced
-        # by a sell/withdrawal/maturity), this is what's actually still held today across every
-        # source. The two are identical until something's actually been sold/matured/cancelled/
-        # withdrawn, since only the lifetime figure stays at its historical value once a position's
-        # fully closed out - see each source class's own docstring.
+        # Unlike total_money_invested (lifetime gross, never reduced by a sell/withdrawal/
+        # maturity), this is what's actually still held today across every source.
         self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
         portfolio_list=list()
-        # Shared across every source constructed below (see __init__'s own docstring) so a
-        # currency pair fetched by one source is reused by another that needs the same pair,
-        # instead of each independently constructing/fetching its own Currency.
+        # Shared across every source below so a currency pair fetched by one is reused by
+        # another instead of each fetching its own.
         currency_cache=dict()
 
-        # Validated up front, before any (potentially slow, network-bound) source construction
-        # starts, so a typo in sources (e.g. 'stocks' instead of 'stock') fails loudly right
-        # away instead of silently dropping that source with no error at all.
+        # Validated up front, before any slow, network-bound source construction starts, so a
+        # typo in sources fails loudly instead of silently dropping that source.
         for dir, type in sources.items():
             if type not in self.VALID_SOURCE_TYPES:
                 raise ValueError(f"Unknown source type {type!r} for {dir!r} (expected one of {sorted(self.VALID_SOURCE_TYPES)}).")
 
-        # Counting tickers/bonds up front (cheap — just reads/splits CSVs, no network calls) lets
-        # one progress bar span the whole portfolio, tracking the unit of work that's actually
-        # slow: one yfinance fetch per ticker. A whole bonds directory only counts as a single
-        # unit — PolishRetailBonds computation is fast, local work with no per-row network
-        # calls, and its progress_callback now fires once per instance rather than once per
-        # bond row.
+        # Counting tickers/bonds up front (cheap, no network calls) lets one progress bar span
+        # the whole portfolio, tracking one yfinance fetch per ticker. A bonds directory counts
+        # as a single unit - PolishRetailBonds is fast, local, no per-row network calls.
         total_units=0
         for dir, type in sources.items():
             if type=='stock':
@@ -192,16 +146,14 @@ class Portfolio(ReprMixin):
                 elif type=='crypto':
                     source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
-                else:  # type=='bank_account' - the only remaining member of VALID_SOURCE_TYPES, already validated above
+                else:  # type=='bank_account' - the only remaining member, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)
                     self._absorb_source(dir, source, supports_currency=False)
                 portfolio_list.append(source)
 
-        # A portfolio where every holding across every source has fully matured/been fully sold
-        # has a 0 total for one or more of these metrics while its distribution dict is still
-        # non-empty - guard each division so that lands on a correct 0.0 instead of a
-        # ZeroDivisionError (these are plain Python floats, not numpy - an unguarded division
-        # raises rather than silently producing NaN).
+        # A portfolio fully matured/sold out has a 0 total for one or more of these metrics while
+        # its distribution dict is still non-empty - guard each division for a correct 0.0
+        # instead of a ZeroDivisionError (plain Python floats, not numpy).
         for key, value in self.distribution_by_directory.items():
             self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
 
@@ -245,28 +197,23 @@ class Portfolio(ReprMixin):
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
-        """Convenience alias — the constructor already accepts a single prepared CSV."""
+        """Convenience alias - the constructor already accepts a single prepared CSV."""
         return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
 
     @staticmethod
     def _accumulate_by_currency(target: dict, currency_by_ticker: dict, key, amount: float):
-        """Adds amount into target's bucket for currency_by_ticker[key]'s currency (uppercased,
-        so differently-cased sources land in the same bucket), used by __init__ to build
-        distribution_by_currency/_current_value/_revenue from each source's per-ticker figures
-        (still in absolute terms at that point - see __init__'s own distribution_by_ticker loops,
-        which normalize to percentages only after every source has been folded in)."""
+        """Adds amount into target's bucket for currency_by_ticker[key]'s currency (uppercased).
+        Used by __init__ to build distribution_by_currency/_current_value/_revenue from each
+        source's per-ticker figures, still absolute at that point (normalized to % later)."""
         currency_code=currency_by_ticker[key].upper()
         target[currency_code]=target.get(currency_code, 0.0)+amount
 
     def _absorb_source(self, dir: str, source, supports_currency: bool=True, supports_native_currency: bool=False):
-        """Folds one already-constructed source instance (Stock/PolishRetailBonds/Commodity/
-        Crypto/BankAccount) into the matching portfolio-level totals/distributions - the logic
-        every branch of __init__'s loop above used to repeat almost verbatim per asset type.
-        supports_currency: False only for BankAccount, the one source type with no
-        currency_by_ticker to accumulate distribution_by_currency/_current_value/_revenue from.
+        """Folds one already-constructed source instance into the matching portfolio-level
+        totals/distributions.
+        supports_currency: False only for BankAccount, which has no currency_by_ticker.
         supports_native_currency: True only when include_native_currency was requested for a
-        source type that supports it (Stock/Commodity/Crypto) - PolishRetailBonds/BankAccount
-        never pass True here since neither exposes native_data/native_currency."""
+        source that supports it (Stock/Commodity/Crypto)."""
         self.distribution_by_directory[dir]=source.total_money_invested
         self.distribution_by_directory_currently_invested[dir]=source.total_money_currently_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
@@ -323,8 +270,8 @@ class Portfolio(ReprMixin):
 
     @staticmethod
     def _prepend_zero_day(dataframe: pd.DataFrame) -> pd.DataFrame:
-        """Adds a zero-valued row one day before the first date, so IRR/return
-        calculations have a clean starting point (see README roadmap)."""
+        """Adds a zero-valued row one day before the first date, so IRR/return calculations have
+        a clean starting point."""
         zero_row=pd.DataFrame(
             [{col: 0.0 for col in dataframe.columns}],
             index=[dataframe.index[0]-pd.DateOffset(days=1)]
@@ -370,14 +317,9 @@ class Portfolio(ReprMixin):
         irr[0]=0.0
 
         # Day i's IRR input is every cashflow through day i, plus day i's total money as a
-        # closing/terminal value - dataframe[CASHFLOW_COLUMN].iloc[:i+1].to_list()+[...] used to
-        # rebuild that (i+2)-element list from scratch on every iteration (an O(n) copy each
-        # time, so O(n^2) total over the full loop). Since only the last two slots actually
-        # change between iterations - the newly-added cashflow term and the terminal value - a
-        # single preallocated buffer can be extended by two O(1) writes per iteration instead:
-        # position i gets this day's cashflow (permanently, matching what the list-rebuild
-        # would have had there), position i+1 gets this day's terminal value (overwriting the
-        # previous iteration's terminal value, which was never anything but scratch space).
+        # terminal value. Rebuilding that (i+2)-element list from scratch each iteration is
+        # O(n^2); a preallocated buffer instead gets two O(1) writes per iteration - position i
+        # gets this day's cashflow permanently, position i+1 overwrites the prior terminal value.
         buffer=np.empty(n+1, dtype=np.float64)
         for i in range(n):
             buffer[i]=cashflow_values[i]
@@ -411,13 +353,9 @@ class Portfolio(ReprMixin):
         if days_between==0:
             days_between=(dataframe.index[-1]-dataframe.index[0]).days
 
-        # Same formula as calculate_money_earned_between_dates (Profit `offset` days ago minus
-        # Profit `days_between+offset` days ago, 0.0 wherever that date falls outside the
-        # index), but for every row at once via .shift() instead of calling it in a per-row
-        # Python loop. .shift(N) moving N *rows* is calendar-day-offset-equivalent to
-        # idx-pd.DateOffset(days=N) only when the index is a continuous daily range - true here
-        # before resample() (see its own use in the README/example), not after, since resample()
-        # produces a weekly/monthly/etc. index where shifting by rows and by days diverge.
+        # Same formula as calculate_money_earned_between_dates, vectorized via .shift() instead
+        # of a per-row loop. Shifting N rows only matches N calendar days on a continuous daily
+        # index - true before resample(), not after (weekly/monthly rows diverge from row shifts).
         recent_profit=dataframe[self.PROFIT_COLUMN].shift(offset).fillna(0.0)
         older_profit=dataframe[self.PROFIT_COLUMN].shift(days_between+offset).fillna(0.0)
         dataframe[self.DAILY_RETURN_COLUMN]=round((recent_profit-older_profit)/days_between, 2)
