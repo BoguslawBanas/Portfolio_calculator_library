@@ -90,33 +90,34 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md).
     # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while a bond is still
-    # held (bonds don't separately track a realized/dividend component day to day), but diverge
-    # once it matures: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized, nothing left held) drops to 0,
-    # while PROFIT_COLUMN (realized, persists) freezes at its final accrued value - see
-    # _bond_dataframe. DIVIDEND_COLUMN is derived from those two (PROFIT_COLUMN minus
+    # held (bonds don't separately track a realized component day to day), but diverge once it
+    # matures: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized, nothing left held) drops to 0, while
+    # PROFIT_COLUMN (realized, persists) freezes at its final accrued value - see
+    # _bond_dataframe. REALIZED_PROFIT_COLUMN is derived from those two (PROFIT_COLUMN minus
     # PROFIT_WITHOUT_DIVIDEND_COLUMN), not accrued independently - see _bond_dataframe's own
-    # comment for why that's the only way to add a Dividend column (so PolishRetailBonds merges
-    # cleanly alongside Stock, whose own Dividend/Profit/Profit_without_dividends already relate
-    # this way) without introducing a second, inconsistent notion of "realized". ---
+    # comment. No DIVIDEND_COLUMN at all: bonds pay no real per-payment dividend, matching
+    # Commodity/Crypto's own precedent of just not having one when there's nothing real to
+    # report, rather than faking one out of what's actually realized profit. ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
-    # Bond interest/redemption proceeds, recast as Stock's own Dividend column: 0 while a bond is
-    # still held (its accrued interest is entirely embedded in the still-fluctuating
-    # PROFIT_WITHOUT_DIVIDEND_COLUMN, exactly as before this column existed), then - at the same
-    # moment PROFIT_WITHOUT_DIVIDEND_COLUMN drops to 0 (maturity or an early cancellation) - jumps
-    # to and freezes at everything that was ever accrued (interest plus, if is_swapped, the swap
+    # Bond interest/redemption proceeds, matching Stock/Commodity/Crypto's own Realized_profit
+    # column: 0 while a bond is still held (its accrued interest is entirely embedded in the
+    # still-fluctuating PROFIT_WITHOUT_DIVIDEND_COLUMN), then - at the same moment
+    # PROFIT_WITHOUT_DIVIDEND_COLUMN drops to 0 (maturity or an early cancellation) - jumps to and
+    # freezes at everything that was ever accrued (interest plus, if is_swapped, the swap
     # discount), mirroring a bond's real cash flow: nothing is paid out until redemption, then
-    # the whole accrued amount is. See _bond_dataframe.
-    DIVIDEND_COLUMN='Dividend'
-    # Profit still attributable to the position as it stands today, dividends included - here
-    # always equal to PROFIT_COLUMN itself, since bonds have no separate realized-profit stream
-    # to exclude the way Stock/Commodity/Crypto do (see the comment above). Present anyway so
-    # Portfolio's merge (a plain per-column sum) has something to add for every source type.
+    # the whole accrued amount is, recognized once, per event - a locked-in gain, not a real
+    # per-payment dividend. See _bond_dataframe.
+    REALIZED_PROFIT_COLUMN='Realized_profit'
+    # Profit still attributable to the position as it stands today, excluding gain already locked
+    # in by redemption/cancellation (REALIZED_PROFIT_COLUMN) - here always equal to
+    # PROFIT_WITHOUT_DIVIDEND_COLUMN itself, since there's no real dividend to add back (no
+    # DIVIDEND_COLUMN, see above) - the same "no dividends" pattern Commodity/Crypto use.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
-    # Excludes only dividends, keeping bonds' equivalent of realized profit (post-maturity
-    # redemption proceeds) - here always equal to PROFIT_WITHOUT_DIVIDEND_COLUMN itself, since
-    # DIVIDEND_COLUMN=PROFIT_COLUMN-PROFIT_WITHOUT_DIVIDEND_COLUMN by construction (see above).
+    # Excludes only dividends, keeping realized profit - here always equal to PROFIT_COLUMN
+    # itself, since there's no real dividend to exclude - the same "no dividends" pattern
+    # Commodity/Crypto use.
     PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
 
     # --- Input: columns read from buy.csv / interest_rate.csv / inflation_rate.csv / cancel.csv. ---
@@ -240,15 +241,11 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         cache_key=None
         cached=None
         if cache is not None:
-            # 'bonds-v6': the cached value's shape/semantics have changed five times now (a bare
-            # DataFrame, then a (dataframe, type_dataframes) pair, then a 3-tuple adding
-            # invested_by_type, then the same 3-tuple currency-converted per currency_to instead
-            # of always PLN, then the same 3-tuple with each DataFrame gaining DIVIDEND_COLUMN,
-            # now a 4-tuple adding lifetime_invested_by_type) - buy.csv/the rate files aren't
-            # necessarily what changed between versions, so their content hash alone wouldn't
-            # invalidate an old-shaped/wrong-currency/missing-column, same-day entry already on
-            # disk - bump this tag again if the cached shape/semantics ever change again.
-            # currency_to/tax_rate are folded into the key itself (not just this tag) since two
+            # Version tag - bump it whenever this method's cached return shape/semantics change
+            # (each type_dataframe's own column set included), so an old-shaped/missing-column
+            # entry already on disk doesn't get silently misinterpreted; the isinstance check
+            # below is the actual guard. currency_to/tax_rate are folded into the key itself (not
+            # just this tag) since two
             # different target currencies (or tax rates) are both otherwise-valid, simultaneously-
             # live cache entries for the same buy.csv - not a stale-vs-fresh case. cancel.csv is
             # folded in the same way (a sentinel string when absent, since there's nothing to
@@ -257,7 +254,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             # folded in the same sentinel-when-absent way as cancel.csv.
             cancel_component=DiskCache.hash_file(cancel_path) if os.path.exists(cancel_path) else 'no-cancellations'
             bond_types_component=DiskCache.hash_file(bond_types_json) if bond_types_json is not None else 'default-bond-types'
-            cache_key=DiskCache.make_key('bonds-v6', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
+            cache_key=DiskCache.make_key('bonds-v7', currency_to.upper(), tax_rate, bond_types_component, DiskCache.hash_file(buy_path), DiskCache.hash_file(interest_rate_path), DiskCache.hash_file(inflation_rate_path), cancel_component)
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if cached is not None:
@@ -647,12 +644,15 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still carries
         # the (fluctuating-until-redemption) accrued value, then exactly whatever
         # PROFIT_WITHOUT_DIVIDEND_COLUMN just dropped the moment it drops to 0 - so this is always
-        # consistent with PROFIT_COLUMN=PROFIT_WITHOUT_DIVIDEND_COLUMN+DIVIDEND_COLUMN (matching
-        # Stock's own three-column relationship) without a second, separately-computed accrual
-        # that could drift from the two columns above.
-        dataframe[self.DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
-        dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_COLUMN]
-        dataframe[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
+        # consistent with PROFIT_COLUMN=PROFIT_WITHOUT_DIVIDEND_COLUMN+REALIZED_PROFIT_COLUMN
+        # (matching Stock's own three-column relationship, minus the dividend term bonds don't
+        # have) without a second, separately-computed accrual that could drift from the two
+        # columns above. PROFIT_WITHOUT_REALIZED_COLUMN/PROFIT_EXCLUDING_DIVIDEND_COLUMN follow
+        # Commodity/Crypto's own "no dividends" pattern (no DIVIDEND_COLUMN term to add back/
+        # exclude) rather than Stock's three-term one.
+        dataframe[self.REALIZED_PROFIT_COLUMN]=dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
+        dataframe[self.PROFIT_WITHOUT_REALIZED_COLUMN]=dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
+        dataframe[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=dataframe[self.PROFIT_COLUMN]
 
         # This tranche's own cost basis at purchase, untouched by maturity/cancellation zeroing
         # money_invested out above - unlike MONEY_INVESTED_COLUMN itself, this number is never
