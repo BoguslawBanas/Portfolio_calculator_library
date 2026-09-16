@@ -211,8 +211,9 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # from its own total_money_invested) to land on the same total as the lifetime figure.
     assert portfolio.total_money_currently_invested==pytest.approx(portfolio.total_money_invested)
     assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
-    # Both sources contribute a Dividend column now (Stock's per dividend.csv row, bonds' own
-    # derived one - see PolishRetailBonds.DIVIDEND_COLUMN), so it's present regardless.
+    # Stock alone guarantees a Dividend column (always part of its own DataFrame, even at 0 with
+    # no dividend.csv row here) - PolishRetailBonds doesn't produce one at all (it pays no real
+    # dividend), so this is present purely because of the stock source, not "both sources".
     assert Portfolio.DIVIDEND_COLUMN in portfolio.data.columns
     # Unlike Dividend, every source type contributes Profit_without_realized (see each source's
     # own PROFIT_WITHOUT_REALIZED_COLUMN), so it's always present - and, with no sell anywhere in

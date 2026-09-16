@@ -30,10 +30,11 @@ class Portfolio(ReprMixin):
     DIVIDEND_COLUMN='Dividend'
     # Profit still attributable to positions as they stand today - unrealized gain on whatever's
     # still held plus dividends collected along the way - excluding gain/loss already locked in
-    # by a sell (each source's own Realized_profit, where that source tracks one; PolishRetailBonds/
-    # BankAccount fold straight into this since neither has a separate realized-profit stream).
-    # Every source contributes it (see each source's own PROFIT_WITHOUT_REALIZED_COLUMN), so unlike
-    # DIVIDEND_COLUMN this is always present - safe to read via self.data[...] directly.
+    # by a sell (each source's own Realized_profit; BankAccount folds straight into this since it
+    # has no separate realized-profit stream to exclude - every other source, PolishRetailBonds
+    # included, does track one). Every source contributes it (see each source's own
+    # PROFIT_WITHOUT_REALIZED_COLUMN), so unlike DIVIDEND_COLUMN this is always present - safe to
+    # read via self.data[...] directly.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
     # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
     # keeping realized profit (Profit - Dividend). Also always present, same as
