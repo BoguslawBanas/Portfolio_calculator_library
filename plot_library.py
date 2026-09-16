@@ -1,9 +1,8 @@
 """
-Class-based charting layer wiring plotly to a Portfolio instance (see
-portfolio_calculator_library.py): each method's plotly code is driven by whatever
-DataFrame/columns the Portfolio instance already has, computing them via Portfolio's own
-methods first if they aren't there yet. Built on plotly alone (not matplotlib) so every chart
-type - including the candlestick - comes from one library.
+Charting layer wiring plotly to a Portfolio instance: each method is driven by whatever
+DataFrame/columns the Portfolio already has, computing them via Portfolio's own methods first if
+missing. Plotly only (not matplotlib), so every chart type - including candlestick - is one
+library.
 """
 
 import pandas as pd
@@ -19,10 +18,8 @@ COLOR_BASELINE='#c3c2b7'
 
 
 class Plot:
-    # Allowed values for each plot method's enumerated string arguments, one constant per value,
-    # exposed as class constants so a caller can refer to a valid option without retyping the
-    # literal (e.g. kind=Plot.ALLOCATION_PLOT_KIND_HISTOGRAM) and can override a library-wide
-    # default in one place (e.g. Plot.PERFORMANCE_PLOT_RESAMPLE_RULE='M').
+    # Allowed values for each plot method's enumerated args, exposed as constants so a caller
+    # can refer to one without retyping the literal (e.g. kind=Plot.ALLOCATION_PLOT_KIND_HISTOGRAM).
     MONEY_PLOT_KIND_PLOT='plot'
     MONEY_PLOT_KIND_STACKED_PLOT='stacked_plot'
 
@@ -47,12 +44,10 @@ class Plot:
     ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY='directory'
 
     def __init__(self, portfolio: Portfolio):
-        """portfolio: a constructed Portfolio instance (portfolio_calculator_library.py) that
-        has already had calculate_irr()/resample()/calculate_money_earned_between_dates_column()
-        called on it at least once - whichever one a caller needs first, since each of them sets
-        portfolio.portfolio (the working DataFrame money_plot/performance_plot/
-        period_return_bar_plot read from) as a side effect. See the README's Usage example,
-        which always calls calculate_irr() right before constructing a Plot."""
+        """portfolio: a constructed Portfolio that's already had calculate_irr()/resample()/
+        calculate_money_earned_between_dates_column() called at least once - whichever's needed
+        first, since each sets portfolio.portfolio (the DataFrame money_plot/performance_plot/
+        period_return_bar_plot read from) as a side effect."""
         self.portfolio=portfolio
 
     @staticmethod
@@ -123,14 +118,13 @@ class Plot:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected {self.PERFORMANCE_PLOT_KIND_PLOT!r} or {self.PERFORMANCE_PLOT_KIND_CANDLESTICK!r})")
 
     def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
-        """Portfolio revenue (total gain) over time — a simpler, non-IRR read of performance
-        than performance_plot. Reads self.portfolio.data directly rather than
-        self.portfolio.portfolio, so — unlike performance_plot/period_return_bar_plot — it needs
-        no prior calculate_irr()/calculate_money_earned_between_dates_column() call.
-        include_dividends: True (default) — a single 'Revenue' line, Profit as-is (dividends
-        already summed into it); False — two separate lines, revenue with dividends backed out
-        (Profit - Dividend) and dividends on their own. DIVIDEND_COLUMN defaults to 0 below when
-        absent (no Stock/PolishRetailBonds source, the only two asset types that produce one)."""
+        """Portfolio revenue (total gain) over time - a simpler, non-IRR read of performance.
+        Reads self.portfolio.data, not .portfolio, so unlike performance_plot/
+        period_return_bar_plot it needs no prior calculate_irr()/
+        calculate_money_earned_between_dates_column() call.
+        include_dividends: True - single 'Revenue' line (Profit as-is); False - two lines,
+        dividends backed out of revenue and shown separately. DIVIDEND_COLUMN defaults to 0 if
+        absent (no Stock source)."""
         dataframe=self.portfolio.data
         dividends=dataframe.get(self.portfolio.DIVIDEND_COLUMN, pd.Series(0.0, index=dataframe.index))
 
@@ -163,20 +157,17 @@ class Plot:
         self._render(fig, path_to_save_fig)
 
     # Suffix appended to 'distribution_by_ticker'/'distribution_by_directory' to reach the
-    # Portfolio attribute backing each allocation_plot metric.
+    # backing Portfolio attribute for each allocation_plot metric.
     METRIC_ATTRIBUTE_SUFFIXES={ALLOCATION_PLOT_METRIC_INVESTED: '', ALLOCATION_PLOT_METRIC_CURRENT_VALUE: '_current_value', ALLOCATION_PLOT_METRIC_REVENUE: '_revenue'}
 
     def allocation_plot(self, by: str=ALLOCATION_PLOT_BY_TICKER, kind: str=ALLOCATION_PLOT_KIND_PIE, metric: str=ALLOCATION_PLOT_METRIC_INVESTED, max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
-        by: 'ticker' — self.portfolio.distribution_by_ticker(_current_value/_revenue), or
-        'directory' — self.portfolio.distribution_by_directory(_current_value/_revenue).
-        kind: 'pie' — donut chart, or 'histogram' — bar chart. metric='revenue' can produce a
-        negative share (a losing position/source), which a pie chart can't represent
-        meaningfully — prefer kind='histogram' whenever that's possible.
-        metric: 'invested' — allocation by amount invested (cost basis), 'current_value' —
-        allocation by what each position is actually worth today (cost basis still held plus
-        unrealized gain), or 'revenue' — allocation by each position's share of total portfolio
-        gains (unrealized + dividends + realized; can be negative for a losing position)."""
+        by: 'ticker' or 'directory' - self.portfolio.distribution_by_ticker/_directory
+        (_current_value/_revenue).
+        kind: 'pie' (donut) or 'histogram' (bar). metric='revenue' can go negative, which a pie
+        can't represent - prefer 'histogram' there.
+        metric: 'invested' (cost basis), 'current_value' (cost basis + unrealized gain), or
+        'revenue' (share of total gains, can be negative)."""
         if metric not in self.METRIC_ATTRIBUTE_SUFFIXES:
             raise ValueError(f"Unknown allocation_plot metric: {metric!r} (expected {self.ALLOCATION_PLOT_METRIC_INVESTED!r}, {self.ALLOCATION_PLOT_METRIC_CURRENT_VALUE!r}, or {self.ALLOCATION_PLOT_METRIC_REVENUE!r})")
         suffix=self.METRIC_ATTRIBUTE_SUFFIXES[metric]
@@ -200,10 +191,8 @@ class Plot:
 
         if kind==self.ALLOCATION_PLOT_KIND_PIE:
             fig=go.Figure(data=[
-                # sort=False: go.Pie defaults to re-sorting its own slices by value, which would
-                # pull 'Other' out of last place (and away from COLOR_OTHER's slice) whenever the
-                # smaller tickers it lumps together outweigh some single kept ticker - keep the
-                # order already built above (largest ticker first, 'Other' always last) instead.
+                # sort=False: go.Pie re-sorts by value by default, which could pull 'Other' out
+                # of last place (and away from COLOR_OTHER) - keep the order built above instead.
                 go.Pie(labels=labels_sorted, values=values_sorted, hole=0.4, marker=dict(colors=colors), textinfo='label+percent', sort=False)
             ])
             self._render(fig, path_to_save_fig)
@@ -218,12 +207,10 @@ class Plot:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected {self.ALLOCATION_PLOT_KIND_PIE!r} or {self.ALLOCATION_PLOT_KIND_HISTOGRAM!r})")
 
     def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY_TICKER, max_slices: int=7, path_to_save_fig: str=None):
-        """Grouped bar chart comparing each ticker's/directory's allocation by amount invested
-        (cost basis, the default allocation_plot metric) against its allocation by current
-        market value — lets you see at a glance which positions have grown or shrunk relative
-        to what was put in.
-        by: 'ticker' — self.portfolio.distribution_by_ticker/_current_value, or 'directory' —
-        self.portfolio.distribution_by_directory/_current_value."""
+        """Grouped bar chart: allocation by amount invested vs. by current market value, per
+        ticker/directory - shows at a glance which positions grew/shrunk relative to cost basis.
+        by: 'ticker' or 'directory' - self.portfolio.distribution_by_ticker/_directory
+        (/_current_value)."""
         if by==self.ALLOCATION_COMPARISON_PLOT_BY_TICKER:
             invested, current_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_current_value
         elif by==self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY:
@@ -231,8 +218,8 @@ class Plot:
         else:
             raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected {self.ALLOCATION_COMPARISON_PLOT_BY_TICKER!r} or {self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY!r})")
 
-        # Sort/group by the invested metric (the "default" allocation_plot ordering), then carry
-        # the same grouping over to current_value so both bars for a given label line up.
+        # Sort by the invested metric, then carry the same grouping to current_value so both
+        # bars per label line up.
         ordered_keys=sorted(invested, key=invested.get, reverse=True)
         if len(ordered_keys)>max_slices:
             kept_keys, other_keys=ordered_keys[:max_slices], ordered_keys[max_slices:]

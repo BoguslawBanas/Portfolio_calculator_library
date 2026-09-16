@@ -1,9 +1,8 @@
 """
-Class-based stock/ETF calculator: given a directory of buy/sell/dividend transactions plus a
-tickers.json mapping each ISIN to its yfinance ticker and native currency, the constructor
-fetches the FX data and price history and computes the final Money_invested/Profit/Dividend
-DataFrame right away, caching the result on self.data. Every other asset-type calculator in
-this package (PolishRetailBonds, Commodity, Crypto, BankAccount) follows the same shape.
+Stock/ETF calculator: given buy/sell/dividend transactions plus a tickers.json mapping each ISIN
+to its yfinance ticker and native currency, computes the Money_invested/Profit/Dividend
+DataFrame at construction, caching the result on self.data. Every other calculator in this
+package follows the same shape.
 """
 
 import os
@@ -22,23 +21,17 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
-    # Despite the name, this is the *unrealized* component only - current market value of units
-    # still held minus their cost basis - so it excludes REALIZED_PROFIT_COLUMN too, not just
-    # DIVIDEND_COLUMN. Load-bearing as-is: total_current_value/current_value_by_ticker below both
-    # add this to MONEY_INVESTED_COLUMN, which is only correct because realized profit (cash
-    # already taken off the table, not part of what the position is worth today) stays excluded.
-    # PROFIT_EXCLUDING_DIVIDEND_COLUMN below is the column that excludes only dividends.
+    # Despite the name, *unrealized* only - market value of units held minus cost basis, so it
+    # excludes REALIZED_PROFIT_COLUMN too, not just DIVIDEND_COLUMN. Load-bearing: total_current_
+    # value/current_value_by_ticker add this to MONEY_INVESTED_COLUMN, correct only because
+    # realized profit (cash off the table already) stays excluded.
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     DIVIDEND_COLUMN='Dividend'
     REALIZED_PROFIT_COLUMN='Realized_profit'
-    # Profit still attributable to the position as it stands today - unrealized gain on units
-    # still held plus dividends collected along the way - excluding gain/loss already locked in
-    # by a sell (REALIZED_PROFIT_COLUMN). Mirrors PROFIT_WITHOUT_DIVIDEND_COLUMN's naming (Profit
-    # minus one component) for the complementary exclusion.
+    # Unrealized gain on units held plus dividends collected, excluding REALIZED_PROFIT_COLUMN.
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
-    # The literal complement of PROFIT_WITHOUT_DIVIDEND_COLUMN's name: excludes only dividends,
-    # keeping both the unrealized component and REALIZED_PROFIT_COLUMN (Profit - Dividend).
+    # Excludes only dividends, keeping the unrealized component and REALIZED_PROFIT_COLUMN.
     PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
@@ -58,34 +51,24 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
     def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
-        """tickers_json: path to the JSON file mapping each ISIN to {"ticker": <yfinance
-        symbol>, "currency": <instrument currency>} - same shape/role as Commodity/Crypto's own
-        tickers_json parameter, just required here (rather than optional) since Stock has no
-        built-in ticker registry of its own to fall back on.
-        progress_callback: optional zero-arg callback invoked once per ticker, right after that
-        ticker's price history has been fetched and computed — the unit of work a caller (e.g.
-        Portfolio) would want to track progress by, since that fetch is what actually takes time.
-        cache_dir: optional directory to cache each ticker's computed DataFrame in, keyed by
-        ticker/currency/transactions and valid for the day it was written — see
-        cache_library.DiskCache. Also passed down to every Currency this Stock constructs.
-        force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes/re-fetches everything, then overwrites the cache with the fresh result.
-        include_native_currency: when True, also computes each ticker's DataFrame in its own
-        native currency (self.native_data[ticker], self.native_currency[ticker]) alongside the
-        currency_to-converted one in self.data — isolates that ticker's own performance from
-        FX movement against currency_to. Off by default: for a foreign-currency ticker this is
-        a second yfinance fetch/computation (the price history itself doesn't depend on
-        currency_to, but _compute_data doesn't know that, so it's fetched again); for a ticker
-        already in currency_to it's free (the already-computed DataFrame is reused as-is).
-        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
-        PolishRetailBonds instances (Portfolio builds and passes one automatically) so tickers
-        that share a currency pair fetch its FX history once per Portfolio construction instead
-        of once each - see currency_calculator_library.get_cached_currency. None (default):
-        every ticker fetches its own, exactly as before this parameter existed."""
+        """tickers_json: JSON file mapping each ISIN to {"ticker": <yfinance symbol>,
+        "currency": <instrument currency>} - same shape as Commodity/Crypto's own, required here
+        since Stock has no built-in ticker registry to fall back on.
+        progress_callback: optional zero-arg callback, once per ticker, after its price history
+        is fetched/computed.
+        cache_dir: caches each ticker's computed DataFrame, keyed by ticker/currency/
+        transactions, valid for the day written. Also passed to every Currency this constructs.
+        force_refresh: ignores any cached entry, recomputes, overwrites the cache.
+        include_native_currency: also computes each ticker's DataFrame in its own native
+        currency (self.native_data/native_currency), isolating it from FX movement against
+        currency_to. Off by default: a second fetch for a foreign-currency ticker, free for one
+        already in currency_to (the computed DataFrame is reused).
+        currency_cache: optional dict shared across sources (Portfolio passes one automatically)
+        so a shared currency pair is fetched once instead of once per ticker - see
+        get_cached_currency. None: every ticker fetches its own."""
         self.total_money_invested=0.0
-        # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
-        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
-        # BankAccount's own total_money_currently_invested/total_money_invested pair.
+        # Unlike total_money_invested (lifetime gross, never reduced by a sell), this is what's
+        # still held today - a separate, independent computation.
         self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -93,9 +76,9 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
-        # Each ticker's own native currency (tickers.json's currency field) — always populated,
-        # unlike native_data/native_currency below which are opt-in, since Portfolio needs this
-        # for distribution_by_currency regardless of whether include_native_currency is set.
+        # Each ticker's native currency - always populated (unlike the opt-in native_data/
+        # native_currency below), since Portfolio needs it for distribution_by_currency
+        # regardless of include_native_currency.
         self.currency_by_ticker=dict()
         self.native_data=dict()
         self.native_currency=dict()
@@ -105,11 +88,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         dataframes=self._split_by_ticker(self.dataframe)
 
-        # A buy row's money invested depends on that ticker's own FX rate (see _compute_data),
-        # so - same pattern Commodity._compute_data already uses - _compute_data itself returns
-        # the lifetime buy total alongside its DataFrame, computed in the very same pass, rather
-        # than a second iterrows() loop plus a second Currency(...) construction/fetch here
-        # recomputing the identical figure a second time.
+        # _compute_data returns the lifetime buy total alongside its DataFrame (same pattern as
+        # Commodity) rather than recomputing it here via a second pass/FX fetch.
         dataframes_2=list()
         money_invested_by_ticker=dict()
         currently_invested_by_ticker=dict()
@@ -125,23 +105,21 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             money_invested_by_ticker[ticker]=total_buy_invested
             self.total_money_invested+=total_buy_invested
 
-            # Cost basis of what's still held today - unlike total_buy_invested above, reduced by
-            # any sell (see MONEY_INVESTED_COLUMN itself). 0 for a ticker that's been fully sold.
+            # Cost basis still held today - unlike total_buy_invested, reduced by any sell. 0 for
+            # a fully-sold ticker.
             currently_invested_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
             self.total_money_currently_invested+=currently_invested_by_ticker[ticker]
 
-            # Current market value of the position: cost basis still held plus its unrealized gain.
+            # Cost basis still held plus its unrealized gain.
             current_value_by_ticker[ticker]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             self.total_current_value+=current_value_by_ticker[ticker]
 
-            # Revenue: this ticker's all-time gain (unrealized + dividends + realized), which
-            # can be negative for a losing position.
+            # All-time gain (unrealized + dividends + realized), can be negative.
             revenue_by_ticker[ticker]=computed[self.PROFIT_COLUMN].iloc[-1]
             self.total_revenue+=revenue_by_ticker[ticker]
 
             if include_native_currency:
-                # Already the same currency -> computed is already this ticker's native-currency
-                # DataFrame, no need to compute it again.
+                # Already the same currency -> computed already is the native-currency DataFrame.
                 if ticker_currency.upper()==currency_to.upper():
                     self.native_data[ticker]=computed
                 else:
@@ -167,10 +145,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
     @staticmethod
     def ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
-        """Looks up a single ticker's declared currency from tickers_json. Only works if every
-        row in dataframe shares the same ticker/isin - named ticker_currency, not
-        get_ticker_currency, matching the rest of this library's public methods, none of which
-        use a get_ prefix (merge, count_tickers, ...)."""
+        """Looks up one ticker's declared currency from tickers_json. Requires every row in
+        dataframe to share the same ticker/isin."""
         with open(path_to_json_file, "r") as f:
             j=json.load(f)
             currency=j[dataframe[isin_column_name].iloc[0]]['currency']
@@ -183,10 +159,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
-        # A nonexistent directory would otherwise surface as a raw FileNotFoundError straight
-        # from os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established
-        # clear-error convention, like the yfinance-empty-history ValueErrors already in place
-        # (README Roadmap item).
+        # A nonexistent directory would otherwise raise a raw FileNotFoundError from os.listdir
+        # instead of this library's own clear-error convention.
         if not os.path.isdir(directory):
             raise ValueError(f"No such directory: {directory!r}")
 
@@ -208,21 +182,17 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
     def _compute_data(self, dataframe: pd.DataFrame, currency_from: str, currency_to: str, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None) -> tuple:
         """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
-        amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
-        distribution_by_ticker/total_money_invested. Returned from here (same pattern
-        Commodity._compute_data already uses) instead of recomputed independently in __init__
-        via a second iterrows() pass and a second Currency(...) fetch for the same ticker/date
-        range - this loop already computes it below while building the full DataFrame."""
+        amount ever bought ('buy' rows only, unreduced by sells) - what __init__ needs for
+        distribution_by_ticker/total_money_invested, computed here (same pattern as Commodity)
+        rather than in a second pass over __init__."""
         start_date=dataframe.index.min()
         ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            # 'stock-v2': bumped from 'stock' when this method started returning a (dataframe,
-            # total_buy_invested) tuple instead of a bare DataFrame - the isinstance check below
-            # guards a cache entry from the older, bare-DataFrame format the same way
-            # Commodity/PolishRetailBonds guard their own tuple cache formats.
+            # Version tag - the isinstance check below guards a cache entry from an older,
+            # differently-shaped format.
             cache_key=DiskCache.make_key('stock-v2', ticker_name, currency_from, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
@@ -233,10 +203,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
-        # yfinance returns an empty DataFrame (not an error) for an invalid/delisted ticker,
-        # rather than raising - left unchecked, all_days.join(ticker_data) below would silently
-        # produce a Close column of all-NaN that ffill() can't fill from anything, rather than
-        # failing loudly at construction time (README Roadmap item).
+        # yfinance returns an empty DataFrame, not an error, for an invalid/delisted ticker -
+        # unchecked, all_days.join(ticker_data) below would silently produce an all-NaN column.
         if ticker_data.empty:
             raise ValueError(f"yfinance returned no price history for ticker {ticker_name!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
@@ -248,23 +216,17 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         data=all_days.join(ticker_data).ffill()
         data[self.CLOSE_COLUMN]=data[self.CLOSE_COLUMN]*currency.data[self.CLOSE_COLUMN]
 
-        # Transactions must be walked in date order (not CSV/file order) since a sell needs
-        # the running average cost basis built up by every buy that precedes it in time -
-        # inherently sequential, so unlike the rest of this method it can't be reduced to a
-        # single vectorized expression. What's vectorized instead: pulling every column (and
-        # each transaction's same-day FX rate) out as plain numpy arrays once up front, and
-        # accumulating into numpy arrays by integer position instead of repeated
-        # .iterrows()/.loc[label] calls inside the loop - .iterrows() rebuilds a pandas Series
-        # per row and .loc[label] does a label lookup per call, both far more expensive than a
-        # numpy array index. The arithmetic, rounding, and iteration order are unchanged.
+        # Walked in date order, not file order - a sell needs the running average cost basis
+        # built by every preceding buy, so it's inherently sequential. Vectorized otherwise:
+        # columns/FX pulled out as numpy arrays up front, accumulated by integer position
+        # instead of .iterrows()/.loc[label] per row (both far more expensive than an array
+        # index). Arithmetic, rounding, and iteration order unchanged.
         sorted_df=dataframe.sort_index(kind='stable')
         n=len(sorted_df)
 
         def column_or_nan(column: str) -> np.ndarray:
-            # A source directory doesn't have to carry every CSV (e.g. buy.csv alone, no
-            # sells/dividends yet) - a column only absent because its CSV never existed is
-            # never actually read below (each is only used under its own state branch), same
-            # as when the original per-row code simply never reached that branch.
+            # A source directory needn't carry every CSV (e.g. just buy.csv) - a missing
+            # column is only ever read under its own state branch below, so it's never touched.
             if column in sorted_df.columns:
                 return sorted_df[column].to_numpy(dtype=float)
             return np.full(n, np.nan)
@@ -276,12 +238,11 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         sell_tax=column_or_nan(self.CSV_SELL_TAX_COLUMN)
         dividend=column_or_nan(self.CSV_DIVIDEND_COLUMN)
         dividend_tax=column_or_nan(self.CSV_DIVIDEND_TAX_COLUMN)
-        # One vectorized lookup for every transaction's same-day FX rate, instead of one
-        # currency.data.loc[idx, ...] call per row.
+        # One vectorized FX lookup for every transaction, instead of one .loc[idx, ...] per row.
         fx=currency.data.loc[sorted_df.index, self.CLOSE_COLUMN].to_numpy(dtype=float)
 
-        # Each transaction's integer position in data's (continuous, daily) index, so the loop
-        # below can write by position instead of by date label.
+        # Each transaction's integer position in data's daily index, so the loop below writes
+        # by position instead of by date label.
         position=data.index.get_indexer(sorted_df.index)
         if (position<0).any():
             missing=sorted_df.index[position<0]
@@ -317,8 +278,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
                 if units_sold>running_units+1e-9:
                     raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {sorted_df.index[i].date()}: only {running_units} units held.")
 
-                # Remove cost basis in proportion to the units sold so the average price of the
-                # remaining position (Money_invested/Units) is unchanged by a partial sell.
+                # Remove cost basis proportional to units sold, so the remaining position's
+                # average price is unchanged by a partial sell.
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 

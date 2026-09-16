@@ -1,28 +1,19 @@
 """
-Class-based commodity calculator, built the same way as stock_calculator_library.Stock but
-scoped to physical commodities (gold, silver, ...) instead of stocks/ETFs: a set of buy/sell
-transactions turned into a daily investment/profit DataFrame. Commodities don't pay dividends,
-so there's no Dividend column — Profit is simply unrealized plus realized profit, the same two
-terms Stock uses minus the dividend one.
+Commodity calculator, built the same way as Stock but scoped to physical commodities (gold,
+silver, ...): buy/sell transactions turned into a daily investment/profit DataFrame. No
+dividends, so no Dividend column - Profit is unrealized plus realized, the same two terms Stock
+uses minus dividends.
 
-Unlike Stock, buy.csv carries no price_of_unit column - the cost basis is instead the actual
-amount paid, recorded directly via money_invested/currency (the amount and the currency it was
-paid in - e.g. a coin dealer's price, which can diverge from the futures market price by more
-than a flat percentage, unlike a simple fee/premium markup), converted to currency_to via that
-row's own currency's FX rate on its own transaction date - not derived from yfinance at all.
-buy.csv also carries amount_of_units alongside a unit column (CSV_UNIT_COLUMN) naming the
-physical unit that amount is denominated in ('troy_ounce' or 'gram', see UNIT_TO_GRAMS) - the
-amount is converted internally, via grams, to whatever unit that symbol's own yfinance ticker
-actually quotes (troy ounce for gold/silver/platinum/palladium, pound for copper - see
-QUOTE_UNIT_GRAMS), so a buy recorded in either unit lands on the same physical quantity, tracked
-purely for marking the held position to market (Units * that day's yfinance close) - money_invested
-is what actually sets the cost basis, independent of the unit conversion.
+Unlike Stock, buy.csv carries no price_of_unit - cost basis is the actual amount paid, recorded
+directly via money_invested/currency (e.g. a coin dealer's price, which can diverge from the
+futures price by more than a flat percentage), converted via that currency's own FX rate on the
+row's own date - not derived from yfinance at all. buy.csv also carries amount_of_units plus a
+unit column (CSV_UNIT_COLUMN, 'troy_ounce' or 'gram') converted via grams to whatever unit that
+symbol's yfinance ticker actually quotes (see QUOTE_UNIT_GRAMS) - purely to size the held
+position for marking to market, with no bearing on cost basis.
 
-sell.csv is unchanged: it carries no price of its own - every sale's proceeds are still the
-yfinance close price on its own transaction date (the same series used to mark the held position
-to market), not an amount the user records by hand. Its amount_of_units is already in that same
-native quote unit (it's selling off units tracked that way internally), so it needs no unit
-column/conversion of its own.
+sell.csv is unchanged: no price of its own - proceeds are still that day's yfinance close, not a
+recorded amount. Its amount_of_units is already in the native quote unit, no unit column needed.
 """
 
 import os
@@ -44,24 +35,19 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
     REALIZED_PROFIT_COLUMN='Realized_profit'
-    # Profit still attributable to the position as it stands today - unrealized gain on units
-    # still held (no Dividend column here, see module docstring) - excluding gain/loss already
-    # locked in by a sell (REALIZED_PROFIT_COLUMN). Mirrors Stock's own column of the same name.
+    # Unrealized gain on units still held, excluding REALIZED_PROFIT_COLUMN. Mirrors Stock's own
+    # column (no Dividend term here, see module docstring).
     PROFIT_WITHOUT_REALIZED_COLUMN='Profit_without_realized'
-    # No dividends to exclude here - always equal to PROFIT_COLUMN. Present anyway so it lines up
-    # with Stock's own PROFIT_EXCLUDING_DIVIDEND_COLUMN once merged into Portfolio.
+    # No dividends to exclude - always equals PROFIT_COLUMN.
     PROFIT_EXCLUDING_DIVIDEND_COLUMN='Profit_excluding_dividends'
     UNITS_COLUMN='Units'
     CLOSE_COLUMN='Close'
 
-    # --- Ingestion tag: synthesized while loading (from the CSV filename), not read from
-    # inside a CSV cell — but consumed everywhere exactly like an input column. ---
+    # --- Ingestion tag, synthesized from the CSV filename, consumed like an input column. ---
     SOURCE_TYPE_COLUMN='state'
 
-    # --- Input: columns read from the per-transaction CSVs (buy.csv, sell.csv, ...). buy's cost
-    # basis is money_invested/currency, recorded directly rather than priced off yfinance; sell
-    # still has no price of its own - priced off yfinance's own close price on that transaction's
-    # date (see module docstring). ---
+    # --- Input: columns read from the per-transaction CSVs. buy's cost basis is money_invested/
+    # currency, recorded directly; sell still has no price of its own (yfinance close). ---
     CSV_TICKER_COLUMN='symbol'
     CSV_DATE_COLUMN='date'
     CSV_AMOUNT_OF_UNITS_COLUMN='amount_of_units'
@@ -70,10 +56,9 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_CURRENCY_COLUMN='currency'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
-    # Every one of these yfinance futures tickers is USD-quoted, so unlike Stock/Bonds there's
-    # no per-symbol currency to look up — QUOTE_CURRENCY below covers all of them. Built-in
-    # defaults, always available with no configuration - tickers_json (below) can add to or
-    # override these without editing this dict (README Roadmap item).
+    # Every yfinance futures ticker here is USD-quoted, so unlike Stock/Bonds there's no
+    # per-symbol currency to look up - QUOTE_CURRENCY covers all of them. tickers_json can
+    # add/override entries without editing this dict.
     TICKERS={
         'gold': 'GC=F',
         'silver': 'SI=F',
@@ -83,17 +68,14 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
     }
     QUOTE_CURRENCY='usd'
 
-    # A buy.csv row's amount_of_units/unit is converted to grams, then to the symbol's own
-    # quote_unit_grams entry, so a buy recorded in either supported unit lands on the same
-    # physical quantity (and so the same cost basis) regardless of which one was used.
+    # amount_of_units/unit is converted to grams, then to the symbol's own quote_unit_grams
+    # entry, so a buy recorded in either supported unit lands on the same physical quantity.
     GRAMS_PER_TROY_OUNCE=31.1034768
     GRAMS_PER_POUND=453.59237
     UNIT_TO_GRAMS={'troy_ounce': GRAMS_PER_TROY_OUNCE, 'gram': 1.0}
-    # The physical unit each symbol's own yfinance futures ticker actually quotes a price per -
-    # troy ounce for every metal here except copper, which yfinance quotes per pound. Built-in
-    # defaults matching TICKERS above - a tickers_json entry for a new symbol must carry its own
-    # quote_unit (one of QUOTE_UNIT_NAME_TO_GRAMS's keys) alongside its ticker, since there's no
-    # way to infer what unit an arbitrary new yfinance ticker quotes a price per.
+    # The physical unit each symbol's yfinance futures ticker quotes a price per - troy ounce for
+    # every metal here except copper (pound). A tickers_json entry for a new symbol must carry
+    # its own quote_unit alongside its ticker - there's no way to infer it otherwise.
     QUOTE_UNIT_GRAMS={
         'gold': GRAMS_PER_TROY_OUNCE,
         'silver': GRAMS_PER_TROY_OUNCE,
@@ -101,55 +83,38 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         'palladium': GRAMS_PER_TROY_OUNCE,
         'copper': GRAMS_PER_POUND,
     }
-    # Named units a tickers_json entry's own quote_unit can reference - a superset of
-    # UNIT_TO_GRAMS (which is only the units a buy.csv row itself may specify), since a quoted
-    # unit like 'pound' (copper) is never something a buy.csv row is recorded in directly.
+    # Named units a tickers_json quote_unit can reference - a superset of UNIT_TO_GRAMS (only the
+    # units a buy.csv row itself may specify; 'pound' is never recorded in a row directly).
     QUOTE_UNIT_NAME_TO_GRAMS={'troy_ounce': GRAMS_PER_TROY_OUNCE, 'pound': GRAMS_PER_POUND, 'gram': 1.0}
 
     def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
-        """directory_path: a directory of per-transaction-state CSVs (buy.csv, sell.csv,
-        sell_tax.csv), state inferred from filename, one row per transaction. Each row's
-        CSV_TICKER_COLUMN value must be one of self.tickers's keys (e.g. 'gold', 'silver' from
-        the built-in TICKERS, or a custom one added via tickers_json).
-        buy.csv rows carry amount_of_units alongside CSV_UNIT_COLUMN ('troy_ounce' or 'gram' -
-        see UNIT_TO_GRAMS, used only to size the held position) plus CSV_MONEY_INVESTED_COLUMN/
-        CSV_CURRENCY_COLUMN - the actual amount paid and the currency it was paid in, converted
-        to currency_to via that currency's own FX rate on the row's own transaction date. Unlike
-        buy.csv, sell.csv carries no price of its own: every sale's proceeds are always that
-        day's own yfinance close (see module docstring), not a manually recorded one - its rows
-        carry just amount_of_units (already in that symbol's own native quote unit, same as the
-        units tracked internally).
+        """directory_path: per-transaction-state CSVs (buy.csv, sell.csv, sell_tax.csv), state
+        from filename. CSV_TICKER_COLUMN must be one of self.tickers's keys.
+        buy.csv rows carry amount_of_units plus CSV_UNIT_COLUMN ('troy_ounce' or 'gram' - see
+        UNIT_TO_GRAMS, sizes the held position only) and CSV_MONEY_INVESTED_COLUMN/
+        CSV_CURRENCY_COLUMN - the amount paid and its currency, converted to currency_to via
+        that currency's own FX rate on the row's date. sell.csv carries no price of its own:
+        proceeds are always that day's yfinance close, just amount_of_units (native quote unit).
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
-        tickers_json: optional path to a JSON file of {symbol: {"ticker": <yfinance futures
-        ticker>, "quote_unit": <one of QUOTE_UNIT_NAME_TO_GRAMS's keys>}} - e.g. {"tin":
-        {"ticker": "TIN=F", "quote_unit": "pound"}} - merged on top of the built-in
-        TICKERS/QUOTE_UNIT_GRAMS (an entry here for an existing symbol overrides the built-in
-        one), so a caller can track another commodity without editing this module's source.
-        None (default): self.tickers/self.quote_unit_grams are exactly TICKERS/QUOTE_UNIT_GRAMS.
-        progress_callback: optional zero-arg callback invoked once per symbol, right after that
-        symbol's price history has been fetched and computed — the unit of work a caller (e.g.
-        Portfolio) would want to track progress by, since that fetch is what actually takes
-        time.
-        cache_dir: optional directory to cache each symbol's computed DataFrame in, keyed by
-        symbol/currency/transactions and valid for the day it was written — see
-        cache_library.DiskCache. Also passed down to every Currency this Commodity constructs.
-        force_refresh: when True (and cache_dir is set), ignores any cached entry and
-        recomputes/re-fetches everything, then overwrites the cache with the fresh result.
-        include_native_currency: when True, also computes each symbol's DataFrame in
-        QUOTE_CURRENCY (self.native_data[symbol], self.native_currency[symbol]) alongside the
-        currency_to-converted one in self.data — isolates that symbol's own performance from
-        FX movement against currency_to. Free when currency_to is already QUOTE_CURRENCY (the
-        already-computed DataFrame is reused); otherwise a second fetch/computation.
-        currency_cache: optional dict shared across this and/or other Stock/Commodity/Crypto/
-        PolishRetailBonds instances (Portfolio builds and passes one automatically) so symbols
-        that share a currency pair fetch its FX history once per Portfolio construction instead
-        of once each - see currency_calculator_library.get_cached_currency. None (default):
-        every symbol fetches its own, exactly as before this parameter existed."""
+        tickers_json: optional {symbol: {"ticker": <yfinance futures ticker>, "quote_unit":
+        <QUOTE_UNIT_NAME_TO_GRAMS key>}} merged on top of the built-in TICKERS/QUOTE_UNIT_GRAMS,
+        so a caller can track another commodity without editing this module. None: self.tickers/
+        self.quote_unit_grams are exactly TICKERS/QUOTE_UNIT_GRAMS.
+        progress_callback: optional zero-arg callback, once per symbol, after its price history
+        is fetched/computed.
+        cache_dir: caches each symbol's computed DataFrame, keyed by symbol/currency/
+        transactions, valid for the day written. Also passed to every Currency this constructs.
+        force_refresh: ignores any cached entry, recomputes, overwrites the cache.
+        include_native_currency: also computes each symbol's DataFrame in QUOTE_CURRENCY
+        (self.native_data/native_currency), isolating it from FX movement against currency_to.
+        Free when currency_to is already QUOTE_CURRENCY; otherwise a second fetch.
+        currency_cache: optional dict shared across sources (Portfolio passes one automatically)
+        so a shared currency pair is fetched once instead of once per symbol - see
+        get_cached_currency. None: every symbol fetches its own."""
         self.tickers, self.quote_unit_grams=self._load_tickers(tickers_json)
         self.total_money_invested=0.0
-        # Unlike total_money_invested (lifetime gross ever bought, never reduced by a sell), this
-        # is what's still held today - a separate, independent computation, same as PolishRetailBonds/
-        # BankAccount's own total_money_currently_invested/total_money_invested pair.
+        # Unlike total_money_invested (lifetime gross, never reduced by a sell), this is what's
+        # still held today - a separate, independent computation.
         self.total_money_currently_invested=0.0
         self.total_current_value=0.0
         self.total_revenue=0.0
@@ -157,9 +122,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
-        # Every symbol here quotes in QUOTE_CURRENCY, so this is trivial (unlike Stock's, which
-        # varies per ticker) — kept as a per-symbol dict anyway so Portfolio's
-        # distribution_by_currency aggregation has one uniform shape to read across every source.
+        # Trivial (every symbol quotes in QUOTE_CURRENCY, unlike Stock's per-ticker currency) -
+        # kept as a dict anyway so Portfolio's distribution_by_currency has one uniform shape.
         self.currency_by_ticker=dict()
         self.native_data=dict()
         self.native_currency=dict()
@@ -167,11 +131,9 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
         dataframes=self._split_by_ticker(self.dataframe)
 
-        # A buy row's money invested depends on _compute_data's own yfinance fetch (see its
-        # docstring) rather than a price the CSV carries directly, so unlike Stock/Crypto there's
-        # no cheap way to recompute distribution_by_ticker's lifetime-invested figure in a
-        # separate, lightweight pass over the raw CSV rows first - _compute_data is called once
-        # per symbol below and returns that lifetime total alongside its DataFrame instead.
+        # A buy row's own FX conversion (see _compute_data) means there's no cheap way to
+        # recompute distribution_by_ticker's lifetime-invested figure separately, so
+        # _compute_data returns that lifetime total alongside its DataFrame instead.
         dataframes_2=list()
         money_invested_by_symbol=dict()
         currently_invested_by_symbol=dict()
@@ -186,16 +148,16 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
             money_invested_by_symbol[symbol]=total_buy_invested
             self.total_money_invested+=total_buy_invested
 
-            # Cost basis of what's still held today - unlike total_buy_invested above, reduced by
-            # any sell (see MONEY_INVESTED_COLUMN itself). 0 for a symbol that's been fully sold.
+            # Cost basis still held today - unlike total_buy_invested, reduced by any sell. 0 for
+            # a fully-sold symbol.
             currently_invested_by_symbol[symbol]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
             self.total_money_currently_invested+=currently_invested_by_symbol[symbol]
 
-            # Current market value of the position: cost basis still held plus its unrealized gain.
+            # Cost basis still held plus its unrealized gain.
             current_value_by_symbol[symbol]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]+computed[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             self.total_current_value+=current_value_by_symbol[symbol]
 
-            # Revenue: this symbol's all-time gain (unrealized + realized), which can be negative.
+            # All-time gain (unrealized + realized), can be negative.
             revenue_by_symbol[symbol]=computed[self.PROFIT_COLUMN].iloc[-1]
             self.total_revenue+=revenue_by_symbol[symbol]
 
@@ -225,9 +187,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
     @classmethod
     def _load_tickers(cls, tickers_json: str=None) -> tuple:
-        """(tickers, quote_unit_grams): {symbol: yfinance ticker} and {symbol: grams per quoted
-        unit}, each starting from the built-in TICKERS/QUOTE_UNIT_GRAMS and merging tickers_json
-        (if given) on top - see __init__'s docstring."""
+        """(tickers, quote_unit_grams): TICKERS/QUOTE_UNIT_GRAMS merged with tickers_json - see
+        __init__'s docstring."""
         tickers=dict(cls.TICKERS)
         quote_unit_grams=dict(cls.QUOTE_UNIT_GRAMS)
         if tickers_json is not None:
@@ -240,10 +201,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
-        # A nonexistent directory would otherwise surface as a raw FileNotFoundError straight
-        # from os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established
-        # clear-error convention, like the yfinance-empty-history ValueErrors already in place
-        # (README Roadmap item).
+        # A nonexistent directory would otherwise raise a raw FileNotFoundError from os.listdir
+        # instead of this library's own clear-error convention.
         if not os.path.isdir(directory):
             raise ValueError(f"No such directory: {directory!r}")
 
@@ -265,13 +224,10 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
     def _compute_data(self, dataframe: pd.DataFrame, currency_to: str, cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None) -> tuple:
         """Returns (computed_dataframe, total_buy_invested): total_buy_invested is the lifetime
-        amount ever bought (only 'buy' rows, unreduced by later sells) - what __init__ needs for
-        distribution_by_ticker/total_money_invested (see CLAUDE.md's Stock architecture notes on
-        that lifetime-vs-currently-held split). Returned from here, rather than recomputed
-        independently in __init__ the way Stock/Crypto still do straight from each buy row's own
-        CSV money_invested, because converting each buy row's own currency to currency_to needs
-        this method's own per-row Currency lookups below - recomputing it separately in __init__
-        would mean re-fetching/re-looking-up the same FX rates a second time."""
+        amount ever bought ('buy' rows only, unreduced by sells) - what __init__ needs for
+        distribution_by_ticker/total_money_invested. Returned here rather than recomputed in
+        __init__, since converting each row's currency needs this method's own Currency lookups
+        below."""
         start_date=dataframe.index.min()
         symbol=dataframe[self.CSV_TICKER_COLUMN].iloc[0]
         ticker_name=self.tickers[symbol]
@@ -279,10 +235,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
         if cache is not None:
-            # Version tag - bump it whenever this method's cached return shape/semantics change,
-            # so an old-shaped entry doesn't get silently misinterpreted; the isinstance check
-            # below is the actual guard, the same way PolishRetailBonds guards its own tuple
-            # cache format.
+            # Version tag - the isinstance check below guards a cache entry from an older,
+            # differently-shaped format.
             cache_key=DiskCache.make_key('commodity-v4', ticker_name, currency_to, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
@@ -293,10 +247,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
 
         ticker=yf.Ticker(ticker_name)
         ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
-        # yfinance returns an empty DataFrame (not an error) for an invalid futures ticker,
-        # rather than raising - left unchecked, all_days.join(ticker_data) below would silently
-        # produce a Close column of all-NaN that ffill() can't fill from anything, rather than
-        # failing loudly at construction time (README Roadmap item).
+        # yfinance returns an empty DataFrame, not an error, for an invalid futures ticker -
+        # unchecked, all_days.join(ticker_data) below would silently produce an all-NaN column.
         if ticker_data.empty:
             raise ValueError(f"yfinance returned no price history for ticker {ticker_name!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.drop(columns=['High', 'Low', 'Open', 'Volume', 'Repaired?'], inplace=True)
@@ -308,13 +260,10 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         data=all_days.join(ticker_data).ffill()
         data[self.CLOSE_COLUMN]=data[self.CLOSE_COLUMN]*currency.data[self.CLOSE_COLUMN]
 
-        # Transactions must be walked in date order (not CSV/file order) since a sell needs
-        # the running average cost basis built up by every buy that precedes it in time -
-        # inherently sequential, so it can't be reduced to a single vectorized expression (see
-        # Stock._compute_data, same pattern). What's vectorized instead: pulling every column
-        # (and each transaction's same-day FX rate) out as plain numpy arrays once up front,
-        # and accumulating into numpy arrays by integer position instead of repeated
-        # .iterrows()/.loc[label] calls inside the loop.
+        # Walked in date order, not file order - a sell needs the running average cost basis
+        # built by every preceding buy, so it's inherently sequential (see Stock, same pattern).
+        # Vectorized otherwise: columns/FX pulled out as numpy arrays up front, accumulated by
+        # integer position instead of .iterrows()/.loc[label] per row.
         sorted_df=dataframe.sort_index(kind='stable')
         n=len(sorted_df)
 
@@ -341,12 +290,9 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
             missing=sorted_df.index[position<0]
             raise KeyError(f"Transaction date(s) {list(missing)} for {ticker_name} fall outside the computed daily range.")
 
-        # Every sell's own market price - the same already currency_to-converted Close series
-        # used for unrealized profit below - looked up by transaction row via position, exactly
-        # like every other per-row column here (no separate FX step needed for it, unlike
-        # sell_tax below, since data[CLOSE_COLUMN] above is already converted to currency_to).
-        # A buy's own cost basis no longer comes from this at all - see money_invested_native/
-        # row_currency below instead.
+        # Every sell's own market price - the already currency_to-converted Close series, looked
+        # up by position (no separate FX step needed, unlike sell_tax below). A buy's cost basis
+        # doesn't come from this at all - see money_invested_native/row_currency below.
         market_price=data[self.CLOSE_COLUMN].to_numpy()[position]
 
         money_invested_by_day=np.zeros(len(data))
@@ -356,12 +302,9 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         running_units=0.0
         running_money_invested=0.0
         total_buy_invested=0.0
-        # Memoizes each currency code seen in a buy row to the Currency object converting it to
-        # currency_to (itself routed through get_cached_currency/currency_cache, so a pair also
-        # used elsewhere - another symbol, another source - is still only fetched once) - a buy
-        # row's own currency can differ from QUOTE_CURRENCY/from another buy row's own currency
-        # (e.g. one purchase paid in eur, another in usd), unlike everything else in this method,
-        # which only ever converts via the single QUOTE_CURRENCY -> currency_to currency above.
+        # Memoizes each currency code seen in a buy row to its Currency object (routed through
+        # get_cached_currency, so a pair used elsewhere is still fetched once) - a buy row's own
+        # currency can differ from QUOTE_CURRENCY or from another row's (e.g. eur vs usd).
         buy_currency_objects=dict()
 
         for i in range(n):
@@ -395,8 +338,8 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
                 if units_sold>running_units+1e-9:
                     raise ValueError(f"Cannot sell {units_sold} units of {ticker_name} on {sorted_df.index[i].date()}: only {running_units} units held.")
 
-                # Remove cost basis in proportion to the units sold so the average price of the
-                # remaining position (Money_invested/Units) is unchanged by a partial sell.
+                # Remove cost basis proportional to units sold, so the remaining position's
+                # average price is unchanged by a partial sell.
                 fraction_sold=units_sold/running_units if running_units>1e-9 else 0.0
                 money_invested_removed=round(running_money_invested*fraction_sold, 2)
 
