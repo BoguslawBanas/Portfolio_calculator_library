@@ -322,10 +322,10 @@ class Portfolio(IrrMixin, ReprMixin):
         end_date_profit=0.0
 
         if start_date.strftime('%Y-%m-%d') in dataframe.index:
-            start_date_profit=dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
+            start_date_profit=float(dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
 
         if end_date.strftime('%Y-%m-%d') in dataframe.index:
-            end_date_profit=dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
+            end_date_profit=float(dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
 
         return end_date_profit-start_date_profit
 
