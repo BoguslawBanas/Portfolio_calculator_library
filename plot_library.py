@@ -117,6 +117,32 @@ class Plot:
         else:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected {self.PERFORMANCE_PLOT_KIND_PLOT!r} or {self.PERFORMANCE_PLOT_KIND_CANDLESTICK!r})")
 
+    def benchmark_comparison_plot(self, benchmark, benchmark_name: str='Benchmark', resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY, path_to_save_fig: str=None):
+        """Overlays this portfolio's own IRR against a Benchmark's - same cash-flow timing,
+        different asset - so the gap between the lines is the portfolio's edge (or lag) over
+        putting the same money into the benchmark instead.
+        benchmark: a Benchmark from self.portfolio.simulate_benchmark(ticker, ...).
+        benchmark_name: legend label for the benchmark's line.
+        resample_rule: both IRR series are resampled (ffill) to this rule, same as
+        performance_plot."""
+        if self.portfolio.IRR_COLUMN not in self.portfolio.portfolio.columns:
+            self.portfolio.calculate_irr()
+        # unlike self.portfolio, benchmark may have no .portfolio yet at all - hasattr guards
+        # that first-ever call instead of raising.
+        if not hasattr(benchmark, 'portfolio') or benchmark.IRR_COLUMN not in benchmark.portfolio.columns:
+            benchmark.calculate_irr()
+
+        portfolio_irr=self.portfolio.portfolio[self.portfolio.IRR_COLUMN].resample(resample_rule).ffill()
+        benchmark_irr=benchmark.portfolio[benchmark.IRR_COLUMN].resample(resample_rule).ffill()
+
+        fig=go.Figure(data=[
+            go.Scatter(x=portfolio_irr.index, y=portfolio_irr, mode='lines', name='Portfolio', line=dict(color=CATEGORICAL_COLORS[0])),
+            go.Scatter(x=benchmark_irr.index, y=benchmark_irr, mode='lines', name=benchmark_name, line=dict(color=CATEGORICAL_COLORS[1])),
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)", legend=dict(x=0, y=1))
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
     def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
         """Portfolio revenue (total gain) over time - a simpler, non-IRR read of performance.
         Reads self.portfolio.data, not .portfolio, so unlike performance_plot/
@@ -197,9 +223,15 @@ class Plot:
             ])
             self._render(fig, path_to_save_fig)
         elif kind==self.ALLOCATION_PLOT_KIND_HISTOGRAM:
+            if metric==self.ALLOCATION_PLOT_METRIC_REVENUE:
+                # Revenue can go negative - flag losing positions by sign (same convention as
+                # period_return_bar_plot) instead of the categorical per-slice palette above.
+                colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values_sorted]
             fig=go.Figure(data=[
                 go.Bar(x=labels_sorted, y=values_sorted, marker_color=colors)
             ])
+            if metric==self.ALLOCATION_PLOT_METRIC_REVENUE:
+                fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
             fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)")
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)

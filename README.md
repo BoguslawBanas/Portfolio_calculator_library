@@ -4,7 +4,7 @@ A Python library for tracking the performance of an investment portfolio, combin
 
 ## Features
 
-The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
+The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`, `Benchmark`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
 
 ### 📈 `stock_calculator_library.Stock`
 
@@ -57,12 +57,23 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - builds one shared `currency_cache` per construction and passes it to every `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` source it builds, so a currency pair needed by more than one source/ticker/holding is only fetched once (see `get_cached_currency` under `Currency` above)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
+- `simulate_benchmark(symbol, asset_type='stock', ...)` — "what if this same money had gone into `symbol` (e.g. `SPY`, or `'gold'`/`'bitcoin'` with `asset_type='commodities'`/`'crypto'`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison. `asset_type='stock'` (the default) takes `symbol` as a raw `yfinance` ticker directly, same as before; `'commodities'`/`'crypto'` instead resolve a friendly name through `Commodity.TICKERS`/`Crypto.TICKERS` (optionally extended via `tickers_json`), the same way a real commodities/crypto source would
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
 - optional `force_refresh` — with `cache_dir` set, forces a one-off cold start (ignores any cached entry, then overwrites it with the fresh result) without having to clear `cache_dir` yourself
 - optional `include_native_currency` — collects each `Stock`/`Commodity`/`Crypto` ticker/symbol's native-currency DataFrame into `self.native_data`/`self.native_currency`, alongside the always-converted `self.data` every other feature above works from. `PolishRetailBonds`/`BankAccount` are left out — both are already single-currency with no conversion step to opt out of
 - optional `commodity_tickers_json`/`crypto_tickers_json` — passed straight through to every `'commodities'`/`'crypto'` source's own `tickers_json` (see `Commodity`/`Crypto` above), never required unlike `tickers_json` above
+
+### ⚖️ `benchmark_calculator_library.Benchmark`
+
+Simulates buying a single ticker with the exact same day-by-day cash contributions a `Portfolio` actually made — not its lifetime total invested on day one, but each real buy/sell mirrored on its own date (e.g. the same $200/month a portfolio actually spent across its real holdings, spent on `SPY` instead on those same dates) — so its IRR is directly comparable to `Portfolio.calculate_irr()`'s own. Not meant to be constructed directly — see `Portfolio.simulate_benchmark()` above, which derives the contributions series this needs from an existing `Portfolio`'s own `Money_invested` column, and (for `asset_type='commodities'`/`'crypto'`) resolves a friendly name to the raw `yfinance` ticker this class itself always takes directly - `Benchmark` itself has no notion of "asset type", just a ticker/currency to fetch.
+
+- `Money_invested`'s day-over-day diffs are set to reproduce the source portfolio's own contributions exactly, so `calculate_irr()`'s cash-flow schedule (via the shared `IrrMixin` — see `Portfolio.calculate_irr` above) lines up with the real portfolio's precisely; only the units bought/sold/held with that money differ
+- dividends are reinvested (bought as more units of `ticker` on the ex-date), matching a real total-return holding rather than letting them sit as idle, non-appreciating cash
+- a withdrawal (a day the real portfolio's `Money_invested` dropped) sells whatever units of `ticker` are worth that same dollar amount on that day; a withdrawal larger than the simulated position's current value is allowed and modeled as going net-negative — a known simplification, since the withdrawn amount (mirroring the real portfolio's own cost-basis reduction) is independent of how `ticker`'s price actually moved
+- same construction-time `ValueError` as `Stock`/`Commodity`/`Crypto` for an invalid/delisted ticker, or one whose price history doesn't reach back far enough to cover the contributions being simulated
+- `currency`/`currency_to` — `ticker`'s own native currency and the currency the contributions are already expressed in, converted via `Currency`/`get_cached_currency` the same way `Stock`/`Commodity`/`Crypto` do
 
 ### 💾 `cache_library.DiskCache`
 
@@ -82,6 +93,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 
 - `money_plot` — money invested vs. total revenue, as overlaid lines or a stacked area
 - `performance_plot` — IRR over time, as a line or a candlestick chart
+- `benchmark_comparison_plot` — overlays this portfolio's own IRR against a `Benchmark`'s (see `Portfolio.simulate_benchmark`/`benchmark_calculator_library.Benchmark` above) — same cash-flow timing, different asset, so the gap between the two lines is the portfolio's actual edge (or lag) over having put the same money into the benchmark instead
 - `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
@@ -251,11 +263,22 @@ plot.revenue_plot(include_dividends=False)
 plot.allocation_plot(by="ticker", kind="pie", metric="current_value")
 plot.allocation_plot(by="ticker", kind="histogram", metric="revenue")
 plot.allocation_comparison_plot(by="ticker")
+
+# "What if this same money had gone into SPY instead" - simulate_benchmark reuses this
+# portfolio's own day-by-day contributions (from Money_invested), so the two IRRs are
+# comparable cash-flow-timing and all, not just lump-sum-on-day-one vs. actual.
+benchmark = portfolio.simulate_benchmark("SPY")
+plot.benchmark_comparison_plot(benchmark, benchmark_name="SPY")
+
+# asset_type='commodities'/'crypto' takes a friendly name instead of a raw yfinance ticker,
+# resolved through Commodity.TICKERS/Crypto.TICKERS - same as a real commodities/crypto source.
+gold_benchmark = portfolio.simulate_benchmark("gold", asset_type="commodities")
+plot.benchmark_comparison_plot(gold_benchmark, benchmark_name="Gold")
 ```
 
 ## Testing
 
-`tests/` holds an automated `pytest` suite — one module per calculator (`test_stock_calculator.py`, `test_bonds_calculator.py`, `test_commodity_calculator.py`, `test_crypto_calculator.py`, `test_bank_account_calculator.py`, `test_currency_calculator.py`, `test_cache_library.py`) plus `test_portfolio_calculator.py` for the multi-source integration layer. Every test runs against synthetic, fixed CSV data written to a temp directory — `yfinance.Ticker` is monkeypatched suite-wide (see `tests/conftest.py`) to a deterministic fake price series, so the suite needs no network access and never depends on real market data.
+`tests/` holds an automated `pytest` suite — one module per calculator (`test_stock_calculator.py`, `test_bonds_calculator.py`, `test_commodity_calculator.py`, `test_crypto_calculator.py`, `test_bank_account_calculator.py`, `test_currency_calculator.py`, `test_cache_library.py`, `test_benchmark_calculator.py`) plus `test_portfolio_calculator.py` for the multi-source integration layer. Every test runs against synthetic, fixed CSV data written to a temp directory — `yfinance.Ticker` is monkeypatched suite-wide (see `tests/conftest.py`) to a deterministic fake price series, so the suite needs no network access and never depends on real market data.
 
 ```bash
 pip install -e ".[test]"   # or: pip install pytest
@@ -286,7 +309,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 ## Roadmap
 
 - `PolishRetailBonds` currently treats every bond type identically — interest accrues as unrealized (`Profit_without_dividends`) continuously and is only recognized as realized once, at final redemption. That matches the four "compounding" types (`TOS`/`ROS`/`EDO`/`ROD`, which really do pay nothing until maturity), but not the four "flat" types (`OTS`/`ROR`/`DOR`/`COI`), which in real life pay interest out at the end of every period — cash that arguably should exit the position and register as realized at each period boundary instead of sitting modeled as still-unrealized for years. Worth a closer look at whether/how to model per-period realization for the flat types; this would change actual reported numbers for those four types, not just labels
-- `Plot.allocation_plot`'s `kind='histogram'` path — the one its own docstring recommends in place of `kind='pie'` whenever `metric='revenue'` can go negative (a pie chart has no honest way to draw a negative-share wedge) — doesn't actually make a losing position's bar stand out: it colors every bar from the fixed `CATEGORICAL_COLORS` palette regardless of sign, so a negative share just quietly dips below zero on the axis. `period_return_bar_plot` a few methods up in the same file already has this solved (`COLOR_GOOD`/`COLOR_CRITICAL` based on sign) - reusing that convention in `allocation_plot`'s histogram branch would make losing positions jump out at a glance
 
 ## License
 

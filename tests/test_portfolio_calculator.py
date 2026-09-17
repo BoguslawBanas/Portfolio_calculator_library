@@ -368,6 +368,43 @@ def test_calculate_irr_starts_at_zero_and_covers_every_row(make_source_dir, make
     assert len(irr)==len(portfolio.portfolio)
 
 
+def test_simulate_benchmark_mirrors_the_portfolios_own_cashflow_schedule(make_source_dir, make_tickers_json):
+    from Portfolio_calculator_library import Benchmark
+
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+
+    # Both invested in different tickers, but the benchmark's Money_invested must still land on
+    # exactly the same day-by-day values as the real portfolio's.
+    assert benchmark.data[Benchmark.MONEY_INVESTED_COLUMN].tolist()==pytest.approx(
+        portfolio.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()
+    )
+    # currency_to defaults to the portfolio's own, unasked.
+    assert portfolio.currency_to=='usd'
+
+    benchmark.calculate_irr()
+    assert Benchmark.IRR_COLUMN in benchmark.portfolio.columns
+    assert benchmark.portfolio[Benchmark.IRR_COLUMN].iloc[0]==pytest.approx(0.0)
+
+
+def test_simulate_benchmark_resolves_commodities_and_crypto_through_their_own_tickers_registry(make_source_dir, make_tickers_json, mock_yfinance):
+    from Portfolio_calculator_library import Commodity, Crypto
+
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+
+    portfolio.simulate_benchmark('gold', asset_type='commodities')
+    assert Commodity.TICKERS['gold'] in mock_yfinance.call_log
+
+    portfolio.simulate_benchmark('bitcoin', asset_type='crypto')
+    assert Crypto.TICKERS['bitcoin'] in mock_yfinance.call_log
+
+
+def test_simulate_benchmark_rejects_unknown_asset_type(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    with pytest.raises(ValueError, match="asset_type"):
+        portfolio.simulate_benchmark('SPY', asset_type='bonds')
+
+
 def test_calculate_money_earned_between_dates_matches_column_version(make_source_dir, make_tickers_json):
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     portfolio.calculate_irr()  # populates self.portfolio, which the two methods below read from

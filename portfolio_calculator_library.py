@@ -7,18 +7,18 @@ instead of retaking a dataframe argument each call.
 
 from datetime import datetime
 import pandas as pd
-import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
+from .benchmark_calculator_library import Benchmark
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin
+from .calculator_mixins import ReprMixin, IrrMixin
 
 
-class Portfolio(ReprMixin):
+class Portfolio(IrrMixin, ReprMixin):
     # --- Output: self.data contract + Portfolio-specific extras (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
@@ -40,6 +40,9 @@ class Portfolio(ReprMixin):
     CASHFLOW_COLUMN='Cashflow'
 
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
+    # Subset of VALID_SOURCE_TYPES simulate_benchmark accepts - 'bonds'/'bank_account' have no
+    # market price to simulate a position in.
+    BENCHMARK_ASSET_TYPES={'stock', 'commodities', 'crypto'}
 
     def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
         """sources: dict mapping each directory to its asset type, one of VALID_SOURCE_TYPES;
@@ -82,6 +85,8 @@ class Portfolio(ReprMixin):
         symbol's DataFrame in its own native currency (self.native_data/native_currency),
         alongside the always-converted self.data. PolishRetailBonds is left out - it converts via
         its own currency_to but doesn't yet expose an include_native_currency of its own."""
+        # Kept so simulate_benchmark can default to it - self.data is already in this currency.
+        self.currency_to=currency_to
         self.distribution_by_directory=dict()
         self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
@@ -240,26 +245,35 @@ class Portfolio(ReprMixin):
             self.native_data.update(source.native_data)
             self.native_currency.update(source.native_currency)
 
-    @staticmethod
-    def _irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):
-        cashflows=np.asarray(cashflows, dtype=np.float64)
-        r=guess
+    def simulate_benchmark(self, symbol: str, asset_type: str='stock', currency: str=None, currency_to: str=None, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
+        """Simulates buying a single stock/ETF/commodity/crypto with this portfolio's own
+        day-by-day cash contributions, so the result's calculate_irr() is directly comparable to
+        this portfolio's own (see Benchmark, and Plot.benchmark_comparison_plot to overlay both).
 
-        for _ in range(max_iter):
-            t=np.arange(len(cashflows))
-            denom=(1+r)**t
-            f=np.sum(cashflows/denom)
-            fp=np.sum(-t*cashflows/((1+r)**(t+1)))
+        symbol: for asset_type='stock' (the default), a yfinance ticker directly (e.g. 'SPY').
+        For 'commodities'/'crypto', a friendly name (e.g. 'gold', 'bitcoin') resolved through
+        Commodity.TICKERS/Crypto.TICKERS - an unknown name raises the same KeyError constructing
+        one of those would.
+        asset_type: one of BENCHMARK_ASSET_TYPES ('stock', 'commodities', 'crypto').
+        currency: symbol's native currency - defaults to 'USD' for a stock, or to Commodity/
+        Crypto's own QUOTE_CURRENCY (both 'usd') otherwise.
+        tickers_json: for 'commodities'/'crypto' only - merged on top of that class's built-in
+        TICKERS, same as a real source. Ignored for 'stock'.
+        currency_to: reporting currency - defaults to this portfolio's own currency_to."""
+        if asset_type=='stock':
+            ticker=symbol
+            currency=currency or 'USD'
+        elif asset_type=='commodities':
+            ticker=Commodity._load_tickers(tickers_json)[0][symbol]
+            currency=currency or Commodity.QUOTE_CURRENCY
+        elif asset_type=='crypto':
+            ticker=Crypto._load_tickers(tickers_json)[symbol]
+            currency=currency or Crypto.QUOTE_CURRENCY
+        else:
+            raise ValueError(f"Unknown simulate_benchmark asset_type: {asset_type!r} (expected one of {sorted(self.BENCHMARK_ASSET_TYPES)})")
 
-            if abs(fp)<1e-15:
-                return np.nan
-            r_new=r-f/fp
-
-            if abs(r_new-r)<tol:
-                return r_new
-            r=r_new
-
-        return r
+        contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(0.0)
+        return Benchmark(contributions, ticker, currency=currency, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
@@ -301,38 +315,6 @@ class Portfolio(ReprMixin):
         self.portfolio=dataframe.resample(resample_rule).ffill()
         return self.portfolio
 
-    def calculate_irr(self):
-        dataframe=self.data
-
-        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
-        dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
-        dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
-
-        n=len(dataframe[self.CASHFLOW_COLUMN])
-        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
-        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
-
-        irr=np.full(n, np.nan)
-        guess=0.1
-        irr[0]=0.0
-
-        # Day i's IRR input is every cashflow through day i, plus day i's total money as a
-        # terminal value. Rebuilding that (i+2)-element list from scratch each iteration is
-        # O(n^2); a preallocated buffer instead gets two O(1) writes per iteration - position i
-        # gets this day's cashflow permanently, position i+1 overwrites the prior terminal value.
-        buffer=np.empty(n+1, dtype=np.float64)
-        for i in range(n):
-            buffer[i]=cashflow_values[i]
-            buffer[i+1]=total_money_values[i]
-            guess=self._irr_newton(buffer[:i+2], guess=guess)
-            irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
-            if np.isnan(guess):
-                guess=0.1
-
-        dataframe[self.IRR_COLUMN]=irr
-        dataframe.drop(columns=[self.PREV_MONEY_INVESTED_COLUMN, self.CASHFLOW_COLUMN], inplace=True)
-        self.portfolio=dataframe
-
     def calculate_money_earned_between_dates(self, start_date: datetime, end_date: datetime) -> float:
         dataframe=self.portfolio
 
@@ -340,10 +322,10 @@ class Portfolio(ReprMixin):
         end_date_profit=0.0
 
         if start_date.strftime('%Y-%m-%d') in dataframe.index:
-            start_date_profit=dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
+            start_date_profit=float(dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
 
         if end_date.strftime('%Y-%m-%d') in dataframe.index:
-            end_date_profit=dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
+            end_date_profit=float(dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
 
         return end_date_profit-start_date_profit
 
