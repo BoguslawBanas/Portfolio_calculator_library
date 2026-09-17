@@ -368,6 +368,26 @@ def test_calculate_irr_starts_at_zero_and_covers_every_row(make_source_dir, make
     assert len(irr)==len(portfolio.portfolio)
 
 
+def test_simulate_benchmark_mirrors_the_portfolios_own_cashflow_schedule(make_source_dir, make_tickers_json):
+    from Portfolio_calculator_library import Benchmark
+
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+
+    # simulate_benchmark derives its contributions from Money_invested.diff() - the benchmark's
+    # own Money_invested must therefore land on exactly the same day-by-day values as the real
+    # portfolio's, even though the two invested in completely different tickers.
+    assert benchmark.data[Benchmark.MONEY_INVESTED_COLUMN].tolist()==pytest.approx(
+        portfolio.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()
+    )
+    # currency_to defaults to the portfolio's own, unasked.
+    assert portfolio.currency_to=='usd'
+
+    benchmark.calculate_irr()
+    assert Benchmark.IRR_COLUMN in benchmark.portfolio.columns
+    assert benchmark.portfolio[Benchmark.IRR_COLUMN].iloc[0]==pytest.approx(0.0)
+
+
 def test_calculate_money_earned_between_dates_matches_column_version(make_source_dir, make_tickers_json):
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     portfolio.calculate_irr()  # populates self.portfolio, which the two methods below read from

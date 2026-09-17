@@ -7,18 +7,18 @@ instead of retaking a dataframe argument each call.
 
 from datetime import datetime
 import pandas as pd
-import numpy as np
 from tqdm import tqdm
 from .stock_calculator_library import Stock
 from .bonds_calculator_library import PolishRetailBonds
 from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
+from .benchmark_calculator_library import Benchmark
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin
+from .calculator_mixins import ReprMixin, IrrMixin
 
 
-class Portfolio(ReprMixin):
+class Portfolio(IrrMixin, ReprMixin):
     # --- Output: self.data contract + Portfolio-specific extras (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
@@ -82,6 +82,9 @@ class Portfolio(ReprMixin):
         symbol's DataFrame in its own native currency (self.native_data/native_currency),
         alongside the always-converted self.data. PolishRetailBonds is left out - it converts via
         its own currency_to but doesn't yet expose an include_native_currency of its own."""
+        # Kept so simulate_benchmark can default to it - self.data is already converted/summed
+        # into this currency, and a benchmark IRR comparable to it needs the same one.
+        self.currency_to=currency_to
         self.distribution_by_directory=dict()
         self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
@@ -240,26 +243,19 @@ class Portfolio(ReprMixin):
             self.native_data.update(source.native_data)
             self.native_currency.update(source.native_currency)
 
-    @staticmethod
-    def _irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):
-        cashflows=np.asarray(cashflows, dtype=np.float64)
-        r=guess
+    def simulate_benchmark(self, ticker: str, currency: str='USD', currency_to: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
+        """Simulates buying a single stock/ETF ticker with this portfolio's own day-by-day cash
+        contributions - not the lifetime total invested on day one, but each real buy/sell
+        mirrored on its own date, the same way the portfolio actually invested (e.g. $200/month
+        spread across today's holdings, invested in `ticker` instead on those same dates). The
+        result's calculate_irr() is then directly comparable to this portfolio's own, and
+        Plot.benchmark_comparison_plot can overlay both. See Benchmark for the simulation itself.
 
-        for _ in range(max_iter):
-            t=np.arange(len(cashflows))
-            denom=(1+r)**t
-            f=np.sum(cashflows/denom)
-            fp=np.sum(-t*cashflows/((1+r)**(t+1)))
-
-            if abs(fp)<1e-15:
-                return np.nan
-            r_new=r-f/fp
-
-            if abs(r_new-r)<tol:
-                return r_new
-            r=r_new
-
-        return r
+        currency: ticker's native currency. currency_to: reporting currency to convert into -
+        defaults to this portfolio's own currency_to, so both IRRs land in the same currency
+        without passing it twice."""
+        contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(0.0)
+        return Benchmark(contributions, ticker, currency=currency, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
@@ -300,38 +296,6 @@ class Portfolio(ReprMixin):
         dataframe=pd.concat([self.portfolio, new_row]).sort_index()
         self.portfolio=dataframe.resample(resample_rule).ffill()
         return self.portfolio
-
-    def calculate_irr(self):
-        dataframe=self.data
-
-        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
-        dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
-        dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
-
-        n=len(dataframe[self.CASHFLOW_COLUMN])
-        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
-        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
-
-        irr=np.full(n, np.nan)
-        guess=0.1
-        irr[0]=0.0
-
-        # Day i's IRR input is every cashflow through day i, plus day i's total money as a
-        # terminal value. Rebuilding that (i+2)-element list from scratch each iteration is
-        # O(n^2); a preallocated buffer instead gets two O(1) writes per iteration - position i
-        # gets this day's cashflow permanently, position i+1 overwrites the prior terminal value.
-        buffer=np.empty(n+1, dtype=np.float64)
-        for i in range(n):
-            buffer[i]=cashflow_values[i]
-            buffer[i+1]=total_money_values[i]
-            guess=self._irr_newton(buffer[:i+2], guess=guess)
-            irr[i]=round(((guess+1.0)**i-1)*100.0, 2)
-            if np.isnan(guess):
-                guess=0.1
-
-        dataframe[self.IRR_COLUMN]=irr
-        dataframe.drop(columns=[self.PREV_MONEY_INVESTED_COLUMN, self.CASHFLOW_COLUMN], inplace=True)
-        self.portfolio=dataframe
 
     def calculate_money_earned_between_dates(self, start_date: datetime, end_date: datetime) -> float:
         dataframe=self.portfolio
