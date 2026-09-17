@@ -57,7 +57,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - builds one shared `currency_cache` per construction and passes it to every `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` source it builds, so a currency pair needed by more than one source/ticker/holding is only fetched once (see `get_cached_currency` under `Currency` above)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
-- `simulate_benchmark(ticker, ...)` — "what if this same money had gone into `ticker` (e.g. `SPY`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison
+- `simulate_benchmark(symbol, asset_type='stock', ...)` — "what if this same money had gone into `symbol` (e.g. `SPY`, or `'gold'`/`'bitcoin'` with `asset_type='commodities'`/`'crypto'`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison. `asset_type='stock'` (the default) takes `symbol` as a raw `yfinance` ticker directly, same as before; `'commodities'`/`'crypto'` instead resolve a friendly name through `Commodity.TICKERS`/`Crypto.TICKERS` (optionally extended via `tickers_json`), the same way a real commodities/crypto source would
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
@@ -67,7 +67,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 
 ### ⚖️ `benchmark_calculator_library.Benchmark`
 
-Simulates buying a single stock/ETF ticker with the exact same day-by-day cash contributions a `Portfolio` actually made — not its lifetime total invested on day one, but each real buy/sell mirrored on its own date (e.g. the same $200/month a portfolio actually spent across its real holdings, spent on `SPY` instead on those same dates) — so its IRR is directly comparable to `Portfolio.calculate_irr()`'s own. Not meant to be constructed directly — see `Portfolio.simulate_benchmark()` above, which derives the contributions series this needs from an existing `Portfolio`'s own `Money_invested` column.
+Simulates buying a single ticker with the exact same day-by-day cash contributions a `Portfolio` actually made — not its lifetime total invested on day one, but each real buy/sell mirrored on its own date (e.g. the same $200/month a portfolio actually spent across its real holdings, spent on `SPY` instead on those same dates) — so its IRR is directly comparable to `Portfolio.calculate_irr()`'s own. Not meant to be constructed directly — see `Portfolio.simulate_benchmark()` above, which derives the contributions series this needs from an existing `Portfolio`'s own `Money_invested` column, and (for `asset_type='commodities'`/`'crypto'`) resolves a friendly name to the raw `yfinance` ticker this class itself always takes directly - `Benchmark` itself has no notion of "asset type", just a ticker/currency to fetch.
 
 - `Money_invested`'s day-over-day diffs are set to reproduce the source portfolio's own contributions exactly, so `calculate_irr()`'s cash-flow schedule (via the shared `IrrMixin` — see `Portfolio.calculate_irr` above) lines up with the real portfolio's precisely; only the units bought/sold/held with that money differ
 - dividends are reinvested (bought as more units of `ticker` on the ex-date), matching a real total-return holding rather than letting them sit as idle, non-appreciating cash
@@ -269,6 +269,11 @@ plot.allocation_comparison_plot(by="ticker")
 # comparable cash-flow-timing and all, not just lump-sum-on-day-one vs. actual.
 benchmark = portfolio.simulate_benchmark("SPY")
 plot.benchmark_comparison_plot(benchmark, benchmark_name="SPY")
+
+# asset_type='commodities'/'crypto' takes a friendly name instead of a raw yfinance ticker,
+# resolved through Commodity.TICKERS/Crypto.TICKERS - same as a real commodities/crypto source.
+gold_benchmark = portfolio.simulate_benchmark("gold", asset_type="commodities")
+plot.benchmark_comparison_plot(gold_benchmark, benchmark_name="Gold")
 ```
 
 ## Testing

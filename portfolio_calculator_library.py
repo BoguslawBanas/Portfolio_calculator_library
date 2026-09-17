@@ -40,6 +40,9 @@ class Portfolio(IrrMixin, ReprMixin):
     CASHFLOW_COLUMN='Cashflow'
 
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
+    # Subset of VALID_SOURCE_TYPES simulate_benchmark accepts - 'bonds'/'bank_account' have no
+    # market price to buy a hypothetical position in.
+    BENCHMARK_ASSET_TYPES={'stock', 'commodities', 'crypto'}
 
     def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
         """sources: dict mapping each directory to its asset type, one of VALID_SOURCE_TYPES;
@@ -243,17 +246,42 @@ class Portfolio(IrrMixin, ReprMixin):
             self.native_data.update(source.native_data)
             self.native_currency.update(source.native_currency)
 
-    def simulate_benchmark(self, ticker: str, currency: str='USD', currency_to: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
-        """Simulates buying a single stock/ETF ticker with this portfolio's own day-by-day cash
-        contributions - not the lifetime total invested on day one, but each real buy/sell
-        mirrored on its own date, the same way the portfolio actually invested (e.g. $200/month
-        spread across today's holdings, invested in `ticker` instead on those same dates). The
-        result's calculate_irr() is then directly comparable to this portfolio's own, and
-        Plot.benchmark_comparison_plot can overlay both. See Benchmark for the simulation itself.
+    def simulate_benchmark(self, symbol: str, asset_type: str='stock', currency: str=None, currency_to: str=None, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
+        """Simulates buying a single stock/ETF/commodity/crypto with this portfolio's own
+        day-by-day cash contributions - not the lifetime total invested on day one, but each real
+        buy/sell mirrored on its own date, the same way the portfolio actually invested (e.g.
+        $200/month spread across today's holdings, invested in `symbol` instead on those same
+        dates). The result's calculate_irr() is then directly comparable to this portfolio's own,
+        and Plot.benchmark_comparison_plot can overlay both. See Benchmark for the simulation
+        itself.
 
-        currency: ticker's native currency. currency_to: reporting currency to convert into -
-        defaults to this portfolio's own currency_to, so both IRRs land in the same currency
-        without passing it twice."""
+        symbol: for asset_type='stock' (the default), a yfinance ticker directly (e.g. 'SPY') -
+        Stock has no built-in ticker registry to resolve one from, only the ISIN -> ticker
+        tickers_json a real Stock source needs. For 'commodities'/'crypto', a friendly name from
+        Commodity.TICKERS/Crypto.TICKERS instead (e.g. 'gold', 'bitcoin'), resolved the same way
+        a real commodities/crypto source resolves one - an unknown name raises the same KeyError
+        constructing one of those would.
+        asset_type: one of BENCHMARK_ASSET_TYPES ('stock', 'commodities', 'crypto').
+        currency: symbol's native currency - defaults to 'USD' for a stock (unchanged from
+        before), or to Commodity.QUOTE_CURRENCY/Crypto.QUOTE_CURRENCY (both 'usd') for the other
+        two, unasked.
+        tickers_json: for 'commodities'/'crypto' only - merged on top of that class's own
+        built-in TICKERS, same as a real source (see Commodity/Crypto __init__). Ignored for
+        'stock', which has no registry to merge into.
+        currency_to: reporting currency to convert into - defaults to this portfolio's own
+        currency_to, so both IRRs land in the same currency without passing it twice."""
+        if asset_type=='stock':
+            ticker=symbol
+            currency=currency or 'USD'
+        elif asset_type=='commodities':
+            ticker=Commodity._load_tickers(tickers_json)[0][symbol]
+            currency=currency or Commodity.QUOTE_CURRENCY
+        elif asset_type=='crypto':
+            ticker=Crypto._load_tickers(tickers_json)[symbol]
+            currency=currency or Crypto.QUOTE_CURRENCY
+        else:
+            raise ValueError(f"Unknown simulate_benchmark asset_type: {asset_type!r} (expected one of {sorted(self.BENCHMARK_ASSET_TYPES)})")
+
         contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(0.0)
         return Benchmark(contributions, ticker, currency=currency, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
 
