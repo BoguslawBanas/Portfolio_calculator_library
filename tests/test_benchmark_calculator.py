@@ -15,9 +15,8 @@ def fake_close(start, end):
 
 
 def test_money_invested_reproduces_the_contribution_schedule_exactly():
-    # The whole point of Benchmark: Money_invested's day-over-day diffs (what calculate_irr's
-    # cashflow schedule is built from) must match the input contributions precisely, regardless
-    # of how the ticker's own price moves.
+    # The whole point of Benchmark: Money_invested's diffs must match contributions exactly,
+    # regardless of how the ticker's own price moves.
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 500.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, 'FAKEUSD', currency='usd', currency_to='usd')
@@ -31,8 +30,7 @@ def test_current_value_matches_units_bought_at_the_buy_day_price():
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 0.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, 'FAKEUSD', currency='usd', currency_to='usd')
-    # Recompute over the identical range Benchmark itself fetched (start..today) so the indexing
-    # lines up, then read off just the two dates this test cares about.
+    # Recompute over the same range Benchmark itself fetched (start..today) so indexing lines up.
     full=fake_close(idx.min(), pd.Timestamp.today())
     buy_price=full.loc['2024-01-02']
     last_price=full.loc['2024-01-05']
@@ -47,9 +45,7 @@ def test_withdrawal_sells_units_worth_the_withdrawn_amount():
     contributions=pd.Series([0.0, 1000.0, 0.0, -300.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, 'FAKEUSD', currency='usd', currency_to='usd')
     data=benchmark.data
-    # Money_invested still mirrors the schedule exactly (see the dedicated test above) - here we
-    # only check that the withdrawal actually reduced the held position's value, not just the
-    # bookkeeping column.
+    # Check the withdrawal actually reduced the held position's value, not just the bookkeeping.
     assert data[Benchmark.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(700.0)
     assert benchmark.total_money_invested==pytest.approx(1000.0)  # gross buys only, unreduced by the withdrawal
 
@@ -72,9 +68,8 @@ def test_invalid_ticker_raises_clear_error():
 
 
 class _DividendFakeTicker:
-    """Like conftest.FakeTicker, but also pays a single per-share dividend partway through -
-    conftest's own fixture never returns a 'Dividends' column, so dividend reinvestment needs
-    its own local mock."""
+    """Like conftest.FakeTicker, but also pays a per-share dividend partway through - needed
+    since conftest's own fixture never returns a 'Dividends' column."""
 
     def __init__(self, symbol):
         self.symbol=symbol
@@ -102,8 +97,6 @@ def test_dividends_are_reinvested_as_extra_units(monkeypatch):
     extra_units=(units_before_dividend*2.0)/ex_div_price
     expected_current_value=(units_before_dividend+extra_units)*last_price
 
-    # Money_invested is untouched by the dividend - only investor cash counts, matching the
-    # rest of the library's convention that a dividend is a return on the position, not new
-    # investor capital.
+    # Money_invested is untouched by the dividend - only investor cash counts as contribution.
     assert benchmark.data[Benchmark.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(1000.0)
     assert benchmark.total_current_value==pytest.approx(expected_current_value, rel=1e-6)

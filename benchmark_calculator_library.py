@@ -1,12 +1,9 @@
 """
-Benchmark calculator: simulates buying a single stock/ETF ticker with the exact same day-by-day
-cash contributions a Portfolio actually made - not its lifetime total invested on day one, but
-each real buy/sell mirrored on its own date ("what if this money had gone into SPY instead") - so
-the result's IRR (via the shared IrrMixin) is directly comparable to Portfolio.calculate_irr().
-Dividends are reinvested (bought as more units on the ex-date), matching a total-return holding.
+Benchmark calculator: simulates buying a single stock/ETF ticker with the same day-by-day cash
+contributions a Portfolio actually made ("what if this money had gone into SPY instead"), so its
+IRR is directly comparable to Portfolio.calculate_irr(). Dividends are reinvested.
 
-Not meant to be constructed directly - see Portfolio.simulate_benchmark, which derives the
-contributions Series this needs from an existing Portfolio's own Money_invested column.
+Not meant to be constructed directly - see Portfolio.simulate_benchmark.
 """
 
 from datetime import datetime
@@ -27,18 +24,14 @@ class Benchmark(IrrMixin, ReprMixin):
     CASHFLOW_COLUMN='Cashflow'
 
     def __init__(self, contributions: pd.Series, ticker: str, currency: str='USD', currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, currency_cache: dict=None):
-        """contributions: daily net investor cash - positive on a day money was added (buy),
-        negative on a day money was withdrawn (sell), 0 elsewhere - indexed by a gapless daily
-        DatetimeIndex (Portfolio.data's own shape). Money_invested's cumsum is set to exactly
-        reproduce this series (so its day-over-day diffs - what calculate_irr's cashflow schedule
-        is built from - match the source portfolio's own precisely); a withdrawal sells whatever
-        units of `ticker` are worth that same dollar amount on that day. A withdrawal larger than
-        the position's current value is allowed and modeled as going net-negative, a known
-        simplification since the withdrawal amount (mirroring the real portfolio's own cost-basis
-        reduction) is independent of how this ticker's price actually moved.
+        """contributions: daily net investor cash - positive on a buy day, negative on a
+        withdrawal, 0 elsewhere - indexed by a gapless daily DatetimeIndex (Portfolio.data's own
+        shape). Money_invested's cumsum exactly reproduces this series; a withdrawal sells
+        whatever units of `ticker` are worth that same dollar amount that day (can go
+        net-negative if it exceeds the simulated position's value - a known simplification).
         ticker: yfinance symbol to buy with that schedule instead (e.g. 'SPY').
-        currency: ticker's native currency. currency_to: currency `contributions` is already
-        expressed in - converted via get_cached_currency, same as Stock/Commodity/Crypto."""
+        currency: ticker's native currency. currency_to: currency `contributions` is already in -
+        converted via get_cached_currency, same as Stock/Commodity/Crypto."""
         contributions=contributions.round(2)
         start_date=contributions.index.min()
         end_date=datetime.today()
@@ -48,19 +41,16 @@ class Benchmark(IrrMixin, ReprMixin):
             raise ValueError(f"yfinance returned no price history for ticker {ticker!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.index=ticker_data.index.tz_localize(None).normalize()
 
-        # start_date is typically the day *before* the first real contribution (Portfolio's own
-        # prepended zero row - see Portfolio._prepend_zero_day), which regularly lands on a
-        # weekend/holiday with no trading day of its own. A small gap like that is bridged by
-        # bfill below; a large one means the ticker genuinely didn't exist yet - keep raising for
-        # that.
+        # start_date is usually the day before the first real contribution (Portfolio's own
+        # prepended zero row), often a weekend with no trading day - bridged by bfill below. A
+        # multi-day gap instead means the ticker genuinely didn't exist yet.
         first_trading_day=ticker_data.index.min()
         if (first_trading_day-start_date).days>7:
             raise ValueError(f"No {ticker!r} price history before {first_trading_day.date()} - it doesn't reach back to this portfolio's start date {start_date.date()}.")
 
         all_days=pd.date_range(start=start_date, end=end_date, freq='D').tz_localize(None).normalize()
         close=ticker_data['Close'].reindex(all_days).ffill().bfill()
-        # 'Dividends' is only present when actions=True returned any - absent (not just zero) for
-        # a ticker with no dividend history at all.
+        # 'Dividends' is absent (not just zero) for a ticker with no dividend history at all.
         dividends=ticker_data.get('Dividends', pd.Series(0.0, index=ticker_data.index)).reindex(all_days).fillna(0.0)
 
         currency_obj=get_cached_currency(currency_cache, currency, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
@@ -71,9 +61,8 @@ class Benchmark(IrrMixin, ReprMixin):
         contribution_values=contributions.to_numpy(dtype=float)
         n=len(contribution_values)
 
-        # Money_invested is just contributions' own cumsum (see docstring) - no per-day tracking
-        # needed. Only units require a sequential walk: each day's reinvested dividend and
-        # buy/sell depends on the running position built by every earlier day.
+        # Money_invested is just contributions' own cumsum. Only units need a sequential walk -
+        # each day's dividend reinvestment and buy/sell depends on the running position so far.
         money_invested_cumulative=np.round(np.cumsum(contribution_values), 2)
 
         units_by_day=np.zeros(n)
@@ -99,9 +88,8 @@ class Benchmark(IrrMixin, ReprMixin):
                 running_units-=units_sold
 
         units_cumulative=np.cumsum(units_by_day)
-        # Holding 0 units is worth 0 regardless of that day's price - guards the leading
-        # zero-contribution row (see the bfill note above) against 0*NaN, not just 0*<a real
-        # price>.
+        # Holding 0 units is worth 0 regardless of price - guards against 0*NaN on the leading
+        # zero-contribution row.
         total_value=np.where(units_cumulative==0.0, 0.0, units_cumulative*price)
         profit=np.round(total_value-money_invested_cumulative, 2)
 

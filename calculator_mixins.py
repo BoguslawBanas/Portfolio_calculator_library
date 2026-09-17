@@ -26,10 +26,9 @@ class MergeMixin:
 
 
 class IrrMixin:
-    """_irr_newton()/calculate_irr(): shared by Portfolio and Benchmark - both build a self.data
-    with Money_invested/Profit columns and want the same money-weighted IRR off it. Requires
-    MONEY_INVESTED_COLUMN/PROFIT_COLUMN/IRR_COLUMN/PREV_MONEY_INVESTED_COLUMN/
-    TOTAL_MONEY_COLUMN/CASHFLOW_COLUMN as class attributes on whatever inherits this."""
+    """_irr_newton()/calculate_irr(): shared by Portfolio and Benchmark, both of which build a
+    self.data with Money_invested/Profit and want the same money-weighted IRR off it. Requires
+    the usual *_COLUMN class attributes (see Portfolio/Benchmark) on whatever inherits this."""
 
     @staticmethod
     def _irr_newton(cashflows: list, guess: float, tol: float=1e-12, max_iter: int=10):

@@ -374,9 +374,8 @@ def test_simulate_benchmark_mirrors_the_portfolios_own_cashflow_schedule(make_so
     portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
     benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
 
-    # simulate_benchmark derives its contributions from Money_invested.diff() - the benchmark's
-    # own Money_invested must therefore land on exactly the same day-by-day values as the real
-    # portfolio's, even though the two invested in completely different tickers.
+    # Both invested in different tickers, but the benchmark's Money_invested must still land on
+    # exactly the same day-by-day values as the real portfolio's.
     assert benchmark.data[Benchmark.MONEY_INVESTED_COLUMN].tolist()==pytest.approx(
         portfolio.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()
     )

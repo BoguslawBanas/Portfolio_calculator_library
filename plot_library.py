@@ -118,19 +118,17 @@ class Plot:
             raise ValueError(f"Unknown performance_plot kind: {kind!r} (expected {self.PERFORMANCE_PLOT_KIND_PLOT!r} or {self.PERFORMANCE_PLOT_KIND_CANDLESTICK!r})")
 
     def benchmark_comparison_plot(self, benchmark, benchmark_name: str='Benchmark', resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY, path_to_save_fig: str=None):
-        """Overlays this portfolio's own IRR against a Benchmark's - same money-weighted
-        cash-flow timing (each real contribution mirrored on its own date), different asset - so
-        the gap between the two lines is the portfolio's actual edge (or lag) over having put the
-        same money into the benchmark instead.
+        """Overlays this portfolio's own IRR against a Benchmark's - same cash-flow timing,
+        different asset - so the gap between the lines is the portfolio's edge (or lag) over
+        putting the same money into the benchmark instead.
         benchmark: a Benchmark from self.portfolio.simulate_benchmark(ticker, ...).
         benchmark_name: legend label for the benchmark's line.
-        resample_rule: both IRR series are resampled (ffill) to this rule before plotting, same
-        as performance_plot."""
+        resample_rule: both IRR series are resampled (ffill) to this rule, same as
+        performance_plot."""
         if self.portfolio.IRR_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_irr()
-        # benchmark is typically fresh off simulate_benchmark(), with no .portfolio yet at all
-        # (unlike self.portfolio, whose Plot.__init__ precondition already guarantees one) -
-        # hasattr guards that first-ever call instead of raising.
+        # unlike self.portfolio, benchmark may have no .portfolio yet at all - hasattr guards
+        # that first-ever call instead of raising.
         if not hasattr(benchmark, 'portfolio') or benchmark.IRR_COLUMN not in benchmark.portfolio.columns:
             benchmark.calculate_irr()
 

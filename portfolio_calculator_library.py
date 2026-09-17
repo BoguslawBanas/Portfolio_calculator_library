@@ -41,7 +41,7 @@ class Portfolio(IrrMixin, ReprMixin):
 
     VALID_SOURCE_TYPES={'stock', 'bonds', 'commodities', 'crypto', 'bank_account'}
     # Subset of VALID_SOURCE_TYPES simulate_benchmark accepts - 'bonds'/'bank_account' have no
-    # market price to buy a hypothetical position in.
+    # market price to simulate a position in.
     BENCHMARK_ASSET_TYPES={'stock', 'commodities', 'crypto'}
 
     def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
@@ -85,8 +85,7 @@ class Portfolio(IrrMixin, ReprMixin):
         symbol's DataFrame in its own native currency (self.native_data/native_currency),
         alongside the always-converted self.data. PolishRetailBonds is left out - it converts via
         its own currency_to but doesn't yet expose an include_native_currency of its own."""
-        # Kept so simulate_benchmark can default to it - self.data is already converted/summed
-        # into this currency, and a benchmark IRR comparable to it needs the same one.
+        # Kept so simulate_benchmark can default to it - self.data is already in this currency.
         self.currency_to=currency_to
         self.distribution_by_directory=dict()
         self.distribution_by_directory_currently_invested=dict()
@@ -248,28 +247,19 @@ class Portfolio(IrrMixin, ReprMixin):
 
     def simulate_benchmark(self, symbol: str, asset_type: str='stock', currency: str=None, currency_to: str=None, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
         """Simulates buying a single stock/ETF/commodity/crypto with this portfolio's own
-        day-by-day cash contributions - not the lifetime total invested on day one, but each real
-        buy/sell mirrored on its own date, the same way the portfolio actually invested (e.g.
-        $200/month spread across today's holdings, invested in `symbol` instead on those same
-        dates). The result's calculate_irr() is then directly comparable to this portfolio's own,
-        and Plot.benchmark_comparison_plot can overlay both. See Benchmark for the simulation
-        itself.
+        day-by-day cash contributions, so the result's calculate_irr() is directly comparable to
+        this portfolio's own (see Benchmark, and Plot.benchmark_comparison_plot to overlay both).
 
-        symbol: for asset_type='stock' (the default), a yfinance ticker directly (e.g. 'SPY') -
-        Stock has no built-in ticker registry to resolve one from, only the ISIN -> ticker
-        tickers_json a real Stock source needs. For 'commodities'/'crypto', a friendly name from
-        Commodity.TICKERS/Crypto.TICKERS instead (e.g. 'gold', 'bitcoin'), resolved the same way
-        a real commodities/crypto source resolves one - an unknown name raises the same KeyError
-        constructing one of those would.
+        symbol: for asset_type='stock' (the default), a yfinance ticker directly (e.g. 'SPY').
+        For 'commodities'/'crypto', a friendly name (e.g. 'gold', 'bitcoin') resolved through
+        Commodity.TICKERS/Crypto.TICKERS - an unknown name raises the same KeyError constructing
+        one of those would.
         asset_type: one of BENCHMARK_ASSET_TYPES ('stock', 'commodities', 'crypto').
-        currency: symbol's native currency - defaults to 'USD' for a stock (unchanged from
-        before), or to Commodity.QUOTE_CURRENCY/Crypto.QUOTE_CURRENCY (both 'usd') for the other
-        two, unasked.
-        tickers_json: for 'commodities'/'crypto' only - merged on top of that class's own
-        built-in TICKERS, same as a real source (see Commodity/Crypto __init__). Ignored for
-        'stock', which has no registry to merge into.
-        currency_to: reporting currency to convert into - defaults to this portfolio's own
-        currency_to, so both IRRs land in the same currency without passing it twice."""
+        currency: symbol's native currency - defaults to 'USD' for a stock, or to Commodity/
+        Crypto's own QUOTE_CURRENCY (both 'usd') otherwise.
+        tickers_json: for 'commodities'/'crypto' only - merged on top of that class's built-in
+        TICKERS, same as a real source. Ignored for 'stock'.
+        currency_to: reporting currency - defaults to this portfolio's own currency_to."""
         if asset_type=='stock':
             ticker=symbol
             currency=currency or 'USD'
