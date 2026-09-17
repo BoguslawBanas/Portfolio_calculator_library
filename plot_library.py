@@ -197,9 +197,15 @@ class Plot:
             ])
             self._render(fig, path_to_save_fig)
         elif kind==self.ALLOCATION_PLOT_KIND_HISTOGRAM:
+            if metric==self.ALLOCATION_PLOT_METRIC_REVENUE:
+                # Revenue can go negative - flag losing positions by sign (same convention as
+                # period_return_bar_plot) instead of the categorical per-slice palette above.
+                colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values_sorted]
             fig=go.Figure(data=[
                 go.Bar(x=labels_sorted, y=values_sorted, marker_color=colors)
             ])
+            if metric==self.ALLOCATION_PLOT_METRIC_REVENUE:
+                fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
             fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)")
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)

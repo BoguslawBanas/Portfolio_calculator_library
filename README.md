@@ -286,7 +286,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 ## Roadmap
 
 - `PolishRetailBonds` currently treats every bond type identically — interest accrues as unrealized (`Profit_without_dividends`) continuously and is only recognized as realized once, at final redemption. That matches the four "compounding" types (`TOS`/`ROS`/`EDO`/`ROD`, which really do pay nothing until maturity), but not the four "flat" types (`OTS`/`ROR`/`DOR`/`COI`), which in real life pay interest out at the end of every period — cash that arguably should exit the position and register as realized at each period boundary instead of sitting modeled as still-unrealized for years. Worth a closer look at whether/how to model per-period realization for the flat types; this would change actual reported numbers for those four types, not just labels
-- `Plot.allocation_plot`'s `kind='histogram'` path — the one its own docstring recommends in place of `kind='pie'` whenever `metric='revenue'` can go negative (a pie chart has no honest way to draw a negative-share wedge) — doesn't actually make a losing position's bar stand out: it colors every bar from the fixed `CATEGORICAL_COLORS` palette regardless of sign, so a negative share just quietly dips below zero on the axis. `period_return_bar_plot` a few methods up in the same file already has this solved (`COLOR_GOOD`/`COLOR_CRITICAL` based on sign) - reusing that convention in `allocation_plot`'s histogram branch would make losing positions jump out at a glance
 
 ## License
 
