@@ -40,7 +40,7 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
     })
     data=crypto.data
     expected=round(1.01*0.5*40000.0, 2)
-    assert data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected)
     assert crypto.distribution_by_ticker['bitcoin']==pytest.approx(100.0)
 
 
@@ -57,7 +57,7 @@ def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_
     )
     assert crypto.tickers['notarealcoin']=='NRC-USD'
     expected=round(1.01*0.5*40000.0, 2)
-    assert crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected)
 
 
 def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
@@ -96,7 +96,7 @@ def test_units_rounded_to_eight_decimals_not_stocks_four(make_source_dir):
     rounded_to_8=round(0.123456789, 8)*40000.0
     rounded_to_4=round(0.123456789, 4)*40000.0
     assert rounded_to_8!=pytest.approx(rounded_to_4)
-    assert crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(rounded_to_8)
+    assert float(crypto.data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(rounded_to_8)
 
 
 def test_partial_sell_preserves_average_cost_basis(make_source_dir):
@@ -107,12 +107,12 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
                     "2024-03-01,ethereum,4,2200.0\n",
     })
     data=crypto.data
-    assert data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(20000.0*0.6)
-    assert data[Crypto.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(4*2200.0-20000.0*0.4)
+    assert float(data[Crypto.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(20000.0*0.6)
+    assert float(data[Crypto.REALIZED_PROFIT_COLUMN].iloc[-1])==pytest.approx(4*2200.0-20000.0*0.4)
     # total_money_invested stays at the lifetime-gross 20000, while total_money_currently_invested
     # drops to the 60% still held - the two diverge exactly once a sell happens, same as Stock.
-    assert crypto.total_money_invested==pytest.approx(20000.0)
-    assert crypto.total_money_currently_invested==pytest.approx(20000.0*0.6)
+    assert float(crypto.total_money_invested)==pytest.approx(20000.0)
+    assert float(crypto.total_money_currently_invested)==pytest.approx(20000.0*0.6)
     assert crypto.distribution_by_ticker_currently_invested['ethereum']==pytest.approx(100.0)
     # No dividends -> Profit_without_realized collapses to just the unrealized component,
     # excluding the realized gain from the partial sell above.
@@ -133,8 +133,8 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
         'sell.csv': "date,symbol,amount_of_units,price_of_unit\n"
                     "2024-03-01,bitcoin,5,40000.0\n",
     })
-    assert crypto.total_current_value==pytest.approx(0.0)
-    assert crypto.total_revenue==pytest.approx(0.0)
+    assert float(crypto.total_current_value)==pytest.approx(0.0)
+    assert float(crypto.total_revenue)==pytest.approx(0.0)
     assert crypto.distribution_by_ticker_current_value==pytest.approx({'bitcoin': 0.0})
     assert crypto.distribution_by_ticker_revenue==pytest.approx({'bitcoin': 0.0})
 
