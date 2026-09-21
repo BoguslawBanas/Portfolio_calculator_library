@@ -31,8 +31,8 @@ def test_fixed_rate_account_accrues_daily_interest_before_first_capitalization(m
     n_days=(date.today()-start).days+1
     daily_rate=1000.0*(6.0/100.0)/365.0  # tax=0.0, balance constant (no capitalization reached yet)
     expected_profit=round(daily_rate*n_days, 2)
-    assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
-    assert account.total_revenue==pytest.approx(expected_profit)
+    assert float(data[BankAccount.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected_profit)
+    assert float(account.total_revenue)==pytest.approx(expected_profit)
     # No dividend/realized-profit split for a bank account - always equal to Profit.
     assert data[BankAccount.PROFIT_WITHOUT_REALIZED_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
     assert data[BankAccount.PROFIT_EXCLUDING_DIVIDEND_COLUMN].equals(data[BankAccount.PROFIT_COLUMN])
@@ -110,7 +110,7 @@ def test_variable_rate_account_reads_interest_rate_csv_plus_spread(make_source_d
     n_days=(date.today()-start).days+1
     daily_rate=1000.0*((5.0+0.5)/100.0)/365.0
     expected_profit=round(daily_rate*n_days, 2)
-    assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
+    assert float(data[BankAccount.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected_profit)
 
 
 def test_variable_rate_account_reads_interest_rate_csv_at_daily_granularity(make_source_dir):
@@ -132,7 +132,7 @@ def test_variable_rate_account_reads_interest_rate_csv_at_daily_granularity(make
     days_at_4=(rate_change_date-start).days
     days_at_6=(date.today()-rate_change_date).days+1
     expected_profit=round(1000.0*(4.0/100.0)/365.0*days_at_4+1000.0*(6.0/100.0)/365.0*days_at_6, 2)
-    assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
+    assert float(data[BankAccount.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected_profit)
 
 
 def test_tax_defaults_to_19_percent_when_omitted(make_source_dir):
@@ -147,7 +147,7 @@ def test_tax_defaults_to_19_percent_when_omitted(make_source_dir):
     n_days=(date.today()-start).days+1
     daily_rate=1000.0*(6.0/100.0)/365.0*(1-BankAccount.DEFAULT_TAX/100.0)
     expected_profit=round(daily_rate*n_days, 2)
-    assert data[BankAccount.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_profit)
+    assert float(data[BankAccount.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected_profit)
 
 
 def test_multiple_accounts_in_one_directory_are_split_and_summed(make_source_dir):
