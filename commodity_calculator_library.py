@@ -19,13 +19,14 @@ recorded amount. Its amount_of_units is already in the native quote unit, no uni
 import os
 import json
 from datetime import datetime
+from decimal import Decimal
 from typing import Callable
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
 
 
 class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
@@ -112,12 +113,12 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         so a shared currency pair is fetched once instead of once per symbol - see
         get_cached_currency. None: every symbol fetches its own."""
         self.tickers, self.quote_unit_grams=self._load_tickers(tickers_json)
-        self.total_money_invested=0.0
+        self.total_money_invested=Decimal('0')
         # Unlike total_money_invested (lifetime gross, never reduced by a sell), this is what's
         # still held today - a separate, independent computation.
-        self.total_money_currently_invested=0.0
-        self.total_current_value=0.0
-        self.total_revenue=0.0
+        self.total_money_currently_invested=Decimal('0')
+        self.total_current_value=Decimal('0')
+        self.total_revenue=Decimal('0')
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
@@ -171,17 +172,19 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
             if progress_callback is not None:
                 progress_callback()
 
+        # Distribution percentages are ratios, not money - computed in float even though value/
+        # total are Decimal.
         for symbol, value in money_invested_by_symbol.items():
-            self.distribution_by_ticker[symbol]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+            self.distribution_by_ticker[symbol]=(float(value)/float(self.total_money_invested))*100.0 if self.total_money_invested else 0.0
 
         for symbol, value in currently_invested_by_symbol.items():
-            self.distribution_by_ticker_currently_invested[symbol]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
+            self.distribution_by_ticker_currently_invested[symbol]=(float(value)/float(self.total_money_currently_invested))*100.0 if self.total_money_currently_invested else 0.0
 
         for symbol, value in current_value_by_symbol.items():
-            self.distribution_by_ticker_current_value[symbol]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
+            self.distribution_by_ticker_current_value[symbol]=(float(value)/float(self.total_current_value))*100.0 if self.total_current_value else 0.0
 
         for symbol, value in revenue_by_symbol.items():
-            self.distribution_by_ticker_revenue[symbol]=(value/self.total_revenue)*100.0 if self.total_revenue else 0.0
+            self.distribution_by_ticker_revenue[symbol]=(float(value)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
 
         self.data=self.merge(dataframes_2)
 
@@ -295,13 +298,18 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         # doesn't come from this at all - see money_invested_native/row_currency below.
         market_price=data[self.CLOSE_COLUMN].to_numpy()[position]
 
-        money_invested_by_day=np.zeros(len(data))
+        # Money_invested/Realized_profit accumulate as Decimal (object dtype) - each
+        # transaction's own float computation is rounded to cents and cast via to_money() right
+        # before landing in these arrays, so the cumsum() below (and every later sum across
+        # sources) adds exact Decimals instead of compounding binary-float rounding error. Units
+        # stays float - a quantity, not money.
+        money_invested_by_day=np.full(len(data), Decimal('0'), dtype=object)
         units_by_day=np.zeros(len(data))
-        realized_profit_by_day=np.zeros(len(data))
+        realized_profit_by_day=np.full(len(data), Decimal('0'), dtype=object)
 
         running_units=0.0
         running_money_invested=0.0
-        total_buy_invested=0.0
+        total_buy_invested=Decimal('0')
         # Memoizes each currency code seen in a buy row to its Currency object (routed through
         # get_cached_currency, so a pair used elsewhere is still fetched once) - a buy row's own
         # currency can differ from QUOTE_CURRENCY or from another row's (e.g. eur vs usd).
@@ -326,13 +334,14 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
                     buy_currency_objects[buy_currency]=get_cached_currency(currency_cache, buy_currency, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
                 buy_fx=buy_currency_objects[buy_currency].data.loc[sorted_df.index[i], self.CLOSE_COLUMN]
                 money_invested=round(money_invested_native[i]*buy_fx, 2)
+                money_invested_decimal=to_money(money_invested)
 
-                money_invested_by_day[pos]+=money_invested
+                money_invested_by_day[pos]+=money_invested_decimal
                 units_by_day[pos]+=units
 
                 running_units+=units
                 running_money_invested+=money_invested
-                total_buy_invested+=money_invested
+                total_buy_invested+=money_invested_decimal
             elif row_state=='sell':
                 units_sold=round(amount[i], 4)
                 if units_sold>running_units+1e-9:
@@ -346,13 +355,13 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
                 proceeds=amount[i]*market_price[i]
 
                 units_by_day[pos]-=units_sold
-                money_invested_by_day[pos]-=money_invested_removed
-                realized_profit_by_day[pos]+=round(proceeds-money_invested_removed, 2)
+                money_invested_by_day[pos]-=to_money(money_invested_removed)
+                realized_profit_by_day[pos]+=to_money(round(proceeds-money_invested_removed, 2))
 
                 running_units-=units_sold
                 running_money_invested-=money_invested_removed
             elif row_state=='sell_tax':
-                realized_profit_by_day[pos]-=round(sell_tax[i]*row_fx, 2)
+                realized_profit_by_day[pos]-=to_money(round(sell_tax[i]*row_fx, 2))
 
         data[self.MONEY_INVESTED_COLUMN]=money_invested_by_day
         data[self.UNITS_COLUMN]=units_by_day
@@ -362,9 +371,13 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         data[self.UNITS_COLUMN]=data[self.UNITS_COLUMN].cumsum()
         data[self.REALIZED_PROFIT_COLUMN]=data[self.REALIZED_PROFIT_COLUMN].cumsum()
 
-        # Unrealized profit = current market value of the held units minus their cost basis.
-        data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=round(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN]-data[self.MONEY_INVESTED_COLUMN], 2)
-        data[self.PROFIT_COLUMN]=round(data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN], 2)
+        # Unrealized profit = current market value of the held units (still float - Close/Units
+        # are price/quantity, not money) minus their cost basis (Decimal), cast to Decimal here
+        # at the point it becomes a stored money figure. Every sum below is then exact
+        # Decimal+Decimal, no further rounding needed.
+        market_value=money_array(data[self.CLOSE_COLUMN]*data[self.UNITS_COLUMN])
+        data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=market_value-data[self.MONEY_INVESTED_COLUMN]
+        data[self.PROFIT_COLUMN]=data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]+data[self.REALIZED_PROFIT_COLUMN]
         # No Dividend column to add back - equal to the unrealized component alone.
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]
         # No dividends to exclude either - equal to total Profit.

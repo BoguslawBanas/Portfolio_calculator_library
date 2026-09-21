@@ -66,7 +66,7 @@ def test_buy_money_invested_is_recorded_directly_not_derived_from_market_price(m
                    "2024-01-15,gold,2,troy_ounce,500.0,usd\n",
     })
     data=commodity.data
-    assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(500.0)
+    assert float(data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(500.0)
     assert commodity.distribution_by_ticker['gold']==pytest.approx(100.0)
 
 
@@ -97,13 +97,13 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
     money_invested=995.0
     money_invested_removed=round(money_invested*0.4, 2)
     proceeds=4*fake_close(start_date, sell_date)
-    assert data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(round(money_invested-money_invested_removed, 2))
-    assert data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(round(proceeds-money_invested_removed, 2))
+    assert float(data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(round(money_invested-money_invested_removed, 2))
+    assert float(data[Commodity.REALIZED_PROFIT_COLUMN].iloc[-1])==pytest.approx(round(proceeds-money_invested_removed, 2))
     # total_money_invested stays at the lifetime-gross buy total, while
     # total_money_currently_invested drops to what's still held (post-sell cost basis) - the two
     # diverge exactly once a sell happens, same as Stock.
-    assert commodity.total_money_invested==pytest.approx(round(money_invested, 2))
-    assert commodity.total_money_currently_invested==pytest.approx(round(money_invested-money_invested_removed, 2))
+    assert float(commodity.total_money_invested)==pytest.approx(round(money_invested, 2))
+    assert float(commodity.total_money_currently_invested)==pytest.approx(round(money_invested-money_invested_removed, 2))
     assert commodity.distribution_by_ticker_currently_invested['gold']==pytest.approx(100.0)
 
 
@@ -148,7 +148,7 @@ def test_buy_currency_is_converted_via_its_own_fx_rate(make_source_dir):
                    "2024-01-15,gold,2,troy_ounce,500.0,eur\n",
     }, currency_to='usd')
     expected=round(500.0*fake_fx('2024-01-15', '2024-01-15'), 2)
-    assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected)
 
 
 def test_missing_currency_raises_value_error(make_source_dir):
@@ -171,8 +171,8 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir):
     # Recomputed in QUOTE_CURRENCY ('usd', matching this buy row's own currency), so it's exactly
     # the recorded amount, no FX involved - unlike self.data, which is currency_to='eur'-converted
     # and so diverges from it.
-    assert commodity.native_data['gold'][Commodity.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(500.0)
-    assert commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(500.0)
+    assert float(commodity.native_data['gold'][Commodity.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(500.0)
+    assert float(commodity.data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1])!=pytest.approx(500.0)
 
 
 def test_gram_and_troy_ounce_units_convert_to_the_same_physical_quantity(make_source_dir):
@@ -206,7 +206,7 @@ def test_copper_quote_unit_is_pounds_not_troy_ounce(make_source_dir):
     # today's own fake close (not DAY_0_CLOSE - total_current_value marks to market as of today,
     # not as of the buy date).
     expected=fake_close('2024-01-15', date.today().isoformat())
-    assert commodity.total_current_value==pytest.approx(expected)
+    assert float(commodity.total_current_value)==pytest.approx(expected)
 
 
 def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
@@ -228,7 +228,7 @@ def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_
     # built-in symbols - so total_current_value (Units * today's Close) is exactly today's own
     # fake close (not DAY_0_CLOSE - total_current_value marks to market as of today).
     expected=fake_close('2024-01-15', date.today().isoformat())
-    assert commodity.total_current_value==pytest.approx(expected)
+    assert float(commodity.total_current_value)==pytest.approx(expected)
 
 
 def test_tickers_json_entry_overrides_a_built_in_symbol(make_source_dir, make_tickers_json, mock_yfinance):
