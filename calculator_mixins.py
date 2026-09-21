@@ -90,13 +90,16 @@ class IrrMixin:
     def calculate_irr(self):
         dataframe=self.data
 
-        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
-        dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
-        dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
+        # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal (money) - their sum/difference is
+        # already exact at cent precision, no round() needed. The Newton's-method solve below is
+        # a rate, not a money value, so it runs on plain float arrays (.astype(float)).
+        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(Decimal('0'))
+        dataframe[self.TOTAL_MONEY_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN]
+        dataframe[self.CASHFLOW_COLUMN]=dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN]
 
         n=len(dataframe[self.CASHFLOW_COLUMN])
-        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
-        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
+        cashflow_values=dataframe[self.CASHFLOW_COLUMN].astype(float).to_numpy()
+        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].astype(float).to_numpy()
 
         irr=np.full(n, np.nan)
         guess=0.1

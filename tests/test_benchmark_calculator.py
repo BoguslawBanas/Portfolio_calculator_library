@@ -36,8 +36,8 @@ def test_current_value_matches_units_bought_at_the_buy_day_price():
     last_price=full.loc['2024-01-05']
     units=1000.0/buy_price
     expected_current_value=units*last_price
-    assert benchmark.total_current_value==pytest.approx(expected_current_value, rel=1e-6)
-    assert benchmark.total_revenue==pytest.approx(expected_current_value-1000.0, abs=0.01)
+    assert float(benchmark.total_current_value)==pytest.approx(expected_current_value, abs=0.01)
+    assert float(benchmark.total_revenue)==pytest.approx(expected_current_value-1000.0, abs=0.01)
 
 
 def test_withdrawal_sells_units_worth_the_withdrawn_amount():
@@ -99,4 +99,4 @@ def test_dividends_are_reinvested_as_extra_units(monkeypatch):
 
     # Money_invested is untouched by the dividend - only investor cash counts as contribution.
     assert benchmark.data[Benchmark.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(1000.0)
-    assert benchmark.total_current_value==pytest.approx(expected_current_value, rel=1e-6)
+    assert float(benchmark.total_current_value)==pytest.approx(expected_current_value, abs=0.01)

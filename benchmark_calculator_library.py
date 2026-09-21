@@ -7,11 +7,12 @@ Not meant to be constructed directly - see Portfolio.simulate_benchmark.
 """
 
 from datetime import datetime
+from decimal import Decimal
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from .currency_calculator_library import get_cached_currency
-from .calculator_mixins import ReprMixin, IrrMixin
+from .calculator_mixins import ReprMixin, IrrMixin, to_money, money_array
 
 
 class Benchmark(IrrMixin, ReprMixin):
@@ -93,11 +94,14 @@ class Benchmark(IrrMixin, ReprMixin):
         total_value=np.where(units_cumulative==0.0, 0.0, units_cumulative*price)
         profit=np.round(total_value-money_invested_cumulative, 2)
 
+        # Units/price/contributions stay float throughout (quantities/prices, not money) -
+        # Decimal only enters here, where the cumulative money_invested/profit arrays become the
+        # actually-stored columns.
         self.data=pd.DataFrame({
-            self.MONEY_INVESTED_COLUMN: money_invested_cumulative,
-            self.PROFIT_COLUMN: profit,
+            self.MONEY_INVESTED_COLUMN: money_array(money_invested_cumulative),
+            self.PROFIT_COLUMN: money_array(profit),
         }, index=contributions.index)
 
-        self.total_money_invested=float(contributions.clip(lower=0.0).sum())
-        self.total_current_value=float(total_value[-1]) if n else 0.0
-        self.total_revenue=float(profit[-1]) if n else 0.0
+        self.total_money_invested=to_money(contributions.clip(lower=0.0).sum())
+        self.total_current_value=to_money(total_value[-1]) if n else Decimal('0')
+        self.total_revenue=to_money(profit[-1]) if n else Decimal('0')
