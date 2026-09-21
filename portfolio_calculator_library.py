@@ -250,38 +250,56 @@ class Portfolio(IrrMixin, ReprMixin):
             self.native_data.update(source.native_data)
             self.native_currency.update(source.native_currency)
 
-    def simulate_benchmark(self, symbol: str, asset_type: str='stock', currency: str=None, currency_to: str=None, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
-        """Simulates buying a single stock/ETF/commodity/crypto with this portfolio's own
-        day-by-day cash contributions, so the result's calculate_irr() is directly comparable to
-        this portfolio's own (see Benchmark, and Plot.benchmark_comparison_plot to overlay both).
+    def simulate_benchmark(self, symbol, asset_type='stock', currency=None, currency_to: str=None, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False) -> Benchmark:
+        """Simulates buying a stock/ETF/commodity/crypto - or a weighted basket of them - with
+        this portfolio's own day-by-day cash contributions, so the result's calculate_irr() is
+        directly comparable to this portfolio's own (see Benchmark, and
+        Plot.benchmark_comparison_plot to overlay both).
 
         symbol: for asset_type='stock' (the default), a yfinance ticker directly (e.g. 'SPY').
         For 'commodities'/'crypto', a friendly name (e.g. 'gold', 'bitcoin') resolved through
         Commodity.TICKERS/Crypto.TICKERS - an unknown name raises the same KeyError constructing
-        one of those would.
-        asset_type: one of BENCHMARK_ASSET_TYPES ('stock', 'commodities', 'crypto').
+        one of those would. Or a dict {symbol: percent} (percents positive, summing to 100) to
+        split every buy across several, e.g. {'SPY': 60, 'gold': 40} - see Benchmark for how
+        withdrawals/dividends are handled.
+        asset_type: one of BENCHMARK_ASSET_TYPES ('stock', 'commodities', 'crypto'), applied to
+        every symbol - or, for a mixed basket, a dict {symbol: asset_type} (a symbol it omits
+        is 'stock').
         currency: symbol's native currency - defaults to 'USD' for a stock, or to Commodity/
-        Crypto's own QUOTE_CURRENCY (both 'usd') otherwise.
+        Crypto's own QUOTE_CURRENCY (both 'usd') otherwise. One string applies to every symbol; a
+        dict {symbol: currency} sets it per symbol (an omitted symbol keeps its default).
         tickers_json: for 'commodities'/'crypto' only - merged on top of that class's built-in
         TICKERS, same as a real source. Ignored for 'stock'.
         currency_to: reporting currency - defaults to this portfolio's own currency_to."""
-        if asset_type=='stock':
-            ticker=symbol
-            currency=currency or 'USD'
-        elif asset_type=='commodities':
-            ticker=Commodity._load_tickers(tickers_json)[0][symbol]
-            currency=currency or Commodity.QUOTE_CURRENCY
-        elif asset_type=='crypto':
-            ticker=Crypto._load_tickers(tickers_json)[symbol]
-            currency=currency or Crypto.QUOTE_CURRENCY
-        else:
-            raise ValueError(f"Unknown simulate_benchmark asset_type: {asset_type!r} (expected one of {sorted(self.BENCHMARK_ASSET_TYPES)})")
+        weights=symbol if isinstance(symbol, dict) else {symbol: 100.0}
+
+        tickers=dict()
+        currencies=dict()
+        for name, percent in weights.items():
+            kind=asset_type.get(name, 'stock') if isinstance(asset_type, dict) else asset_type
+            ticker, default_currency=self._resolve_benchmark_symbol(name, kind, tickers_json)
+            if ticker in tickers:
+                raise ValueError(f"simulate_benchmark symbols resolve to the same ticker {ticker!r} twice - merge them into one weight.")
+            tickers[ticker]=percent
+            symbol_currency=currency.get(name) if isinstance(currency, dict) else currency
+            currencies[ticker]=symbol_currency or default_currency
 
         # MONEY_INVESTED_COLUMN is Decimal - Benchmark's own contributions contract is float (its
         # constructor immediately .round(2)s it, then re-derives its own Decimal Money_invested/
         # Profit from that), so the day-by-day cash-flow schedule is handed over as float here.
         contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(Decimal('0')).astype(float)
-        return Benchmark(contributions, ticker, currency=currency, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
+        return Benchmark(contributions, tickers, currency=currencies, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
+
+    @classmethod
+    def _resolve_benchmark_symbol(cls, symbol: str, asset_type: str, tickers_json: str=None) -> tuple:
+        """(yfinance ticker, default native currency) for one simulate_benchmark symbol."""
+        if asset_type=='stock':
+            return symbol, 'USD'
+        if asset_type=='commodities':
+            return Commodity._load_tickers(tickers_json)[0][symbol], Commodity.QUOTE_CURRENCY
+        if asset_type=='crypto':
+            return Crypto._load_tickers(tickers_json)[symbol], Crypto.QUOTE_CURRENCY
+        raise ValueError(f"Unknown simulate_benchmark asset_type: {asset_type!r} (expected one of {sorted(cls.BENCHMARK_ASSET_TYPES)})")
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:

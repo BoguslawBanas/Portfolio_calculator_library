@@ -439,3 +439,26 @@ def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_sourc
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
     with pytest.raises(ValueError, match="stocks"):
         Portfolio({stock_dir: 'stocks'}, tickers_json=tickers_json)  # typo: 'stocks', not 'stock'
+
+
+def test_simulate_benchmark_accepts_a_weighted_basket_across_asset_types(make_source_dir, make_tickers_json, mock_yfinance):
+    from Portfolio_calculator_library import Commodity
+
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    benchmark=portfolio.simulate_benchmark({'FAKEUSD': 60, 'gold': 40}, asset_type={'gold': 'commodities'})
+
+    assert benchmark.tickers=={'FAKEUSD': 60.0, Commodity.TICKERS['gold']: 40.0}
+    assert Commodity.TICKERS['gold'] in mock_yfinance.call_log
+    assert benchmark.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()==portfolio.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()
+
+
+def test_simulate_benchmark_rejects_symbols_that_resolve_to_the_same_ticker(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    with pytest.raises(ValueError, match="same ticker"):
+        portfolio.simulate_benchmark({'GC=F': 50, 'gold': 50}, asset_type={'gold': 'commodities'})
+
+
+def test_simulate_benchmark_rejects_bad_weights(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    with pytest.raises(ValueError, match="sum to 100"):
+        portfolio.simulate_benchmark({'FAKEUSD': 50, 'FAKEUSD2': 30})
