@@ -6,6 +6,7 @@ instead of retaking a dataframe argument each call.
 """
 
 from datetime import datetime
+from decimal import Decimal
 import pandas as pd
 from tqdm import tqdm
 from .stock_calculator_library import Stock
@@ -15,7 +16,7 @@ from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
 from .benchmark_calculator_library import Benchmark
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, IrrMixin
+from .calculator_mixins import ReprMixin, IrrMixin, to_money, zero_row
 
 
 class Portfolio(IrrMixin, ReprMixin):
@@ -104,12 +105,12 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_currency_revenue=dict()
         self.native_data=dict()
         self.native_currency=dict()
-        self.total_money_invested=0.0
+        self.total_money_invested=Decimal('0')
         # Unlike total_money_invested (lifetime gross, never reduced by a sell/withdrawal/
         # maturity), this is what's actually still held today across every source.
-        self.total_money_currently_invested=0.0
-        self.total_current_value=0.0
-        self.total_revenue=0.0
+        self.total_money_currently_invested=Decimal('0')
+        self.total_current_value=Decimal('0')
+        self.total_revenue=Decimal('0')
         portfolio_list=list()
         # Shared across every source below so a currency pair fetched by one is reused by
         # another instead of each fetching its own.
@@ -158,42 +159,43 @@ class Portfolio(IrrMixin, ReprMixin):
 
         # A portfolio fully matured/sold out has a 0 total for one or more of these metrics while
         # its distribution dict is still non-empty - guard each division for a correct 0.0
-        # instead of a ZeroDivisionError (plain Python floats, not numpy).
+        # instead of a ZeroDivisionError. Every value/total here is Decimal (money); the
+        # percentage itself is a ratio, not money, so it's computed in float.
         for key, value in self.distribution_by_directory.items():
-            self.distribution_by_directory[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
+            self.distribution_by_directory[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_directory_currently_invested.items():
-            self.distribution_by_directory_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+            self.distribution_by_directory_currently_invested[key]=100.0*float(value)/float(self.total_money_currently_invested) if self.total_money_currently_invested else 0.0
 
         for key, value in self.distribution_by_directory_current_value.items():
-            self.distribution_by_directory_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
+            self.distribution_by_directory_current_value[key]=100.0*float(value)/float(self.total_current_value) if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_directory_revenue.items():
-            self.distribution_by_directory_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
+            self.distribution_by_directory_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_ticker.items():
-            self.distribution_by_ticker[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
+            self.distribution_by_ticker[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_ticker_currently_invested.items():
-            self.distribution_by_ticker_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+            self.distribution_by_ticker_currently_invested[key]=100.0*float(value)/float(self.total_money_currently_invested) if self.total_money_currently_invested else 0.0
 
         for key, value in self.distribution_by_ticker_current_value.items():
-            self.distribution_by_ticker_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
+            self.distribution_by_ticker_current_value[key]=100.0*float(value)/float(self.total_current_value) if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_ticker_revenue.items():
-            self.distribution_by_ticker_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
+            self.distribution_by_ticker_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
 
         for key, value in self.distribution_by_currency.items():
-            self.distribution_by_currency[key]=100.0*value/self.total_money_invested if self.total_money_invested else 0.0
+            self.distribution_by_currency[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
 
         for key, value in self.distribution_by_currency_currently_invested.items():
-            self.distribution_by_currency_currently_invested[key]=100.0*value/self.total_money_currently_invested if self.total_money_currently_invested else 0.0
+            self.distribution_by_currency_currently_invested[key]=100.0*float(value)/float(self.total_money_currently_invested) if self.total_money_currently_invested else 0.0
 
         for key, value in self.distribution_by_currency_current_value.items():
-            self.distribution_by_currency_current_value[key]=100.0*value/self.total_current_value if self.total_current_value else 0.0
+            self.distribution_by_currency_current_value[key]=100.0*float(value)/float(self.total_current_value) if self.total_current_value else 0.0
 
         for key, value in self.distribution_by_currency_revenue.items():
-            self.distribution_by_currency_revenue[key]=100.0*value/self.total_revenue if self.total_revenue else 0.0
+            self.distribution_by_currency_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
 
         self.data=self.merge(portfolio_list)
 
@@ -206,12 +208,12 @@ class Portfolio(IrrMixin, ReprMixin):
         return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
 
     @staticmethod
-    def _accumulate_by_currency(target: dict, currency_by_ticker: dict, key, amount: float):
+    def _accumulate_by_currency(target: dict, currency_by_ticker: dict, key, amount: Decimal):
         """Adds amount into target's bucket for currency_by_ticker[key]'s currency (uppercased).
         Used by __init__ to build distribution_by_currency/_current_value/_revenue from each
-        source's per-ticker figures, still absolute at that point (normalized to % later)."""
+        source's per-ticker figures, still absolute (Decimal) at that point (normalized to % later)."""
         currency_code=currency_by_ticker[key].upper()
-        target[currency_code]=target.get(currency_code, 0.0)+amount
+        target[currency_code]=target.get(currency_code, Decimal('0'))+amount
 
     def _absorb_source(self, dir: str, source, supports_currency: bool=True, supports_native_currency: bool=False):
         """Folds one already-constructed source instance into the matching portfolio-level
@@ -236,8 +238,11 @@ class Portfolio(IrrMixin, ReprMixin):
         )
         for target_ticker, target_currency, source_ticker, total in per_metric:
             for key, value in source_ticker.items():
-                amount=round(value/100.0*total, 2)
-                target_ticker[key]=target_ticker.get(key, 0.0)+amount
+                # value (a %) and total (Decimal money) are reconstructed back to an absolute
+                # amount here - computed in float (an approximation of the source's own rounding),
+                # then cast to Decimal at the point it becomes a stored money figure.
+                amount=to_money(value/100.0*float(total))
+                target_ticker[key]=target_ticker.get(key, Decimal('0'))+amount
                 if supports_currency:
                     self._accumulate_by_currency(target_currency, source.currency_by_ticker, key, amount)
 
@@ -272,7 +277,10 @@ class Portfolio(IrrMixin, ReprMixin):
         else:
             raise ValueError(f"Unknown simulate_benchmark asset_type: {asset_type!r} (expected one of {sorted(self.BENCHMARK_ASSET_TYPES)})")
 
-        contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(0.0)
+        # MONEY_INVESTED_COLUMN is Decimal - Benchmark's own contributions contract is float (its
+        # constructor immediately .round(2)s it, then re-derives its own Decimal Money_invested/
+        # Profit from that), so the day-by-day cash-flow schedule is handed over as float here.
+        contributions=self.data[self.MONEY_INVESTED_COLUMN].diff().fillna(Decimal('0')).astype(float)
         return Benchmark(contributions, ticker, currency=currency, currency_to=currency_to or self.currency_to, cache_dir=cache_dir, force_refresh=force_refresh)
 
     @staticmethod
@@ -286,11 +294,11 @@ class Portfolio(IrrMixin, ReprMixin):
     def _prepend_zero_day(dataframe: pd.DataFrame) -> pd.DataFrame:
         """Adds a zero-valued row one day before the first date, so IRR/return calculations have
         a clean starting point."""
-        zero_row=pd.DataFrame(
-            [{col: 0.0 for col in dataframe.columns}],
+        zero_day=pd.DataFrame(
+            [zero_row(dataframe)],
             index=[dataframe.index[0]-pd.DateOffset(days=1)]
         )
-        return pd.concat([zero_row, dataframe]).sort_index()
+        return pd.concat([zero_day, dataframe]).sort_index()
 
     def resample(self, resample_rule: str) -> pd.DataFrame:
         resample_rule=resample_rule.upper()
@@ -308,24 +316,24 @@ class Portfolio(IrrMixin, ReprMixin):
             timedelta_to_subtract=pd.DateOffset(years=1)
 
         new_row=pd.DataFrame(
-            [{col: 0.0 for col in self.portfolio.columns}],
+            [zero_row(self.portfolio)],
             index=[pd.to_datetime(self.portfolio.index[0]-timedelta_to_subtract, format='%Y-%m-%d')]
         )
         dataframe=pd.concat([self.portfolio, new_row]).sort_index()
         self.portfolio=dataframe.resample(resample_rule).ffill()
         return self.portfolio
 
-    def calculate_money_earned_between_dates(self, start_date: datetime, end_date: datetime) -> float:
+    def calculate_money_earned_between_dates(self, start_date: datetime, end_date: datetime) -> Decimal:
         dataframe=self.portfolio
 
-        start_date_profit=0.0
-        end_date_profit=0.0
+        start_date_profit=Decimal('0')
+        end_date_profit=Decimal('0')
 
         if start_date.strftime('%Y-%m-%d') in dataframe.index:
-            start_date_profit=float(dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
+            start_date_profit=dataframe.loc[start_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
 
         if end_date.strftime('%Y-%m-%d') in dataframe.index:
-            end_date_profit=float(dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN])
+            end_date_profit=dataframe.loc[end_date.strftime('%Y-%m-%d'), self.PROFIT_COLUMN]
 
         return end_date_profit-start_date_profit
 
@@ -338,9 +346,12 @@ class Portfolio(IrrMixin, ReprMixin):
         # Same formula as calculate_money_earned_between_dates, vectorized via .shift() instead
         # of a per-row loop. Shifting N rows only matches N calendar days on a continuous daily
         # index - true before resample(), not after (weekly/monthly rows diverge from row shifts).
-        recent_profit=dataframe[self.PROFIT_COLUMN].shift(offset).fillna(0.0)
-        older_profit=dataframe[self.PROFIT_COLUMN].shift(days_between+offset).fillna(0.0)
-        dataframe[self.DAILY_RETURN_COLUMN]=round((recent_profit-older_profit)/days_between, 2)
+        # PROFIT_COLUMN is Decimal - cast to float for the division (days_between is a count, not
+        # money), then back to Decimal (money_array, via to_money's own rounding) at the point the
+        # result becomes the stored Daily_return column.
+        recent_profit=dataframe[self.PROFIT_COLUMN].shift(offset).fillna(Decimal('0')).astype(float)
+        older_profit=dataframe[self.PROFIT_COLUMN].shift(days_between+offset).fillna(Decimal('0')).astype(float)
+        dataframe[self.DAILY_RETURN_COLUMN]=[to_money((recent-older)/days_between) for recent, older in zip(recent_profit, older_profit)]
 
         self.portfolio=dataframe
         return self.portfolio

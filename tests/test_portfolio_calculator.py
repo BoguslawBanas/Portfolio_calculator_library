@@ -51,7 +51,7 @@ def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_d
     stock_dir=list(portfolio.distribution_by_directory)[0]
     stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
     realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
-    assert realized==pytest.approx(80.0)
+    assert float(realized)==pytest.approx(80.0)
 
     assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-realized)
     # The net dividend (25.0-0.0, no dividend_tax.csv here) is still included, unlike realized.
@@ -203,7 +203,7 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # of hardcoding 100.0 PLN, so this test doesn't depend on the fake FX rate's exact value.
     from Portfolio_calculator_library import PolishRetailBonds
     bonds_alone=PolishRetailBonds(bonds_dir, 'usd')
-    assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
+    assert float(portfolio.total_money_invested)==pytest.approx(1000.0+float(bonds_alone.total_money_invested))
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
     # Nothing sold/matured/cancelled anywhere in this portfolio, so total_money_currently_invested
