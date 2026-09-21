@@ -58,13 +58,14 @@ worth double-checking against an authoritative source, overridable via bond_type
 
 import os
 import json
+from decimal import Decimal
 from typing import Callable
 import numpy as np
 import pandas as pd
 from datetime import datetime
 from .currency_calculator_library import Currency, get_cached_currency
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, MergeMixin
+from .calculator_mixins import ReprMixin, MergeMixin, to_money, money_array
 
 
 class PolishRetailBonds(MergeMixin, ReprMixin):
@@ -230,8 +231,10 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # by ticker - merging per type (type_dataframes) so two holdings of the same type land in
         # one slice. distribution_by_ticker keeps a fully-matured type's lifetime share;
         # _currently_invested drops it to 0% instead; _revenue keeps whatever was realized.
-        self.distribution_by_ticker={code: (invested/self.total_money_invested)*100.0 for code, invested in lifetime_invested_by_type.items()} if self.total_money_invested else dict()
-        self.distribution_by_ticker_currently_invested={code: (invested/self.total_money_currently_invested)*100.0 for code, invested in invested_by_type.items()} if self.total_money_currently_invested else dict()
+        # Distribution percentages are ratios, not money - computed in float even though the
+        # underlying invested/current_value/revenue figures are Decimal.
+        self.distribution_by_ticker={code: (float(invested)/float(self.total_money_invested))*100.0 for code, invested in lifetime_invested_by_type.items()} if self.total_money_invested else dict()
+        self.distribution_by_ticker_currently_invested={code: (float(invested)/float(self.total_money_currently_invested))*100.0 for code, invested in invested_by_type.items()} if self.total_money_currently_invested else dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Trivial (every type is issued in NATIVE_CURRENCY, unlike Stock's per-ticker currency) -
@@ -240,8 +243,8 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         for code, type_dataframe in type_dataframes.items():
             current_value=type_dataframe[self.MONEY_INVESTED_COLUMN].iloc[-1]+type_dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]
             revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
-            self.distribution_by_ticker_current_value[code]=(current_value/self.total_current_value)*100.0 if self.total_current_value else 0.0
-            self.distribution_by_ticker_revenue[code]=(revenue/self.total_revenue)*100.0 if self.total_revenue else 0.0
+            self.distribution_by_ticker_current_value[code]=(float(current_value)/float(self.total_current_value))*100.0 if self.total_current_value else 0.0
+            self.distribution_by_ticker_revenue[code]=(float(revenue)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
 
     @classmethod
     def count_tickers(cls, directory_path: str) -> int:
@@ -380,7 +383,7 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             # Summing each tranche's own lifetime_invested reconstructs the whole holding's cost
             # basis exactly - price_per_bond/fx_at_purchase are identical across tranches, and
             # tranche amounts sum back to amounts[i].
-            lifetime_invested_by_type[code]=lifetime_invested_by_type.get(code, 0.0)+sum(lifetime_invested for _, lifetime_invested in tranche_results)
+            lifetime_invested_by_type[code]=lifetime_invested_by_type.get(code, Decimal('0'))+sum(lifetime_invested for _, lifetime_invested in tranche_results)
             bond=tranche_dataframes[0] if len(tranche_dataframes)==1 else self.merge(tranche_dataframes)
             bonds_by_type.setdefault(code, list()).append(bond)
 
@@ -499,10 +502,14 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         profit[:n_days]=accrued_profit
         profit[n_days:]=accrued_profit[-1]
 
+        # The whole accrual above (daily_interest/accrued_profit/money_invested/profit) stays
+        # float/numpy end to end - that's the vectorized hot path this method is built around.
+        # Decimal only enters at the boundary, here, where these per-day arrays become the
+        # actually-stored money columns.
         dataframe=pd.DataFrame({
-            self.MONEY_INVESTED_COLUMN: money_invested,
-            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: profit_without_dividend,
-            self.PROFIT_COLUMN: profit,
+            self.MONEY_INVESTED_COLUMN: money_array(money_invested),
+            self.PROFIT_WITHOUT_DIVIDEND_COLUMN: money_array(profit_without_dividend),
+            self.PROFIT_COLUMN: money_array(profit),
         }, index=full_index)
         # Derived, not accrued independently: 0 while PROFIT_WITHOUT_DIVIDEND_COLUMN still
         # carries the fluctuating accrued value, then whatever it just dropped the moment it
@@ -517,5 +524,5 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # money_invested above - the "lifetime gross" meaning Stock's total_money_invested
         # carries. Returned alongside the DataFrame since summing a partially-cancelled holding's
         # tranches needs this even once MONEY_INVESTED_COLUMN has dropped to 0.
-        lifetime_invested=round(amount_of_bonds*price_per_bond*fx_at_purchase, 2)
+        lifetime_invested=to_money(amount_of_bonds*price_per_bond*fx_at_purchase)
         return dataframe, lifetime_invested
