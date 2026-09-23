@@ -4,6 +4,8 @@
 
 A Python library for tracking the performance of an investment portfolio, combining stocks/ETFs, Polish retail treasury bonds, physical commodities, crypto, and bank accounts into a single aggregated view. Price data comes from `yfinance`; every chart is built with `plotly`.
 
+> **Status: pre-1.0, still under active development.** The public API, data formats, and file layout may all change - including in breaking ways - before a 1.0.0 release. See `CHANGELOG.md` for what's changed so far, and pin a specific version if you depend on this library.
+
 ## Features
 
 The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`, `Benchmark`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
@@ -332,7 +334,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - `Plot.performance_plot`/`benchmark_comparison_plot`/`period_return_bar_plot` each guard with `if <column> not in self.portfolio.portfolio.columns: <recompute it>`, but `self.portfolio` only ever comes into existence (always already carrying that column) inside `calculate_irr()` itself — `resample()`/`calculate_money_earned_between_dates_column()` both require it to already exist, so neither can be the first call either. Calling any of the three on a `Portfolio` that's never had `calculate_irr()` called raises `AttributeError` from the guard's own attribute access, instead of transparently computing IRR the way the guard implies — and the guard's "recompute" branch is otherwise unreachable through the public API. See `tests/test_plot_library.py`'s `test_performance_plot_on_a_never_computed_portfolio_raises_attributeerror` for a reproduction
 - No retry/backoff around any `yfinance` call (`Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark` all call `yf.Ticker(...).history(...)` bare) — one transient network failure or rate-limit response aborts the whole `Portfolio` construction instead of retrying a couple of times first
 - Ticker/symbol price history is fetched one at a time, sequentially, even across independent tickers within one source — for a portfolio with many holdings, fetching them concurrently (e.g. a thread pool, since these are I/O-bound waits) could cut load time substantially. Would need care around the shared `currency_cache`/`DiskCache` (thread-safety) and the `tqdm` progress callback
-- No `CHANGELOG.md` — recent changes (money values becoming `Decimal`, `simulate_benchmark` accepting a weighted basket) are breaking/feature changes with nothing tracking them for anyone upgrading an existing install
 
 ## License
 

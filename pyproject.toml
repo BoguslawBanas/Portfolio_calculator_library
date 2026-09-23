@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "portfolio-calculator-library"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tracks the performance of an investment portfolio combining stocks/ETFs, Polish retail treasury bonds, commodities, crypto, and bank accounts into a single aggregated view."
 readme = "README.md"
 license = { file = "LICENSE" }
