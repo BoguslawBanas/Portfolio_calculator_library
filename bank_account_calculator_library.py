@@ -9,11 +9,12 @@ balance left by every prior day.
 
 import os
 from datetime import datetime
+from decimal import Decimal
 from typing import Callable
 import numpy as np
 import pandas as pd
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
 
 
 class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
@@ -63,9 +64,9 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         self._interest_rate_path=os.path.join(directory_path, interest_rate_file)
         self._interest_rate_data=None  # lazily loaded — only accounts with rate_type='variable' need it
 
-        self.total_money_invested=0.0
-        self.total_current_value=0.0
-        self.total_revenue=0.0
+        self.total_money_invested=Decimal('0')
+        self.total_current_value=Decimal('0')
+        self.total_revenue=Decimal('0')
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
@@ -102,15 +103,17 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         # distribution_by_ticker: lifetime-gross (every deposit, ignoring withdrawals), matching
         # Stock. distribution_by_ticker_currently_invested: current balance net of withdrawals -
         # an account withdrawn to 0 drops to 0% there while keeping its lifetime share above.
+        # Distribution percentages are ratios, not money - computed in float even though value/
+        # total are Decimal.
         for account, value in lifetime_invested_by_account.items():
-            self.distribution_by_ticker[account]=(value/self.total_money_invested)*100.0 if self.total_money_invested else 0.0
+            self.distribution_by_ticker[account]=(float(value)/float(self.total_money_invested))*100.0 if self.total_money_invested else 0.0
         self.total_money_currently_invested=sum(money_invested_by_account.values())
         for account, value in money_invested_by_account.items():
-            self.distribution_by_ticker_currently_invested[account]=(value/self.total_money_currently_invested)*100.0 if self.total_money_currently_invested else 0.0
+            self.distribution_by_ticker_currently_invested[account]=(float(value)/float(self.total_money_currently_invested))*100.0 if self.total_money_currently_invested else 0.0
         for account, value in current_value_by_account.items():
-            self.distribution_by_ticker_current_value[account]=(value/self.total_current_value)*100.0 if self.total_current_value else 0.0
+            self.distribution_by_ticker_current_value[account]=(float(value)/float(self.total_current_value))*100.0 if self.total_current_value else 0.0
         for account, value in revenue_by_account.items():
-            self.distribution_by_ticker_revenue[account]=(value/self.total_revenue)*100.0 if self.total_revenue else 0.0
+            self.distribution_by_ticker_revenue[account]=(float(value)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
 
         self.data=self.merge(dataframes_2)
 
@@ -183,20 +186,23 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         # Plain numpy arrays, scattered by position instead of .iterrows()/.loc[label] per row -
         # same pattern as Stock/Commodity/Crypto, but with no running-average dependency between
         # rows, so np.add.at does the whole accumulation in one call, no Python loop needed.
+        # signed_amount/money_invested_by_day are Decimal (object dtype) - each deposit/
+        # withdrawal is already meaningful at cent precision, cast via to_money()/money_array()
+        # right before landing here, so the cumsum() below adds exact Decimals.
         sorted_df=dataframe.sort_index(kind='stable')
         state=sorted_df[self.SOURCE_TYPE_COLUMN].to_numpy()
         raw_amount=sorted_df[self.CSV_AMOUNT_COLUMN].to_numpy(dtype=float)
-        signed_amount=np.where(state=='deposit', 1.0, -1.0)*np.round(raw_amount, 2)
+        signed_amount=money_array(np.where(state=='deposit', 1.0, -1.0)*np.round(raw_amount, 2))
         # signed_amount is already +amount for deposits/-amount for withdrawals, so summing just
         # the deposit entries gives lifetime_deposited directly.
-        lifetime_deposited=float(signed_amount[state=='deposit'].sum())
+        lifetime_deposited=signed_amount[state=='deposit'].sum() if (state=='deposit').any() else Decimal('0')
 
         position=data.index.get_indexer(sorted_df.index)
         if (position<0).any():
             missing=sorted_df.index[position<0]
             raise KeyError(f"Transaction date(s) {list(missing)} for {account} fall outside the computed daily range.")
 
-        money_invested_by_day=np.zeros(len(data))
+        money_invested_by_day=np.full(len(data), Decimal('0'), dtype=object)
         np.add.at(money_invested_by_day, position, signed_amount)
         data[self.MONEY_INVESTED_COLUMN]=money_invested_by_day
 
@@ -206,6 +212,9 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         # Must accrue one calendar day at a time (not vectorized) - capitalization (folding
         # accrued interest into the balance every capitalization_months) is path-dependent: which
         # days trigger it, and what balance later days accrue against, depend on every prior day.
+        # Stays float end to end (annual_rate is a rate, not money) - money_invested[i] (Decimal)
+        # is cast to float here for this internal computation, and the resulting profit array is
+        # cast back to Decimal in one shot below, at the point it becomes the stored Profit column.
         profit=np.empty(len(data))
         capitalized_interest=0.0
         uncapitalized_interest=0.0
@@ -213,7 +222,7 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         last_capitalization_date=start_date
 
         for i, idx in enumerate(data.index):
-            interest_bearing_balance=money_invested[i]+capitalized_interest
+            interest_bearing_balance=float(money_invested[i])+capitalized_interest
 
             annual_rate=account_rate if rate_type=='fixed' else interest_rate_data.loc[idx, self.CSV_INTEREST_RATE_COLUMN]+account_rate
             daily_interest=interest_bearing_balance*(annual_rate/100.0)/365.0*(1-tax/100.0)
@@ -227,7 +236,7 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
                 uncapitalized_interest=0.0
                 last_capitalization_date=idx
 
-        data[self.PROFIT_COLUMN]=profit
+        data[self.PROFIT_COLUMN]=money_array(profit)
         data[self.PROFIT_WITHOUT_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]
         data[self.PROFIT_WITHOUT_REALIZED_COLUMN]=data[self.PROFIT_COLUMN]
         data[self.PROFIT_EXCLUDING_DIVIDEND_COLUMN]=data[self.PROFIT_COLUMN]

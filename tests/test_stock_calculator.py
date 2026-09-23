@@ -22,11 +22,11 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir, make_tic
     data=stock.data
     # The computed range starts on the first buy's own date (no day-before-zero row here,
     # unlike Portfolio's merge), so day 0 already reflects that first buy, not zero.
-    assert data[Stock.MONEY_INVESTED_COLUMN].iloc[0]==pytest.approx(500.0)
+    assert float(data[Stock.MONEY_INVESTED_COLUMN].iloc[0])==pytest.approx(500.0)
     # After both buys: 5*100 + (1.01)*3*110 = 500 + 333.3 = 833.3, up to FX (flat 1.0, same currency).
     expected=round(5*100.0, 2)+round(1.01*3*110.0, 2)
-    assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected)
-    assert stock.total_money_invested==pytest.approx(expected)
+    assert float(data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected)
+    assert float(stock.total_money_invested)==pytest.approx(expected)
     # distribution_by_ticker/native_data are keyed by the CSV's isin column (CSV_TICKER_COLUMN),
     # not the yfinance ticker symbol looked up from tickers.json — despite the name.
     assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
@@ -45,20 +45,20 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     )
     data=stock.data
     # Selling 4 of 10 units removes 40% of the cost basis (1000 -> 600), average price unchanged.
-    assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(600.0)
+    assert float(data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(600.0)
     # total_money_invested stays at the lifetime-gross 1000 (unreduced by the sell), while
     # total_money_currently_invested drops to the 600 actually still held - the two diverge
     # exactly once a sell happens.
-    assert stock.total_money_invested==pytest.approx(1000.0)
-    assert stock.total_money_currently_invested==pytest.approx(600.0)
+    assert float(stock.total_money_invested)==pytest.approx(1000.0)
+    assert float(stock.total_money_currently_invested)==pytest.approx(600.0)
     assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
     assert stock.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
     # Realized profit = proceeds (4*120) - cost basis removed (400) = 80.
-    assert data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==pytest.approx(80.0)
+    assert float(data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1])==pytest.approx(80.0)
     # Profit_without_realized excludes that locked-in 80 (no dividends here, so it's just the
     # unrealized component on what's still held) - strictly less than total Profit.
     assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
-    assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1]-80.0)
+    assert float(data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1])==pytest.approx(float(data[Stock.PROFIT_COLUMN].iloc[-1])-80.0)
     # Profit_excluding_dividends is the opposite exclusion: it keeps that 80, and (no dividends
     # here) equals total Profit exactly.
     assert data[Stock.PROFIT_EXCLUDING_DIVIDEND_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
@@ -80,15 +80,15 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
         },
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
-    assert stock.total_current_value==pytest.approx(0.0)
-    assert stock.total_revenue==pytest.approx(0.0)
+    assert float(stock.total_current_value)==pytest.approx(0.0)
+    assert float(stock.total_revenue)==pytest.approx(0.0)
     assert stock.distribution_by_ticker_current_value==pytest.approx({'US0000000001': 0.0})
     assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
     # Same 0/0-guarded shape for currently_invested: nothing is left held (full sell), so
     # total_money_currently_invested is exactly 0.0 while total_money_invested (lifetime gross)
     # stays at 1000 - distribution_by_ticker_currently_invested must land on 0.0, not NaN.
-    assert stock.total_money_invested==pytest.approx(1000.0)
-    assert stock.total_money_currently_invested==pytest.approx(0.0)
+    assert float(stock.total_money_invested)==pytest.approx(1000.0)
+    assert float(stock.total_money_currently_invested)==pytest.approx(0.0)
     assert stock.distribution_by_ticker_currently_invested==pytest.approx({'US0000000001': 0.0})
 
 
@@ -128,9 +128,9 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
         {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
     )
     data=stock.data
-    assert data[Stock.DIVIDEND_COLUMN].iloc[-1]==pytest.approx(25.0-4.75)
+    assert float(data[Stock.DIVIDEND_COLUMN].iloc[-1])==pytest.approx(25.0-4.75)
     # Money invested/units are untouched by a dividend.
-    assert data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(1000.0)
+    assert float(data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(1000.0)
     # Profit_without_realized includes the net dividend (no sell here, so it equals total Profit).
     assert data[Stock.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Stock.PROFIT_COLUMN].iloc[-1])
     # Profit_excluding_dividends drops that same net dividend (no sell here, so it's the pure
@@ -172,7 +172,7 @@ def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json
         currency_to='usd',
     )
     # FakeTicker's EUR/USD rate isn't flat 1.0, so a straight EUR cost basis wouldn't match.
-    assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]!=pytest.approx(250.0)
+    assert float(stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])!=pytest.approx(250.0)
     assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]>0.0
 
 
@@ -205,7 +205,7 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tick
     assert 'DE0000000002' in stock.native_data
     assert stock.native_currency['DE0000000002']=='eur'
     # Native (EUR) cost basis is the flat EUR calculation, no FX applied.
-    assert stock.native_data['DE0000000002'][Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(250.0)
+    assert float(stock.native_data['DE0000000002'][Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(250.0)
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
@@ -234,7 +234,7 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
     })
     stock=Stock(stock_dir, tickers_json, 'usd')
     expected_total=round(5*100.0, 2)+round(2*200.0, 2)
-    assert stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(expected_total)
+    assert float(stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected_total)
     assert set(stock.distribution_by_ticker)=={'US0000000001', 'US0000000003'}
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
 

@@ -63,17 +63,21 @@ class Plot:
         """Money invested vs. total revenue over time.
         kind: 'plot' — two overlaid line plots, or 'stacked_plot' — stacked area plot."""
         dataframe=self.portfolio.portfolio
-        revenue=dataframe[self.portfolio.MONEY_INVESTED_COLUMN]+dataframe[self.portfolio.PROFIT_COLUMN]
+        # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal - cast to float for plotly, which
+        # doesn't render Decimal values.
+        money_invested=dataframe[self.portfolio.MONEY_INVESTED_COLUMN].astype(float)
+        profit=dataframe[self.portfolio.PROFIT_COLUMN].astype(float)
+        revenue=money_invested+profit
 
         if kind==self.MONEY_PLOT_KIND_PLOT:
             fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.MONEY_INVESTED_COLUMN], mode='lines', name='Money_invested'),
+                go.Scatter(x=dataframe.index, y=money_invested, mode='lines', name='Money_invested'),
                 go.Scatter(x=dataframe.index, y=revenue, mode='lines', name='Revenue'),
             ])
         elif kind==self.MONEY_PLOT_KIND_STACKED_PLOT:
             fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.MONEY_INVESTED_COLUMN], mode='lines', name='Money_invested', stackgroup='one'),
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN], mode='lines', name='Profit', stackgroup='one'),
+                go.Scatter(x=dataframe.index, y=money_invested, mode='lines', name='Money_invested', stackgroup='one'),
+                go.Scatter(x=dataframe.index, y=profit, mode='lines', name='Profit', stackgroup='one'),
             ])
         else:
             raise ValueError(f"Unknown money_plot kind: {kind!r} (expected {self.MONEY_PLOT_KIND_PLOT!r} or {self.MONEY_PLOT_KIND_STACKED_PLOT!r})")
@@ -152,15 +156,18 @@ class Plot:
         dividends backed out of revenue and shown separately. DIVIDEND_COLUMN defaults to 0 if
         absent (no Stock source)."""
         dataframe=self.portfolio.data
-        dividends=dataframe.get(self.portfolio.DIVIDEND_COLUMN, pd.Series(0.0, index=dataframe.index))
+        # PROFIT_COLUMN/DIVIDEND_COLUMN are Decimal - cast to float for plotly, which doesn't
+        # render Decimal values. dividends' absent-column fallback is float too, matching that.
+        profit=dataframe[self.portfolio.PROFIT_COLUMN].astype(float)
+        dividends=dataframe[self.portfolio.DIVIDEND_COLUMN].astype(float) if self.portfolio.DIVIDEND_COLUMN in dataframe else pd.Series(0.0, index=dataframe.index)
 
         if include_dividends:
             fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN], mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0]))
+                go.Scatter(x=dataframe.index, y=profit, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0]))
             ])
         else:
             fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.PROFIT_COLUMN]-dividends, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0])),
+                go.Scatter(x=dataframe.index, y=profit-dividends, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0])),
                 go.Scatter(x=dataframe.index, y=dividends, mode='lines', name='Dividends', line=dict(color=CATEGORICAL_COLORS[1])),
             ])
 
@@ -172,10 +179,13 @@ class Plot:
         if self.portfolio.DAILY_RETURN_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_money_earned_between_dates_column(days_between, offset)
         dataframe=self.portfolio.portfolio
+        # DAILY_RETURN_COLUMN is Decimal - cast to float for plotly, which doesn't render Decimal
+        # values.
+        daily_return=dataframe[self.portfolio.DAILY_RETURN_COLUMN].astype(float)
 
-        colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in dataframe[self.portfolio.DAILY_RETURN_COLUMN]]
+        colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in daily_return]
         fig=go.Figure(data=[
-            go.Bar(x=dataframe.index, y=dataframe[self.portfolio.DAILY_RETURN_COLUMN], marker_color=colors, width=1.0*24*60*60*1000)
+            go.Bar(x=dataframe.index, y=daily_return, marker_color=colors, width=1.0*24*60*60*1000)
         ])
         fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
         fig.update_layout(xaxis_title="Time", yaxis_title="Daily return")

@@ -2,10 +2,46 @@
 Behavior shared across Stock/PolishRetailBonds/Commodity/Crypto/BankAccount/Portfolio, split
 into narrow mixins rather than one base class so each calculator only inherits what applies to
 it (e.g. PolishRetailBonds splits by bond type, not ticker, so it skips TickerSplitMixin).
+
+Money values (Money_invested, Profit and its variants, Dividend, Realized_profit, totals,
+current_value, revenue) are stored as Decimal, not float - everything else (prices, FX/interest/
+inflation rates, unit counts, IRR, percentages) stays float. Boundary conversion: intermediate
+computation keeps using float/numpy (matches the vectorized-performance design), and a value is
+only cast to Decimal at the point it becomes a stored money figure, via to_money()/money_array()
+below - so further accumulation of that figure (cumsum, cross-source sums) happens in exact
+Decimal arithmetic instead of letting binary-float rounding error compound.
 """
 
+from decimal import Decimal
 import numpy as np
 import pandas as pd
+
+CENTS=Decimal('0.01')
+
+
+def to_money(value) -> Decimal:
+    """Casts a float (already meaningful at cent precision, typically just rounded via
+    round(value, 2)) to an exact Decimal - str() on a 2-decimal-rounded float round-trips
+    cleanly, so the binary-float imprecision stops here instead of compounding through later
+    summation. A Decimal input is only re-quantized (e.g. after an exact Decimal+Decimal op that
+    lands on a different scale)."""
+    if isinstance(value, Decimal):
+        return value.quantize(CENTS)
+    return Decimal(str(round(float(value), 2)))
+
+
+def money_array(values) -> np.ndarray:
+    """Converts an iterable of floats into an object-dtype numpy array of Decimal money values -
+    for assigning a whole computed column (e.g. money_invested_by_day) in one shot."""
+    return np.array([to_money(v) for v in values], dtype=object)
+
+
+def zero_row(dataframe: pd.DataFrame) -> dict:
+    """{column: Decimal('0') or 0.0}, matching each column's own dtype - an object (Decimal
+    money) column gets Decimal('0'), a numeric (rate/IRR/return) column gets 0.0. Used to build a
+    zero-valued padding row (a prepended day-before-start row, a resample anchor) without
+    hardcoding which columns happen to be money."""
+    return {col: (Decimal('0') if dataframe[col].dtype==object else 0.0) for col in dataframe.columns}
 
 
 class ReprMixin:
@@ -54,13 +90,16 @@ class IrrMixin:
     def calculate_irr(self):
         dataframe=self.data
 
-        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(0.0)
-        dataframe[self.TOTAL_MONEY_COLUMN]=round(dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN], 2)
-        dataframe[self.CASHFLOW_COLUMN]=round(dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN], 2)
+        # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal (money) - their sum/difference is
+        # already exact at cent precision, no round() needed. The Newton's-method solve below is
+        # a rate, not a money value, so it runs on plain float arrays (.astype(float)).
+        dataframe[self.PREV_MONEY_INVESTED_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN].shift(1).fillna(Decimal('0'))
+        dataframe[self.TOTAL_MONEY_COLUMN]=dataframe[self.MONEY_INVESTED_COLUMN]+dataframe[self.PROFIT_COLUMN]
+        dataframe[self.CASHFLOW_COLUMN]=dataframe[self.PREV_MONEY_INVESTED_COLUMN]-dataframe[self.MONEY_INVESTED_COLUMN]
 
         n=len(dataframe[self.CASHFLOW_COLUMN])
-        cashflow_values=dataframe[self.CASHFLOW_COLUMN].to_numpy()
-        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].to_numpy()
+        cashflow_values=dataframe[self.CASHFLOW_COLUMN].astype(float).to_numpy()
+        total_money_values=dataframe[self.TOTAL_MONEY_COLUMN].astype(float).to_numpy()
 
         irr=np.full(n, np.nan)
         guess=0.1

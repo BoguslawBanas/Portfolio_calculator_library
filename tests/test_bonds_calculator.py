@@ -187,13 +187,13 @@ def test_full_cancellation_freezes_profit_and_zeroes_money_invested_early(make_s
     assert expected_at_cancellation<gross_at_cancellation
 
     at_cancel_date=data.loc[pd.Timestamp(cancel_date), PolishRetailBonds.PROFIT_COLUMN]
-    assert at_cancel_date==pytest.approx(expected_at_cancellation)
+    assert float(at_cancel_date)==pytest.approx(expected_at_cancellation)
 
     last_row=data.iloc[-1]
     assert data.index[-1]==pd.Timestamp(date.today())  # index still reaches today, not just cancel_date
     assert last_row[PolishRetailBonds.MONEY_INVESTED_COLUMN]==pytest.approx(0.0)
     assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]==pytest.approx(0.0)
-    assert last_row[PolishRetailBonds.PROFIT_COLUMN]==pytest.approx(expected_at_cancellation)
+    assert float(last_row[PolishRetailBonds.PROFIT_COLUMN])==pytest.approx(expected_at_cancellation)
 
     # Never reached ROR's natural ~12-month maturity, so without the cancellation Profit today
     # would have kept growing well past what it was on cancel_date.
@@ -230,7 +230,7 @@ def test_partial_cancellation_splits_the_holding_into_tranches(make_source_dir):
 
     # Cost basis: half the original 10-unit cost basis is still held (the other half zeroed out).
     full_money_invested=PolishRetailBonds.NOMINAL_VALUE*10
-    assert partial[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(full_money_invested/2)
+    assert float(partial[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(full_money_invested/2)
 
     # Profit: 5 units' worth froze at cancel_date, the other 5 units' worth kept accruing to
     # today - so total Profit should be strictly between "all 10 froze at cancel_date" and
@@ -245,7 +245,7 @@ def test_partial_cancellation_splits_the_holding_into_tranches(make_source_dir):
     half_frozen=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
     half_frozen_after_fee=_apply_early_redemption_fee(half_frozen, 'ROR', amount=5.0)
     half_kept=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
-    assert actual==pytest.approx(half_frozen_after_fee+half_kept)
+    assert float(actual)==pytest.approx(half_frozen_after_fee+half_kept)
 
 
 def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source_dir):
@@ -272,7 +272,7 @@ def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source
     data=PolishRetailBonds(bonds_dir).data
 
     # 10-3-2=5 units still held -> half the original cost basis.
-    assert data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(PolishRetailBonds.NOMINAL_VALUE*5)
+    assert float(data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(PolishRetailBonds.NOMINAL_VALUE*5)
 
     first_tranche=_apply_early_redemption_fee(
         _expected_profit(start, first_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=3.0), 'ROR', amount=3.0)
@@ -280,7 +280,7 @@ def test_multiple_partial_cancellations_stack_into_separate_tranches(make_source
         _expected_profit(start, second_cancel, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=2.0), 'ROR', amount=2.0)
     remaining_tranche=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0, amount=5.0)
     expected=first_tranche+second_tranche+remaining_tranche
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
 
 
 def test_cancellation_after_natural_maturity_is_a_no_op(make_source_dir):
@@ -401,7 +401,7 @@ def test_early_redemption_fee_is_converted_to_currency_to_at_cancel_date_rate(ma
     fee_usd=PolishRetailBonds.BOND_TYPES['ROR']['early_redemption_fee']*fx.data.loc[pd.Timestamp(cancel_date), Currency.CLOSE_COLUMN]
     expected=round(max(0.0, gross_usd_after_tax-fee_usd), 2)
 
-    assert converted[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(converted[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     # Sanity check this test actually exercises a nonzero, FX-converted fee, not a no-op.
     assert fee_usd>0.0
     assert fee_usd!=pytest.approx(PolishRetailBonds.BOND_TYPES['ROR']['early_redemption_fee'])  # genuinely converted, not left in raw PLN
@@ -473,7 +473,7 @@ def test_ots_single_period_uses_initial_coupon(make_source_dir):
 
     expected=_expected_profit(start, date.today(), 'OTS', initial_coupon=2.0, additional_coupon=0.0)
     assert data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(100.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     assert expected>0.0  # sanity check the helper itself isn't vacuously computing zero
 
 
@@ -490,7 +490,7 @@ def test_ror_first_period_uses_initial_coupon_ignoring_interest_rate_csv(make_so
     data=PolishRetailBonds(bonds_dir).data
 
     expected=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=99.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     # If period 1 had used interest_rate.csv (99.0) instead of initial_coupon (4.0), profit would
     # be wildly higher - this pins that it didn't.
     assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]<1.0
@@ -509,7 +509,7 @@ def test_ror_second_period_uses_interest_rate_csv_plus_additional_coupon(make_so
     data=PolishRetailBonds(bonds_dir).data
 
     expected=_expected_profit(start, date.today(), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     # Confirms this test actually exercises period 2, not just period 1 again.
     period_1_only=_expected_profit(start, start+timedelta(days=20), 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
     assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>period_1_only
@@ -528,7 +528,7 @@ def test_coi_first_period_fixed_then_inflation_plus_margin(make_source_dir):
     data=PolishRetailBonds(bonds_dir).data
 
     expected=_expected_profit(start, date.today(), 'COI', initial_coupon=4.75, additional_coupon=1.5, external_rate=3.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
 
 
 def test_tos_compounds_across_periods(make_source_dir):
@@ -540,7 +540,7 @@ def test_tos_compounds_across_periods(make_source_dir):
     data=PolishRetailBonds(bonds_dir).data
 
     expected=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0)
-    assert data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     # Compounding means year 2's contribution alone (computed on the grown base) exceeds what a
     # flat, non-compounding year 2 at the same rate would have contributed.
     non_compounding_equivalent=PolishRetailBonds.NOMINAL_VALUE*4.4/100.0*(1-PolishRetailBonds.TAX_RATE/100.0)
@@ -569,7 +569,7 @@ def test_edo_continues_accruing_past_year_one(make_source_dir):
     assert profit_today>profit_within_year_one  # keeps growing past the year-1 boundary, unlike the old bug
 
     expected=_expected_profit(start, date.today(), 'EDO', initial_coupon=5.35, additional_coupon=2.0, external_rate=2.5)
-    assert profit_today==pytest.approx(expected)
+    assert float(profit_today)==pytest.approx(expected)
 
 
 def test_swap_discount_reduces_cost_basis_and_raises_profit_by_the_same_amount_every_day(make_source_dir):
@@ -586,12 +586,12 @@ def test_swap_discount_reduces_cost_basis_and_raises_profit_by_the_same_amount_e
 
     # amount_of_units=1, ROR's swap_discount=0.10 zł/bond -> cost basis 0.10 lower.
     assert not_swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(100.0)
-    assert swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(99.90)
+    assert float(swapped[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(99.90)
 
     # Accrual is always computed off the full nominal value regardless of what was paid, so a
     # lower cost basis means Profit is uniformly higher by the same 0.10 - every day, not just at
     # the end (unlike the pre-rework flat maturity-day bonus).
-    delta=swapped[PolishRetailBonds.PROFIT_COLUMN]-not_swapped[PolishRetailBonds.PROFIT_COLUMN]
+    delta=(swapped[PolishRetailBonds.PROFIT_COLUMN]-not_swapped[PolishRetailBonds.PROFIT_COLUMN]).astype(float)
     assert delta.sub(0.10).abs().max()<1e-9
 
 
@@ -726,7 +726,7 @@ def test_matured_holding_no_longer_counts_toward_currently_invested_once_matured
     # Matches self.data's own last row exactly - total_money_currently_invested is that same
     # currently-held figure, summed per type instead of read off the merged whole-portfolio frame.
     assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(200.0)
-    assert bonds.total_current_value==pytest.approx(200.0+bonds.data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1])
+    assert float(bonds.total_current_value)==pytest.approx(200.0+float(bonds.data[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN].iloc[-1]))
 
 
 def test_stale_incompatible_cache_entry_is_recomputed_not_crashed(make_source_dir, cache_dir):
@@ -788,7 +788,7 @@ def test_currency_to_converts_money_invested_at_the_purchase_date_rate(make_sour
     fx=Currency('PLN', 'usd', pd.Timestamp(start))
     fx_at_purchase=fx.data.loc[pd.Timestamp(start), Currency.CLOSE_COLUMN]
 
-    assert bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1]==pytest.approx(300.0*fx_at_purchase)
+    assert float(bonds.data[PolishRetailBonds.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(300.0*fx_at_purchase)
     # Frozen at the purchase-date rate specifically, not today's - the two only coincide by
     # accident, so assert against the deliberately non-flat fake rate rather than 1.0.
     assert fx_at_purchase!=pytest.approx(1.0)
@@ -812,12 +812,12 @@ def test_currency_to_bakes_in_each_days_own_fx_rate_before_accumulating(make_sou
 
     gross_converted=sum(daily_interest_pln*fx.data[Currency.CLOSE_COLUMN].iloc[j] for j in range(n_days))
     expected=round(gross_converted*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
-    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
 
     # If every day had instead been converted at a single flat (e.g. today's) rate, the result
     # would differ from the day-by-day sum above, since the fake FX rate genuinely isn't flat.
     flat_at_today=round(daily_interest_pln*n_days*fx.data[Currency.CLOSE_COLUMN].iloc[-1]*(1-PolishRetailBonds.TAX_RATE/100.0), 2)
-    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]!=pytest.approx(flat_at_today)
+    assert float(bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])!=pytest.approx(flat_at_today)
 
 
 def test_currency_to_is_folded_into_the_cache_key(make_source_dir, cache_dir):
@@ -845,7 +845,7 @@ def test_tax_rate_defaults_to_tax_rate_constant(make_source_dir):
     # Existing callers that never pass tax_rate keep getting exactly the old TAX_RATE-taxed
     # result - same guarantee currency_to='PLN' already gives for the currency_to argument.
     expected=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0, amount=3.0)
-    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
     assert bonds.tax_rate==pytest.approx(PolishRetailBonds.TAX_RATE)
 
 
@@ -861,7 +861,7 @@ def test_tax_rate_override_changes_accrued_profit(make_source_dir):
     assert tax_exempt.tax_rate==pytest.approx(0.0)
 
     expected_untaxed=_expected_profit(start, date.today(), 'TOS', initial_coupon=4.4, additional_coupon=0.0, amount=3.0, tax_rate=0.0)
-    assert tax_exempt.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected_untaxed)
+    assert float(tax_exempt.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected_untaxed)
 
     default_taxed=PolishRetailBonds(bonds_dir)
     assert tax_exempt.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]>default_taxed.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]
@@ -929,7 +929,7 @@ def test_bond_types_json_overrides_early_redemption_fee(make_source_dir, make_ti
 
     gross_at_cancellation=_expected_profit(start, cancel_date, 'ROR', initial_coupon=4.0, additional_coupon=0.5, external_rate=6.0)
     expected=round(max(0.0, gross_at_cancellation-2.00), 2)  # overridden 2.00, not the built-in 0.50
-    assert bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1]==pytest.approx(expected)
+    assert float(bonds.data[PolishRetailBonds.PROFIT_COLUMN].iloc[-1])==pytest.approx(expected)
 
 
 def test_bond_types_json_unknown_code_raises(make_source_dir, make_tickers_json):
@@ -1135,7 +1135,7 @@ def test_realized_profit_column_reflects_the_early_redemption_fee_at_cancellatio
     expected_at_cancellation=_apply_early_redemption_fee(gross_at_cancellation, 'ROR', amount=1.0)
 
     last_row=data.iloc[-1]
-    assert last_row[PolishRetailBonds.REALIZED_PROFIT_COLUMN]==pytest.approx(expected_at_cancellation)
+    assert float(last_row[PolishRetailBonds.REALIZED_PROFIT_COLUMN])==pytest.approx(expected_at_cancellation)
     assert last_row[PolishRetailBonds.REALIZED_PROFIT_COLUMN]==pytest.approx(last_row[PolishRetailBonds.PROFIT_COLUMN])
 
 
@@ -1165,7 +1165,7 @@ def test_realized_profit_column_sums_correctly_across_partial_cancellation_tranc
     # The cancelled tranche's frozen interest is already fully realized (Realized_profit); the
     # other tranche is still held (its accrual is still in Profit_without_dividends, not
     # Realized_profit yet).
-    assert last_row[PolishRetailBonds.REALIZED_PROFIT_COLUMN]==pytest.approx(half_frozen)
+    assert float(last_row[PolishRetailBonds.REALIZED_PROFIT_COLUMN])==pytest.approx(half_frozen)
     assert last_row[PolishRetailBonds.PROFIT_WITHOUT_DIVIDEND_COLUMN]>0.0
 
 

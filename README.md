@@ -1,10 +1,26 @@
 # Portfolio Library
 
+[![Tests](https://github.com/bbanas16/Portfolio_calculator_library/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/bbanas16/Portfolio_calculator_library/actions/workflows/tests.yml)
+
 A Python library for tracking the performance of an investment portfolio, combining stocks/ETFs, Polish retail treasury bonds, physical commodities, crypto, and bank accounts into a single aggregated view. Price data comes from `yfinance`; every chart is built with `plotly`.
+
+> **Status: pre-1.0, still under active development.** The public API, data formats, and file layout may all change - including in breaking ways - before a 1.0.0 release. See `CHANGELOG.md` for what's changed so far, and pin a specific version if you depend on this library.
 
 ## Features
 
 The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`, `Benchmark`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
+
+### Money values are `Decimal`, not `float`
+
+Every value that's actually an amount of money — `Money_invested`, `Profit` and its variants, `Dividend`, `Realized_profit`, every `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` attribute, and the matching DataFrame columns — is `decimal.Decimal`, not `float`. Each figure is rounded to the cent the moment it's computed, so summing many of them (a `cumsum` down a DataFrame, `Portfolio` merging several sources, `Benchmark` accumulating day by day) stays exact instead of drifting the way repeated `float` addition can.
+
+Everything that isn't itself an amount of money stays `float` — prices, FX/interest/inflation rates, unit/share counts, IRR, and every `distribution_by_*` percentage — so the library's existing vectorized `numpy`/`pandas` computation is unaffected; `Decimal` is only introduced at the point a value becomes a stored monetary figure.
+
+What this means for a caller:
+- Comparing or combining a money value with a plain `float` literal needs an explicit cast, e.g. `float(portfolio.total_money_invested) == 1234.56` or `Decimal(str(portfolio.total_money_invested)) + Decimal("10.00")` — mixed `Decimal`/`float` arithmetic raises `TypeError` (equality/ordering comparisons against a `float`, like `>`/`<`/`==`, work fine without a cast).
+- `f"{value:.2f}"`-style formatting works unchanged.
+- `Decimal` values round-trip through `DiskCache` (pickled) and `plotly` charts (cast to `float` internally by `Plot`) transparently — no extra work needed from a caller.
+- No new dependency — `decimal` is part of the Python standard library.
 
 ### 📈 `stock_calculator_library.Stock`
 
@@ -57,7 +73,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - builds one shared `currency_cache` per construction and passes it to every `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` source it builds, so a currency pair needed by more than one source/ticker/holding is only fetched once (see `get_cached_currency` under `Currency` above)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
-- `simulate_benchmark(symbol, asset_type='stock', ...)` — "what if this same money had gone into `symbol` (e.g. `SPY`, or `'gold'`/`'bitcoin'` with `asset_type='commodities'`/`'crypto'`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison. `asset_type='stock'` (the default) takes `symbol` as a raw `yfinance` ticker directly, same as before; `'commodities'`/`'crypto'` instead resolve a friendly name through `Commodity.TICKERS`/`Crypto.TICKERS` (optionally extended via `tickers_json`), the same way a real commodities/crypto source would
+- `simulate_benchmark(symbol, asset_type='stock', ...)` — "what if this same money had gone into `symbol` (e.g. `SPY`, or `'gold'`/`'bitcoin'` with `asset_type='commodities'`/`'crypto'`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison. `asset_type='stock'` (the default) takes `symbol` as a raw `yfinance` ticker directly; `'commodities'`/`'crypto'` instead resolve a friendly name through `Commodity.TICKERS`/`Crypto.TICKERS` (optionally extended via `tickers_json`), the same way a real commodities/crypto source would. `symbol` can also be a dict `{symbol: percent}` (percents positive, summing to 100) to split every buy across several assets, e.g. `{'SPY': 60, 'gold': 40}`; `asset_type` then applies to all of them, or is a dict `{symbol: asset_type}` for a mixed basket (an omitted symbol is `'stock'`), and `currency` likewise takes a string or a per-symbol dict
 - `calculate_money_earned_between_dates()` / `calculate_money_earned_between_dates_column()` — profit over a rolling date window
 - `resample()` — downsample to daily/weekly/monthly/quarterly/yearly buckets
 - optional `cache_dir` — caches each source's computed DataFrame to disk instead of re-fetching/recomputing on every run (see `cache_library.DiskCache` below)
@@ -67,11 +83,12 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 
 ### ⚖️ `benchmark_calculator_library.Benchmark`
 
-Simulates buying a single ticker with the exact same day-by-day cash contributions a `Portfolio` actually made — not its lifetime total invested on day one, but each real buy/sell mirrored on its own date (e.g. the same $200/month a portfolio actually spent across its real holdings, spent on `SPY` instead on those same dates) — so its IRR is directly comparable to `Portfolio.calculate_irr()`'s own. Not meant to be constructed directly — see `Portfolio.simulate_benchmark()` above, which derives the contributions series this needs from an existing `Portfolio`'s own `Money_invested` column, and (for `asset_type='commodities'`/`'crypto'`) resolves a friendly name to the raw `yfinance` ticker this class itself always takes directly - `Benchmark` itself has no notion of "asset type", just a ticker/currency to fetch.
+Simulates buying a single ticker — or a weighted basket of several — with the exact same day-by-day cash contributions a `Portfolio` actually made — not its lifetime total invested on day one, but each real buy/sell mirrored on its own date (e.g. the same $200/month a portfolio actually spent across its real holdings, spent on `SPY` instead on those same dates) — so its IRR is directly comparable to `Portfolio.calculate_irr()`'s own. Not meant to be constructed directly — see `Portfolio.simulate_benchmark()` above, which derives the contributions series this needs from an existing `Portfolio`'s own `Money_invested` column, and (for `asset_type='commodities'`/`'crypto'`) resolves a friendly name to the raw `yfinance` ticker this class itself always takes directly - `Benchmark` itself has no notion of "asset type", just a ticker/currency to fetch.
 
 - `Money_invested`'s day-over-day diffs are set to reproduce the source portfolio's own contributions exactly, so `calculate_irr()`'s cash-flow schedule (via the shared `IrrMixin` — see `Portfolio.calculate_irr` above) lines up with the real portfolio's precisely; only the units bought/sold/held with that money differ
 - dividends are reinvested (bought as more units of `ticker` on the ex-date), matching a real total-return holding rather than letting them sit as idle, non-appreciating cash
 - a withdrawal (a day the real portfolio's `Money_invested` dropped) sells whatever units of `ticker` are worth that same dollar amount on that day; a withdrawal larger than the simulated position's current value is allowed and modeled as going net-negative — a known simplification, since the withdrawn amount (mirroring the real portfolio's own cost-basis reduction) is independent of how `ticker`'s price actually moved
+- a weighted basket (`tickers={'SPY': 60, 'GLD': 40}` instead of one symbol; percents positive, summing to 100 within 0.01) splits every buy by those percents, each ticker buying `contribution * percent / price` units on that day; a withdrawal sells the same split by value (so a ticker can likewise go net-negative), and a dividend is reinvested only into the ticker that paid it. `benchmark.tickers` holds the `{symbol: percent}` dict either way; `currency` is one string for every ticker or a per-ticker dict
 - same construction-time `ValueError` as `Stock`/`Commodity`/`Crypto` for an invalid/delisted ticker, or one whose price history doesn't reach back far enough to cover the contributions being simulated
 - `currency`/`currency_to` — `ticker`'s own native currency and the currency the contributions are already expressed in, converted via `Currency`/`get_cached_currency` the same way `Stock`/`Commodity`/`Crypto` do
 
@@ -274,6 +291,11 @@ plot.benchmark_comparison_plot(benchmark, benchmark_name="SPY")
 # resolved through Commodity.TICKERS/Crypto.TICKERS - same as a real commodities/crypto source.
 gold_benchmark = portfolio.simulate_benchmark("gold", asset_type="commodities")
 plot.benchmark_comparison_plot(gold_benchmark, benchmark_name="Gold")
+
+# A weighted basket instead of one asset: every buy is split 60/40, and asset_type can be a
+# dict when the basket mixes asset types (a symbol it omits is a plain stock/ETF ticker).
+mixed_benchmark = portfolio.simulate_benchmark({"SPY": 60, "gold": 40}, asset_type={"gold": "commodities"})
+plot.benchmark_comparison_plot(mixed_benchmark, benchmark_name="60% SPY / 40% gold")
 ```
 
 ## Testing
@@ -308,7 +330,7 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 
 ## Roadmap
 
-- `PolishRetailBonds` currently treats every bond type identically — interest accrues as unrealized (`Profit_without_dividends`) continuously and is only recognized as realized once, at final redemption. That matches the four "compounding" types (`TOS`/`ROS`/`EDO`/`ROD`, which really do pay nothing until maturity), but not the four "flat" types (`OTS`/`ROR`/`DOR`/`COI`), which in real life pay interest out at the end of every period — cash that arguably should exit the position and register as realized at each period boundary instead of sitting modeled as still-unrealized for years. Worth a closer look at whether/how to model per-period realization for the flat types; this would change actual reported numbers for those four types, not just labels
+Known gaps and possible future improvements are tracked in `ROADMAP.md`, not here.
 
 ## License
 

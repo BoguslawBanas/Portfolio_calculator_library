@@ -51,7 +51,7 @@ def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_d
     stock_dir=list(portfolio.distribution_by_directory)[0]
     stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
     realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
-    assert realized==pytest.approx(80.0)
+    assert float(realized)==pytest.approx(80.0)
 
     assert data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].iloc[-1]==pytest.approx(data[Portfolio.PROFIT_COLUMN].iloc[-1]-realized)
     # The net dividend (25.0-0.0, no dividend_tax.csv here) is still included, unlike realized.
@@ -203,7 +203,7 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
     # of hardcoding 100.0 PLN, so this test doesn't depend on the fake FX rate's exact value.
     from Portfolio_calculator_library import PolishRetailBonds
     bonds_alone=PolishRetailBonds(bonds_dir, 'usd')
-    assert portfolio.total_money_invested==pytest.approx(1000.0+bonds_alone.total_money_invested)
+    assert float(portfolio.total_money_invested)==pytest.approx(1000.0+float(bonds_alone.total_money_invested))
     assert set(portfolio.distribution_by_directory)=={stock_dir, bonds_dir}
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
     # Nothing sold/matured/cancelled anywhere in this portfolio, so total_money_currently_invested
@@ -439,3 +439,26 @@ def test_unknown_source_type_raises_instead_of_being_silently_dropped(make_sourc
     tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
     with pytest.raises(ValueError, match="stocks"):
         Portfolio({stock_dir: 'stocks'}, tickers_json=tickers_json)  # typo: 'stocks', not 'stock'
+
+
+def test_simulate_benchmark_accepts_a_weighted_basket_across_asset_types(make_source_dir, make_tickers_json, mock_yfinance):
+    from Portfolio_calculator_library import Commodity
+
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    benchmark=portfolio.simulate_benchmark({'FAKEUSD': 60, 'gold': 40}, asset_type={'gold': 'commodities'})
+
+    assert benchmark.tickers=={'FAKEUSD': 60.0, Commodity.TICKERS['gold']: 40.0}
+    assert Commodity.TICKERS['gold'] in mock_yfinance.call_log
+    assert benchmark.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()==portfolio.data[Portfolio.MONEY_INVESTED_COLUMN].tolist()
+
+
+def test_simulate_benchmark_rejects_symbols_that_resolve_to_the_same_ticker(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    with pytest.raises(ValueError, match="same ticker"):
+        portfolio.simulate_benchmark({'GC=F': 50, 'gold': 50}, asset_type={'gold': 'commodities'})
+
+
+def test_simulate_benchmark_rejects_bad_weights(make_source_dir, make_tickers_json):
+    portfolio=build_single_stock_portfolio(make_source_dir, make_tickers_json)
+    with pytest.raises(ValueError, match="sum to 100"):
+        portfolio.simulate_benchmark({'FAKEUSD': 50, 'FAKEUSD2': 30})
