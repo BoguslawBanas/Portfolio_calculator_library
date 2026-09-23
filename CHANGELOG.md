@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.2.2] - 2026-09-23
+
+### Changed
+- Moved the Roadmap out of the README into its own `ROADMAP.md`.
+
 ## [0.2.1] - 2026-09-23
 
 ### Added
