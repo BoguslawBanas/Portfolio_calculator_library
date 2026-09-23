@@ -6,6 +6,18 @@ A Python library for tracking the performance of an investment portfolio, combin
 
 The library is organized as one class per module. Every one of them (`Portfolio`, `Stock`, `PolishRetailBonds`, `Commodity`, `Crypto`, `BankAccount`, `Benchmark`) implements `__repr__`, showing a quick `invested`/`current_value`/`revenue` summary instead of the default `<...object at 0x...>` — handy in a REPL/notebook.
 
+### Money values are `Decimal`, not `float`
+
+Every value that's actually an amount of money — `Money_invested`, `Profit` and its variants, `Dividend`, `Realized_profit`, every `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` attribute, and the matching DataFrame columns — is `decimal.Decimal`, not `float`. Each figure is rounded to the cent the moment it's computed, so summing many of them (a `cumsum` down a DataFrame, `Portfolio` merging several sources, `Benchmark` accumulating day by day) stays exact instead of drifting the way repeated `float` addition can.
+
+Everything that isn't itself an amount of money stays `float` — prices, FX/interest/inflation rates, unit/share counts, IRR, and every `distribution_by_*` percentage — so the library's existing vectorized `numpy`/`pandas` computation is unaffected; `Decimal` is only introduced at the point a value becomes a stored monetary figure.
+
+What this means for a caller:
+- Comparing or combining a money value with a plain `float` literal needs an explicit cast, e.g. `float(portfolio.total_money_invested) == 1234.56` or `Decimal(str(portfolio.total_money_invested)) + Decimal("10.00")` — mixed `Decimal`/`float` arithmetic raises `TypeError` (equality/ordering comparisons against a `float`, like `>`/`<`/`==`, work fine without a cast).
+- `f"{value:.2f}"`-style formatting works unchanged.
+- `Decimal` values round-trip through `DiskCache` (pickled) and `plotly` charts (cast to `float` internally by `Plot`) transparently — no extra work needed from a caller.
+- No new dependency — `decimal` is part of the Python standard library.
+
 ### 📈 `stock_calculator_library.Stock`
 
 Fetches stock/ETF price history and turns a set of buy/sell/dividend transactions into a daily investment/profit DataFrame.
