@@ -333,7 +333,6 @@ See `requirements.txt`/`pyproject.toml` for exact version bounds.
 - No retry/backoff around any `yfinance` call (`Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark` all call `yf.Ticker(...).history(...)` bare) — one transient network failure or rate-limit response aborts the whole `Portfolio` construction instead of retrying a couple of times first
 - Ticker/symbol price history is fetched one at a time, sequentially, even across independent tickers within one source — for a portfolio with many holdings, fetching them concurrently (e.g. a thread pool, since these are I/O-bound waits) could cut load time substantially. Would need care around the shared `currency_cache`/`DiskCache` (thread-safety) and the `tqdm` progress callback
 - No `CHANGELOG.md` — recent changes (money values becoming `Decimal`, `simulate_benchmark` accepting a weighted basket) are breaking/feature changes with nothing tracking them for anyone upgrading an existing install
-- `pyproject.toml` is still pinned at `version = "0.1.0"` despite those same changes
 
 ## License
 
