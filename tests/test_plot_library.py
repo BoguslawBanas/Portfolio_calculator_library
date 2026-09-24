@@ -278,16 +278,17 @@ def test_allocation_plot_rejects_unknown_kind(portfolio):
         plot.allocation_plot(kind='nonsense')
 
 
-def test_allocation_comparison_plot_groups_invested_and_current_value_by_ticker(portfolio, captured_figures):
+def test_allocation_comparison_plot_groups_invested_and_total_value_by_ticker(portfolio, captured_figures):
     plot=Plot(portfolio)
     plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_TICKER)
     fig, _=captured_figures[-1]
 
     assert len(fig.data)==2
     assert fig.data[0].name=='Invested'
-    assert fig.data[1].name=='Current value'
+    assert fig.data[1].name=='Total value'
     assert list(fig.data[0].x)==list(fig.data[1].x)
     assert list(fig.data[0].x)==list(portfolio.distribution_by_ticker)
+    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_ticker_total_value[key] for key in fig.data[1].x])
 
 
 def test_allocation_comparison_plot_by_directory(portfolio, captured_figures):

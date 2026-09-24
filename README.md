@@ -67,9 +67,10 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - `Profit_without_realized` — profit still attributable to positions as they stand today: unrealized gain on whatever's still held plus dividends collected along the way, excluding gain/loss already locked in by a sell
 - `Profit_excluding_dividends` — the literal complement of `Profit_without_dividends`'s name: unrealized gain plus realized gain/loss, excluding only dividends
 - Both are always present (unlike `Dividend` below), since every source contributes them — for `BankAccount`, which doesn't track a separate realized-profit stream, both simply equal `Profit`/`Profit_without_dividends` respectively; for `Commodity`/`Crypto`/`PolishRetailBonds`, which pay no dividends, `Profit_excluding_dividends` is a no-op equal to `Profit` and `Profit_without_realized` equals `Profit_without_dividends`
-- allocation by ticker/directory/currency, by amount invested (cost basis), by amount *currently* invested, by current market value (cost basis still held plus unrealized gain), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
+- allocation by ticker/directory/currency, by amount invested (cost basis), by amount *currently* invested, by current market value (cost basis still held plus unrealized gain), by total value (cost basis still held plus every gain ever made, realized included), or by revenue (each position's share of total portfolio gains — can be negative for a losing position)
 - `distribution_by_currency`/`_current_value`/`_revenue` — allocation by each position's own *native* currency (a US stock's `usd`, a Polish bond's `PLN`, ...), always populated (no flag needed, unlike `include_native_currency` below) — answers "how much of my portfolio is actually USD- vs. EUR- vs. PLN-denominated", independent of `currency_to` (the single currency `self.data`/totals are already converted to and summed in)
 - `total_money_currently_invested`/`distribution_by_directory`/`_ticker`/`_currency_currently_invested` — the same allocation-by-amount-invested figures as `total_money_invested`/`distribution_by_directory`/`_ticker`/`_currency`, but by cost basis of what's actually still held today rather than lifetime-gross-ever-bought/deposited/issued. Every source (`Stock`/`Commodity`/`Crypto` sells, `PolishRetailBonds` maturity/cancellation, `BankAccount` withdrawals) tracks both figures independently, and they diverge once anything's actually been sold/matured/cancelled/withdrawn (a fully-closed-out position drops to 0% here, while the lifetime figure keeps its historical share) — see the Distribution metrics section below
+- `total_value`/`distribution_by_directory`/`_ticker`/`_currency_total_value` — allocation by `Money_invested + Profit`: cost basis still held plus every gain ever made on it (unrealized, dividends, realized). Unlike `_current_value`, a sold/matured/cancelled position keeps its realized gain here instead of dropping to 0%. `Portfolio`-only — see "Total value" in the Distribution metrics section below
 - builds one shared `currency_cache` per construction and passes it to every `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` source it builds, so a currency pair needed by more than one source/ticker/holding is only fetched once (see `get_cached_currency` under `Currency` above)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
 - `calculate_irr()` — incremental Newton's-method internal rate of return
@@ -114,7 +115,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
-- `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by current market value, side by side per ticker/directory
+- `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory
 
 ### 🪙 `commodity_calculator_library.Commodity`
 
@@ -174,6 +175,31 @@ For every asset class, the first two columns coincide until something's actually
 - `distribution_by_directory*` — one entry per source directory, value = that source's own `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` (the class-level totals the table above rolls up into), not broken down further by ticker.
 - `distribution_by_ticker*` — each source's own already-computed per-ticker dict (the table above) is re-expanded back to an absolute amount and summed across every source that happens to share the same ticker/type/account key, then the combined total is renormalized to a percentage of the whole portfolio.
 - `distribution_by_currency*` — the same merge as `distribution_by_ticker*` above, but grouped by each holding's own *native* currency instead of its ticker key. `BankAccount` never contributes here — it has no per-ticker native currency to look up (everything is assumed to already be in one currency), so a `BankAccount`-only portfolio's `distribution_by_currency*` dicts stay empty.
+
+### Total value
+
+`total_value` and `distribution_by_ticker_total_value`/`distribution_by_directory_total_value`/`distribution_by_currency_total_value` exist on `Portfolio` only — no source class computes them. `Portfolio` builds each key's amount from two figures every source already has:
+
+```
+total_value[key] = currently_invested[key] + revenue[key]
+                 = Money_invested (last day) + Profit (last day)
+```
+
+Per ticker, both are re-expanded from the source's percentages back to money and added together; per directory, `Portfolio` uses the source's own `total_money_currently_invested + total_revenue`. The amounts are then normalized to a percentage of `total_value`, the same way every other distribution is (0.0 across the board if `total_value` is 0).
+
+Example — a stock bought for 1000, with 400 of that cost basis sold at an 80 gain, 25 in dividends and a 50 unrealized gain on the rest; plus a matured `OTS` bond that earned 12:
+
+| | Currently invested | Revenue | Total value | Share | Share by current value |
+|---|---|---|---|---|---|
+| Stock | 600 | 80 + 25 + 50 = 155 | 755 | 98.4% | 100% (600 + 50) |
+| `OTS` | 0 | 12 | 12 | 1.6% | 0% |
+
+What to keep in mind:
+- For a position still fully held, total value is current value plus dividends and realized gains.
+- For a fully sold/matured/cancelled position, total value is just its realized profit — so a position closed at a **loss has a negative share**, the same as `_revenue`. Prefer bar charts over pie charts for it.
+- Returned principal isn't counted (it becomes cash, which this library doesn't track), so total value is cost still held plus profit, not everything a position ever paid back.
+
+`Plot.allocation_comparison_plot` compares this against allocation by amount ever invested.
 
 ## Project structure
 
@@ -258,6 +284,7 @@ print(portfolio.distribution_by_ticker)                     # allocation by amou
 print(portfolio.distribution_by_ticker_currently_invested)  # allocation by amount currently invested
 print(portfolio.distribution_by_ticker_current_value)       # allocation by current market value
 print(portfolio.distribution_by_ticker_revenue)              # allocation by share of total gains
+print(portfolio.distribution_by_ticker_total_value)         # allocation by Money_invested + Profit
 
 # distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
 # position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by

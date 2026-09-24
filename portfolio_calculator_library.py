@@ -92,10 +92,12 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
+        self.distribution_by_directory_total_value=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
+        self.distribution_by_ticker_total_value=dict()
         # Allocation by each position's own NATIVE currency, not currency_to - answers "how much
         # of my portfolio is actually USD/EUR/PLN" regardless of reporting currency. Keyed
         # uppercase so differently-cased sources land in the same bucket.
@@ -103,6 +105,7 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_currency_currently_invested=dict()
         self.distribution_by_currency_current_value=dict()
         self.distribution_by_currency_revenue=dict()
+        self.distribution_by_currency_total_value=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=Decimal('0')
@@ -111,6 +114,10 @@ class Portfolio(IrrMixin, ReprMixin):
         self.total_money_currently_invested=Decimal('0')
         self.total_current_value=Decimal('0')
         self.total_revenue=Decimal('0')
+        # Money_invested + Profit: what's still held at cost plus every gain ever made on it
+        # (unrealized, dividends, realized) - unlike total_current_value, a sold/matured
+        # position keeps its realized gain here instead of dropping to 0.
+        self.total_value=Decimal('0')
         portfolio_list=list()
         # Shared across every source below so a currency pair fetched by one is reused by
         # another instead of each fetching its own.
@@ -173,6 +180,9 @@ class Portfolio(IrrMixin, ReprMixin):
         for key, value in self.distribution_by_directory_revenue.items():
             self.distribution_by_directory_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
 
+        for key, value in self.distribution_by_directory_total_value.items():
+            self.distribution_by_directory_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
+
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
 
@@ -185,6 +195,9 @@ class Portfolio(IrrMixin, ReprMixin):
         for key, value in self.distribution_by_ticker_revenue.items():
             self.distribution_by_ticker_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
 
+        for key, value in self.distribution_by_ticker_total_value.items():
+            self.distribution_by_ticker_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
+
         for key, value in self.distribution_by_currency.items():
             self.distribution_by_currency[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
 
@@ -196,6 +209,9 @@ class Portfolio(IrrMixin, ReprMixin):
 
         for key, value in self.distribution_by_currency_revenue.items():
             self.distribution_by_currency_revenue[key]=100.0*float(value)/float(self.total_revenue) if self.total_revenue else 0.0
+
+        for key, value in self.distribution_by_currency_total_value.items():
+            self.distribution_by_currency_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
 
         self.data=self.merge(portfolio_list)
 
@@ -225,18 +241,23 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_directory_currently_invested[dir]=source.total_money_currently_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
+        self.distribution_by_directory_total_value[dir]=source.total_money_currently_invested+source.total_revenue
         self.total_money_invested+=source.total_money_invested
         self.total_money_currently_invested+=source.total_money_currently_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
+        self.total_value+=source.total_money_currently_invested+source.total_revenue
 
+        # Last field: whether that metric's per-key amount also feeds total_value (currently
+        # invested + revenue) - no source exposes a per-ticker total_value of its own.
         per_metric=(
-            (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested),
-            (self.distribution_by_ticker_currently_invested, self.distribution_by_currency_currently_invested, source.distribution_by_ticker_currently_invested, source.total_money_currently_invested),
-            (self.distribution_by_ticker_current_value, self.distribution_by_currency_current_value, source.distribution_by_ticker_current_value, source.total_current_value),
-            (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue),
+            (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested, False),
+            (self.distribution_by_ticker_currently_invested, self.distribution_by_currency_currently_invested, source.distribution_by_ticker_currently_invested, source.total_money_currently_invested, True),
+            (self.distribution_by_ticker_current_value, self.distribution_by_currency_current_value, source.distribution_by_ticker_current_value, source.total_current_value, False),
+            (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue, True),
         )
-        for target_ticker, target_currency, source_ticker, total in per_metric:
+        total_value_by_ticker=dict()
+        for target_ticker, target_currency, source_ticker, total, feeds_total_value in per_metric:
             for key, value in source_ticker.items():
                 # value (a %) and total (Decimal money) are reconstructed back to an absolute
                 # amount here - computed in float (an approximation of the source's own rounding),
@@ -245,6 +266,12 @@ class Portfolio(IrrMixin, ReprMixin):
                 target_ticker[key]=target_ticker.get(key, Decimal('0'))+amount
                 if supports_currency:
                     self._accumulate_by_currency(target_currency, source.currency_by_ticker, key, amount)
+                if feeds_total_value:
+                    total_value_by_ticker[key]=total_value_by_ticker.get(key, Decimal('0'))+amount
+        for key, amount in total_value_by_ticker.items():
+            self.distribution_by_ticker_total_value[key]=self.distribution_by_ticker_total_value.get(key, Decimal('0'))+amount
+            if supports_currency:
+                self._accumulate_by_currency(self.distribution_by_currency_total_value, source.currency_by_ticker, key, amount)
 
         if supports_native_currency:
             self.native_data.update(source.native_data)

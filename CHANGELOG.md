@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.2.3] - 2026-09-24
+
+### Added
+- `Portfolio.total_value` and `distribution_by_ticker_total_value`/
+  `distribution_by_directory_total_value`/`distribution_by_currency_total_value`: allocation by
+  `Money_invested + Profit` (currently held cost basis plus every gain ever made, realized
+  included). Documented in the README's new "Total value" section.
+
+### Changed
+- `Plot.allocation_comparison_plot` now compares allocation by amount invested against
+  allocation by total value (`_total_value`) instead of current market value (`_current_value`).
+  The second bar is renamed from "Current value" to "Total value". A sold/matured position now
+  keeps its realized gain there instead of dropping to 0%.
+
 ## [0.2.2] - 2026-09-23
 
 ### Changed

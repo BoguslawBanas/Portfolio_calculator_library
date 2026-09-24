@@ -272,6 +272,15 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     assert bonds_only.total_money_currently_invested==pytest.approx(0.0)
     assert mixed.total_money_currently_invested==pytest.approx(stock_only.total_money_currently_invested)
 
+    # total_value (Money_invested + Profit) keeps the matured bond's realized gain, unlike
+    # total_current_value, which drops it to 0 along with its cost basis.
+    assert mixed.total_value==mixed.data[Portfolio.MONEY_INVESTED_COLUMN].iloc[-1]+mixed.data[Portfolio.PROFIT_COLUMN].iloc[-1]
+    assert mixed.distribution_by_ticker_current_value['OTS']==pytest.approx(0.0)
+    assert mixed.distribution_by_ticker_total_value['OTS']==pytest.approx(100.0*float(matured_bond_revenue)/float(mixed.total_value), abs=0.01)
+    assert sum(mixed.distribution_by_ticker_total_value.values())==pytest.approx(100.0)
+    assert sum(mixed.distribution_by_directory_total_value.values())==pytest.approx(100.0)
+    assert sum(mixed.distribution_by_currency_total_value.values())==pytest.approx(100.0)
+
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
     start=date.today()-timedelta(days=5)
