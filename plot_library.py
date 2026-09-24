@@ -249,33 +249,34 @@ class Plot:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected {self.ALLOCATION_PLOT_KIND_PIE!r} or {self.ALLOCATION_PLOT_KIND_HISTOGRAM!r})")
 
     def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY_TICKER, max_slices: int=7, path_to_save_fig: str=None):
-        """Grouped bar chart: allocation by amount invested vs. by current market value, per
+        """Grouped bar chart: allocation by amount invested vs. by total value (Money_invested +
+        Profit - still-held cost basis plus every gain ever made, realized included), per
         ticker/directory - shows at a glance which positions grew/shrunk relative to cost basis.
         by: 'ticker' or 'directory' - self.portfolio.distribution_by_ticker/_directory
-        (/_current_value)."""
+        (/_total_value)."""
         if by==self.ALLOCATION_COMPARISON_PLOT_BY_TICKER:
-            invested, current_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_current_value
+            invested, total_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_total_value
         elif by==self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY:
-            invested, current_value=self.portfolio.distribution_by_directory, self.portfolio.distribution_by_directory_current_value
+            invested, total_value=self.portfolio.distribution_by_directory, self.portfolio.distribution_by_directory_total_value
         else:
             raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected {self.ALLOCATION_COMPARISON_PLOT_BY_TICKER!r} or {self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY!r})")
 
-        # Sort by the invested metric, then carry the same grouping to current_value so both
+        # Sort by the invested metric, then carry the same grouping to total_value so both
         # bars per label line up.
         ordered_keys=sorted(invested, key=invested.get, reverse=True)
         if len(ordered_keys)>max_slices:
             kept_keys, other_keys=ordered_keys[:max_slices], ordered_keys[max_slices:]
             labels=kept_keys+['Other']
             invested_values=[invested[key] for key in kept_keys]+[sum(invested[key] for key in other_keys)]
-            current_values=[current_value[key] for key in kept_keys]+[sum(current_value[key] for key in other_keys)]
+            total_values=[total_value[key] for key in kept_keys]+[sum(total_value[key] for key in other_keys)]
         else:
             labels=ordered_keys
             invested_values=[invested[key] for key in labels]
-            current_values=[current_value[key] for key in labels]
+            total_values=[total_value[key] for key in labels]
 
         fig=go.Figure(data=[
             go.Bar(x=labels, y=invested_values, name='Invested', marker_color=CATEGORICAL_COLORS[0]),
-            go.Bar(x=labels, y=current_values, name='Current value', marker_color=CATEGORICAL_COLORS[1]),
+            go.Bar(x=labels, y=total_values, name='Total value', marker_color=CATEGORICAL_COLORS[1]),
         ])
         fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)", barmode='group')
         fig.update_yaxes(showgrid=True)

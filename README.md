@@ -114,7 +114,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
-- `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by current market value, side by side per ticker/directory
+- `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory
 
 ### 🪙 `commodity_calculator_library.Commodity`
 
@@ -173,6 +173,7 @@ For every asset class, the first two columns coincide until something's actually
 `Portfolio` builds its own three dict families on top of the tables above, not by re-deriving them from scratch:
 - `distribution_by_directory*` — one entry per source directory, value = that source's own `total_money_invested`/`total_money_currently_invested`/`total_current_value`/`total_revenue` (the class-level totals the table above rolls up into), not broken down further by ticker.
 - `distribution_by_ticker*` — each source's own already-computed per-ticker dict (the table above) is re-expanded back to an absolute amount and summed across every source that happens to share the same ticker/type/account key, then the combined total is renormalized to a percentage of the whole portfolio.
+- `distribution_by_ticker_total_value`/`distribution_by_directory_total_value`/`distribution_by_currency_total_value` (and `total_value`) — `Portfolio`-only: each key's currently invested amount plus its revenue, i.e. `Money_invested + Profit`. Unlike `_current_value`, a sold/matured/cancelled position keeps its realized gain here instead of dropping to 0%. This is what `Plot.allocation_comparison_plot` compares against amount ever invested.
 - `distribution_by_currency*` — the same merge as `distribution_by_ticker*` above, but grouped by each holding's own *native* currency instead of its ticker key. `BankAccount` never contributes here — it has no per-ticker native currency to look up (everything is assumed to already be in one currency), so a `BankAccount`-only portfolio's `distribution_by_currency*` dicts stay empty.
 
 ## Project structure
@@ -258,6 +259,7 @@ print(portfolio.distribution_by_ticker)                     # allocation by amou
 print(portfolio.distribution_by_ticker_currently_invested)  # allocation by amount currently invested
 print(portfolio.distribution_by_ticker_current_value)       # allocation by current market value
 print(portfolio.distribution_by_ticker_revenue)              # allocation by share of total gains
+print(portfolio.distribution_by_ticker_total_value)         # allocation by Money_invested + Profit
 
 # distribution_by_currency/_current_value/_revenue: same three allocations, but grouped by each
 # position's own NATIVE currency (e.g. {"usd": 60.0, "eur": 25.0, "PLN": 15.0}) instead of by
