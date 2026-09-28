@@ -116,6 +116,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `drawdown_plot` — total value's (`Money_invested + Profit`) running peak-to-trough decline over time, as a percentage off its own running all-time high
 - `cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by sign
 - `realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized (incl. dividends) components, as a stacked area
+- `dividend_income_plot` — dividends actually received per resample period, as bars, distinct from `revenue_plot`'s cumulative dividend line
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker, by source directory, or by native currency (FX exposure), as a pie or bar chart, by amount invested, current market value, or revenue
 - `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory

@@ -12,6 +12,7 @@ tests can assert on fig.data.
 from unittest import mock
 
 import pytest
+import pandas as pd
 import plotly.graph_objects as go
 
 from Portfolio_calculator_library import Portfolio, Plot
@@ -248,6 +249,34 @@ def test_realized_vs_unrealized_profit_plot_splits_and_sums_to_profit(portfolio,
     assert summed==pytest.approx(profit.tolist())
     # the fixture's partial sell (4 units bought at 100, sold at 120) locks in a realized gain
     assert realized.iloc[-1]>0
+
+
+def test_dividend_income_plot_matches_periodic_dividend_diff(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.dividend_income_plot(resample_rule='D')
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    dividends=data[Portfolio.DIVIDEND_COLUMN].astype(float)
+    expected=dividends.diff().fillna(0.0)
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected.tolist())
+    # the fixture's single dividend.csv row (25.0 on 2024-06-01) shows up as one day's income
+    assert expected[pd.Timestamp('2024-06-01')]==pytest.approx(25.0)
+
+
+def test_dividend_income_plot_defaults_dividends_to_zero_when_source_has_none(make_source_dir, captured_figures):
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-01-15,savings,1000.0,fixed,6.0,12,0.0\n",
+    })
+    portfolio=Portfolio({account_dir: 'bank_account'})
+    assert Portfolio.DIVIDEND_COLUMN not in portfolio.data.columns
+    plot=Plot(portfolio)
+    plot.dividend_income_plot()
+    fig, _=captured_figures[-1]
+    assert list(fig.data[0].y)==pytest.approx([0.0]*len(fig.data[0].y))
 
 
 def test_period_return_bar_plot_colors_bars_by_sign(portfolio, captured_figures):

@@ -244,6 +244,27 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
+    def dividend_income_plot(self, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_MONTHLY, path_to_save_fig: str=None):
+        """Dividends actually received per resample_rule period, as bars - Dividend's cumulative
+        series diffed and summed per bucket - unlike revenue_plot's cumulative dividend line.
+        DIVIDEND_COLUMN defaults to 0 if absent (no Stock source). By period only, not by ticker -
+        DIVIDEND_COLUMN is already summed across every ticker by the time it reaches
+        self.portfolio.data, and Portfolio doesn't separately retain a per-ticker daily series.
+        Reads self.portfolio.data, not .portfolio, so - like revenue_plot - it needs no prior
+        calculate_irr()/resample()/calculate_money_earned_between_dates_column() call."""
+        dataframe=self.portfolio.data
+        # DIVIDEND_COLUMN is Decimal - cast to float for plotly, which doesn't render Decimal
+        # values.
+        dividends=dataframe[self.portfolio.DIVIDEND_COLUMN].astype(float) if self.portfolio.DIVIDEND_COLUMN in dataframe else pd.Series(0.0, index=dataframe.index)
+        periodic_dividends=dividends.diff().fillna(0.0).resample(resample_rule).sum()
+
+        fig=go.Figure(data=[
+            go.Bar(x=periodic_dividends.index, y=periodic_dividends, marker_color=CATEGORICAL_COLORS[0])
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title="Dividend income")
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
     def period_return_bar_plot(self, days_between: int=0, offset: int=0, path_to_save_fig: str=None):
         if self.portfolio.DAILY_RETURN_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_money_earned_between_dates_column(days_between, offset)
