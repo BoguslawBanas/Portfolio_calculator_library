@@ -282,6 +282,43 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
+    def rolling_return_plot(self, days_between: int=90, path_to_save_fig: str=None):
+        """Rolling annualized return (%) over a trailing days_between-day window, as a line -
+        extends calculate_money_earned_between_dates_column's own single-window formula (the same
+        shift-based windowing) into an annualized percentage of capital deployed, rather than one
+        raw dollar-per-day figure (period_return_bar_plot) or one cumulative rate since inception
+        (performance_plot's IRR). Each day's value is that window's profit gained, divided by
+        money invested at the window's start, scaled to a year (x365/days_between).
+        Reads self.portfolio.data, not .portfolio, so - unlike period_return_bar_plot - it needs
+        no prior calculate_money_earned_between_dates_column() call."""
+        if days_between<=0:
+            raise ValueError(f"days_between must be a positive number of days, got {days_between!r}.")
+
+        dataframe=self.portfolio.data
+        # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal - cast to float for plotly, which
+        # doesn't render Decimal values.
+        money_invested=dataframe[self.portfolio.MONEY_INVESTED_COLUMN].astype(float)
+        profit=dataframe[self.portfolio.PROFIT_COLUMN].astype(float)
+
+        # Shifting N rows matches N calendar days on this continuous daily index (same assumption
+        # calculate_money_earned_between_dates_column's own shift() relies on).
+        older_profit=profit.shift(days_between).fillna(0.0)
+        older_money_invested=money_invested.shift(days_between).fillna(0.0)
+        window_gain=profit-older_profit
+
+        # Guarded like Portfolio's own percentage fields - a window starting before any money was
+        # invested would otherwise divide by 0.
+        rolling_return=pd.Series(0.0, index=dataframe.index)
+        funded=older_money_invested>0
+        rolling_return[funded]=(window_gain[funded]/older_money_invested[funded])*(365.0/days_between)*100.0
+
+        fig=go.Figure(data=[
+            go.Scatter(x=dataframe.index, y=rolling_return, mode='lines', line=dict(color=CATEGORICAL_COLORS[0]))
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title=f"Rolling {days_between}-day annualized return (%)")
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
     # Suffix appended to 'distribution_by_ticker'/'distribution_by_directory' to reach the
     # backing Portfolio attribute for each allocation_plot metric.
     METRIC_ATTRIBUTE_SUFFIXES={ALLOCATION_PLOT_METRIC_INVESTED: '', ALLOCATION_PLOT_METRIC_CURRENT_VALUE: '_current_value', ALLOCATION_PLOT_METRIC_REVENUE: '_revenue'}

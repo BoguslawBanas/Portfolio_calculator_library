@@ -118,6 +118,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized (incl. dividends) components, as a stacked area
 - `dividend_income_plot` — dividends actually received per resample period, as bars, distinct from `revenue_plot`'s cumulative dividend line
 - `period_return_bar_plot` — rolling daily return, colored by sign
+- `rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line - a window's profit gain over money invested at the window's start, scaled to a year
 - `allocation_plot` — portfolio allocation by ticker, by source directory, or by native currency (FX exposure), as a pie or bar chart, by amount invested, current market value, or revenue
 - `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory
 

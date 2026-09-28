@@ -291,6 +291,31 @@ def test_period_return_bar_plot_colors_bars_by_sign(portfolio, captured_figures)
     assert list(fig.data[0].marker.color)==[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values]
 
 
+def test_rolling_return_plot_matches_annualized_window_formula(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.rolling_return_plot(days_between=30)
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    money_invested=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)
+    profit=data[Portfolio.PROFIT_COLUMN].astype(float)
+    older_profit=profit.shift(30).fillna(0.0)
+    older_money_invested=money_invested.shift(30).fillna(0.0)
+    expected=[
+        0.0 if older<=0 else (recent-old)/older*(365.0/30)*100.0
+        for recent, old, older in zip(profit, older_profit, older_money_invested)
+    ]
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected)
+
+
+def test_rolling_return_plot_rejects_non_positive_days_between(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="days_between must be a positive number of days"):
+        plot.rolling_return_plot(days_between=0)
+
+
 def test_allocation_plot_pie_matches_distribution_by_ticker(portfolio, captured_figures):
     plot=Plot(portfolio)
     plot.allocation_plot(by=Plot.ALLOCATION_PLOT_BY_TICKER, kind=Plot.ALLOCATION_PLOT_KIND_PIE, metric=Plot.ALLOCATION_PLOT_METRIC_INVESTED)
