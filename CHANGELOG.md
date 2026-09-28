@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.3.1] - 2026-09-28
+
+### Added
+- `Plot.allocation_plot` accepts `by='currency'`, charting allocation by each position's own
+  native currency (FX exposure) alongside the existing `'ticker'`/`'directory'`.
+- `Plot.dividend_income_plot` — dividends actually received per resample period, as bars, unlike
+  `revenue_plot`'s cumulative dividend line.
+- `Plot.rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added
