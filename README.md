@@ -113,6 +113,9 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `performance_plot` — IRR over time, as a line or a candlestick chart
 - `benchmark_comparison_plot` — overlays this portfolio's own IRR against a `Benchmark`'s (see `Portfolio.simulate_benchmark`/`benchmark_calculator_library.Benchmark` above) — same cash-flow timing, different asset, so the gap between the two lines is the portfolio's actual edge (or lag) over having put the same money into the benchmark instead
 - `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
+- `drawdown_plot` — total value's (`Money_invested + Profit`) running peak-to-trough decline over time, as a percentage off its own running all-time high
+- `cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by sign
+- `realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized (incl. dividends) components, as a stacked area
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
 - `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory

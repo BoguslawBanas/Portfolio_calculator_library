@@ -175,6 +175,74 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
+    def drawdown_plot(self, path_to_save_fig: str=None):
+        """Portfolio total value's (Money_invested + Profit) running peak-to-trough decline over
+        time, as a percentage off its own running all-time high - a risk view money_plot/
+        revenue_plot don't show. Reads self.portfolio.data, not .portfolio, so - like
+        revenue_plot - it needs no prior calculate_irr()/resample()/
+        calculate_money_earned_between_dates_column() call."""
+        dataframe=self.portfolio.data
+        # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal - cast to float for plotly, which
+        # doesn't render Decimal values.
+        total_value=dataframe[self.portfolio.MONEY_INVESTED_COLUMN].astype(float)+dataframe[self.portfolio.PROFIT_COLUMN].astype(float)
+        running_max=total_value.cummax()
+        # Guarded like Portfolio's own percentage fields - a never-funded/all-zero stretch would
+        # otherwise divide by 0.
+        drawdown=pd.Series(0.0, index=dataframe.index)
+        held=running_max>0
+        drawdown[held]=(total_value[held]-running_max[held])/running_max[held]*100.0
+
+        fig=go.Figure(data=[
+            go.Scatter(x=dataframe.index, y=drawdown, mode='lines', fill='tozeroy', line=dict(color=COLOR_CRITICAL))
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title="Drawdown (%)")
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
+    def cashflow_plot(self, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_MONTHLY, path_to_save_fig: str=None):
+        """Net contributions (positive bars) and withdrawals (negative bars) per resample_rule
+        period - Money_invested's day-over-day diffs, summed per bucket - complementing
+        money_plot's cumulative view with how much actually moved in/out each period. Reads
+        self.portfolio.data, not .portfolio, so - like revenue_plot - it needs no prior
+        calculate_irr()/resample()/calculate_money_earned_between_dates_column() call."""
+        dataframe=self.portfolio.data
+        # MONEY_INVESTED_COLUMN is Decimal - cast to float for plotly, which doesn't render
+        # Decimal values.
+        money_invested=dataframe[self.portfolio.MONEY_INVESTED_COLUMN].astype(float)
+        daily_cashflow=money_invested.diff().fillna(0.0)
+        periodic_cashflow=daily_cashflow.resample(resample_rule).sum()
+
+        colors=[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in periodic_cashflow]
+        fig=go.Figure(data=[
+            go.Bar(x=periodic_cashflow.index, y=periodic_cashflow, marker_color=colors)
+        ])
+        fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
+        fig.update_layout(xaxis_title="Time", yaxis_title="Net cashflow")
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
+    def realized_vs_unrealized_profit_plot(self, path_to_save_fig: str=None):
+        """Profit split into its realized and unrealized components, as a stacked area summing
+        back to Profit. Realized profit is Profit minus Profit_without_realized - the latter
+        (unrealized gain on positions still held, plus dividends collected along the way,
+        excluding gain/loss already locked in by a sell) is always present, unlike Dividend.
+        Reads self.portfolio.data, not .portfolio, so - like revenue_plot - it needs no prior
+        calculate_irr()/resample()/calculate_money_earned_between_dates_column() call."""
+        dataframe=self.portfolio.data
+        # PROFIT_COLUMN/PROFIT_WITHOUT_REALIZED_COLUMN are Decimal - cast to float for plotly,
+        # which doesn't render Decimal values.
+        profit=dataframe[self.portfolio.PROFIT_COLUMN].astype(float)
+        unrealized=dataframe[self.portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].astype(float)
+        realized=profit-unrealized
+
+        fig=go.Figure(data=[
+            go.Scatter(x=dataframe.index, y=realized, mode='lines', name='Realized profit', stackgroup='one', line=dict(color=CATEGORICAL_COLORS[0])),
+            go.Scatter(x=dataframe.index, y=unrealized, mode='lines', name='Unrealized profit (incl. dividends)', stackgroup='one', line=dict(color=CATEGORICAL_COLORS[1])),
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title="Money", legend=dict(x=0, y=1))
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
     def period_return_bar_plot(self, days_between: int=0, offset: int=0, path_to_save_fig: str=None):
         if self.portfolio.DAILY_RETURN_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_money_earned_between_dates_column(days_between, offset)

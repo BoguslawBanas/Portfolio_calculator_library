@@ -27,9 +27,6 @@ Known gaps and possible future improvements, not yet scheduled to any release.
 
 ## Additional plots
 
-- Drawdown plot — running peak-to-trough decline of total value over time, derivable from the same `Money_invested + Profit` series `money_plot` already computes; a risk view nothing currently shows
-- Cashflow bar plot — periodic (e.g. monthly) net contributions/withdrawals as bars, using the `Cashflow`/`Money_invested` diffs, complementing `money_plot`'s cumulative view
-- Realized vs. unrealized profit plot — stacked area splitting `Profit` into `Realized_profit` and the unrealized remainder over time; `revenue_plot` currently only splits out dividends, not this
 - Allocation-over-time plot — stacked area chart of `distribution_by_ticker`/`_directory` evolving over time, vs. `allocation_plot`'s current snapshot-only pie/bar, to show allocation drift
 - Dividend income plot — dividends received per period (monthly/yearly bars) and/or by ticker, distinct from `revenue_plot`'s cumulative dividend line
 - Optional `benchmark` argument on the line-based plots (`money_plot`, `performance_plot`, `revenue_plot`) instead of one-off `*_comparison_plot` methods per plot type — overlays a second, aligned line the same way `benchmark_comparison_plot` already does internally (resample both to the same rule), covering both IRR comparison (what `benchmark_comparison_plot` does today) and money-value comparison (a benchmark trailing in IRR% but ahead in absolute terms, or vice versa, is a real distinction worth seeing) without duplicating each chart type. Left out of `period_return_bar_plot`/`allocation_plot`, where a second series doesn't overlay cleanly on bars/pies

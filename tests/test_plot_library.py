@@ -192,6 +192,64 @@ def test_revenue_plot_defaults_dividends_to_zero_when_source_has_none(make_sourc
     assert list(fig.data[1].y)==pytest.approx([0.0]*len(portfolio.data))
 
 
+def test_drawdown_plot_matches_running_peak_to_trough_decline(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.drawdown_plot()
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    total_value=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)+data[Portfolio.PROFIT_COLUMN].astype(float)
+    running_max=total_value.cummax()
+    expected=[(0.0 if peak<=0 else (value-peak)/peak*100.0) for value, peak in zip(total_value, running_max)]
+    assert list(fig.data[0].y)==pytest.approx(expected)
+    assert all(value<=1e-9 for value in fig.data[0].y)  # never above its own running peak
+
+
+def test_cashflow_plot_matches_periodic_money_invested_diff(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.cashflow_plot(resample_rule='D')
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    money_invested=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)
+    expected=money_invested.diff().fillna(0.0)
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected.tolist())
+
+
+def test_cashflow_plot_colors_bars_by_sign(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.cashflow_plot()
+    fig, _=captured_figures[-1]
+
+    values=list(fig.data[0].y)
+    colors=list(fig.data[0].marker.color)
+    assert colors==[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values]
+
+
+def test_realized_vs_unrealized_profit_plot_splits_and_sums_to_profit(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.realized_vs_unrealized_profit_plot()
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    assert len(fig.data)==2
+    assert fig.data[0].name=='Realized profit'
+    assert fig.data[1].name=='Unrealized profit (incl. dividends)'
+    data=portfolio.data
+    profit=data[Portfolio.PROFIT_COLUMN].astype(float)
+    unrealized=data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].astype(float)
+    realized=profit-unrealized
+    assert list(fig.data[0].y)==pytest.approx(realized.tolist())
+    assert list(fig.data[1].y)==pytest.approx(unrealized.tolist())
+    summed=[a+b for a, b in zip(fig.data[0].y, fig.data[1].y)]
+    assert summed==pytest.approx(profit.tolist())
+    # the fixture's partial sell (4 units bought at 100, sold at 120) locks in a realized gain
+    assert realized.iloc[-1]>0
+
+
 def test_period_return_bar_plot_colors_bars_by_sign(portfolio, captured_figures):
     portfolio.calculate_irr()  # gives period_return_bar_plot's own guard a self.portfolio.portfolio to work with
     plot=Plot(portfolio)

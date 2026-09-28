@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.3.0] - 2026-09-28
+
+### Added
+- `Plot.drawdown_plot` — total value's running peak-to-trough decline over time, as a percentage
+  off its own running all-time high.
+- `Plot.cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by
+  sign.
+- `Plot.realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized
+  (including dividends) components, as a stacked area.
+
 ## [0.2.3] - 2026-09-24
 
 ### Added
