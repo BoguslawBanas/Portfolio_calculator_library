@@ -60,9 +60,32 @@ class Plot:
         else:
             fig.show()
 
-    def money_plot(self, kind: str=MONEY_PLOT_KIND_PLOT, path_to_save_fig: str=None):
+    @staticmethod
+    def _reindex_benchmark_column(benchmark, column: str, index) -> pd.Series:
+        """One Benchmark column (Decimal - cast to float), reindexed (ffill) onto index, for a
+        direct overlay against the portfolio's own same-shaped series - used by money_plot's/
+        revenue_plot's own benchmark= overlay. Benchmark's own .data is always present from
+        construction, no calculate_irr()/... prerequisite (unlike its .portfolio, see
+        _benchmark_irr below)."""
+        return benchmark.data[column].astype(float).reindex(index).ffill()
+
+    def _benchmark_irr(self, benchmark, resample_rule: str) -> pd.Series:
+        """Benchmark's own IRR, resampled (ffill) to resample_rule - runs calculate_irr() first
+        if it hasn't yet (unlike self.portfolio, a Benchmark may have no .portfolio at all on a
+        first-ever call, so hasattr guards that instead of raising). Shared by
+        benchmark_comparison_plot and performance_plot's own benchmark= overlay."""
+        if not hasattr(benchmark, 'portfolio') or benchmark.IRR_COLUMN not in benchmark.portfolio.columns:
+            benchmark.calculate_irr()
+        return benchmark.portfolio[benchmark.IRR_COLUMN].resample(resample_rule).ffill()
+
+    def money_plot(self, kind: str=MONEY_PLOT_KIND_PLOT, benchmark=None, benchmark_name: str='Benchmark', path_to_save_fig: str=None):
         """Money invested vs. total revenue over time.
-        kind: 'plot' — two overlaid line plots, or 'stacked_plot' — stacked area plot."""
+        kind: 'plot' — two overlaid line plots, or 'stacked_plot' — stacked area plot.
+        benchmark: optional Benchmark (from Portfolio.simulate_benchmark) to overlay - its own
+        revenue (Money_invested + Profit), reindexed (ffill) onto this portfolio's own dates, as
+        an extra line regardless of kind - so a benchmark trailing in IRR% but ahead in absolute
+        money (or vice versa, see performance_plot's own IRR-only comparison) is visible directly.
+        benchmark_name: legend label for the benchmark's line, used only when benchmark is given."""
         dataframe=self.portfolio.portfolio
         # MONEY_INVESTED_COLUMN/PROFIT_COLUMN are Decimal - cast to float for plotly, which
         # doesn't render Decimal values.
@@ -71,39 +94,61 @@ class Plot:
         revenue=money_invested+profit
 
         if kind==self.MONEY_PLOT_KIND_PLOT:
-            fig=go.Figure(data=[
+            traces=[
                 go.Scatter(x=dataframe.index, y=money_invested, mode='lines', name='Money_invested'),
                 go.Scatter(x=dataframe.index, y=revenue, mode='lines', name='Revenue'),
-            ])
+            ]
         elif kind==self.MONEY_PLOT_KIND_STACKED_PLOT:
-            fig=go.Figure(data=[
+            traces=[
                 go.Scatter(x=dataframe.index, y=money_invested, mode='lines', name='Money_invested', stackgroup='one'),
                 go.Scatter(x=dataframe.index, y=profit, mode='lines', name='Profit', stackgroup='one'),
-            ])
+            ]
         else:
             raise ValueError(f"Unknown money_plot kind: {kind!r} (expected {self.MONEY_PLOT_KIND_PLOT!r} or {self.MONEY_PLOT_KIND_STACKED_PLOT!r})")
 
+        if benchmark is not None:
+            benchmark_money_invested=self._reindex_benchmark_column(benchmark, benchmark.MONEY_INVESTED_COLUMN, dataframe.index)
+            benchmark_profit=self._reindex_benchmark_column(benchmark, benchmark.PROFIT_COLUMN, dataframe.index)
+            traces.append(go.Scatter(x=dataframe.index, y=benchmark_money_invested+benchmark_profit, mode='lines', name=f'{benchmark_name} revenue'))
+
+        fig=go.Figure(data=traces)
         fig.update_layout(xaxis_title="Time", yaxis_title="Money", legend=dict(x=0, y=1))
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND_PLOT, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY, path_to_save_fig: str=None):
+    def performance_plot(self, kind: str=PERFORMANCE_PLOT_KIND_PLOT, resample_rule: str=PERFORMANCE_PLOT_RESAMPLE_RULE_WEEKLY, benchmark=None, benchmark_name: str='Benchmark', path_to_save_fig: str=None):
         """Portfolio performance over time, driven by the Irr column.
         kind: 'plot' — line plot of IRR, or 'candlestick' — candlestick of IRR aggregated
-        over resample_rule (min/max/first/last per bucket)."""
+        over resample_rule (min/max/first/last per bucket).
+        benchmark: optional Benchmark (from Portfolio.simulate_benchmark) to overlay against
+        kind='plot' - both IRR series resampled (ffill) to resample_rule, same as
+        benchmark_comparison_plot (which this supersedes for kind='plot'). Not supported for
+        kind='candlestick' - a second series doesn't overlay cleanly on a candlestick.
+        benchmark_name: legend label for the benchmark's line, used only when benchmark is given."""
         if self.portfolio.IRR_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_irr()
         dataframe=self.portfolio.portfolio
 
         if kind==self.PERFORMANCE_PLOT_KIND_PLOT:
-            # Kept off money_plot on purpose: IRR is a percentage, and mixing it in would mean a dual-axis chart.
-            fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.IRR_COLUMN], mode='lines', line=dict(color=CATEGORICAL_COLORS[0]))
-            ])
-            fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)")
+            if benchmark is not None:
+                # Kept off money_plot on purpose: IRR is a percentage, and mixing it in would mean a dual-axis chart.
+                portfolio_irr=dataframe[self.portfolio.IRR_COLUMN].resample(resample_rule).ffill()
+                benchmark_irr=self._benchmark_irr(benchmark, resample_rule)
+                fig=go.Figure(data=[
+                    go.Scatter(x=portfolio_irr.index, y=portfolio_irr, mode='lines', name='Portfolio', line=dict(color=CATEGORICAL_COLORS[0])),
+                    go.Scatter(x=benchmark_irr.index, y=benchmark_irr, mode='lines', name=benchmark_name, line=dict(color=CATEGORICAL_COLORS[1])),
+                ])
+                fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)", legend=dict(x=0, y=1))
+            else:
+                fig=go.Figure(data=[
+                    go.Scatter(x=dataframe.index, y=dataframe[self.portfolio.IRR_COLUMN], mode='lines', line=dict(color=CATEGORICAL_COLORS[0]))
+                ])
+                fig.update_layout(xaxis_title="Time", yaxis_title="IRR (%)")
             fig.update_yaxes(showgrid=True)
             self._render(fig, path_to_save_fig)
         elif kind==self.PERFORMANCE_PLOT_KIND_CANDLESTICK:
+            if benchmark is not None:
+                raise ValueError(f"performance_plot's benchmark overlay isn't supported for kind={kind!r} (only {self.PERFORMANCE_PLOT_KIND_PLOT!r}).")
             resample_df=dataframe.resample(resample_rule).ffill()
             open_close_low_high=dataframe[self.portfolio.IRR_COLUMN].resample(resample_rule).aggregate(['min', 'max', 'first', 'last'])
 
@@ -129,16 +174,12 @@ class Plot:
         benchmark: a Benchmark from self.portfolio.simulate_benchmark(ticker, ...).
         benchmark_name: legend label for the benchmark's line.
         resample_rule: both IRR series are resampled (ffill) to this rule, same as
-        performance_plot."""
+        performance_plot. Equivalent to performance_plot(kind='plot', benchmark=benchmark, ...)."""
         if self.portfolio.IRR_COLUMN not in self.portfolio.portfolio.columns:
             self.portfolio.calculate_irr()
-        # unlike self.portfolio, benchmark may have no .portfolio yet at all - hasattr guards
-        # that first-ever call instead of raising.
-        if not hasattr(benchmark, 'portfolio') or benchmark.IRR_COLUMN not in benchmark.portfolio.columns:
-            benchmark.calculate_irr()
 
         portfolio_irr=self.portfolio.portfolio[self.portfolio.IRR_COLUMN].resample(resample_rule).ffill()
-        benchmark_irr=benchmark.portfolio[benchmark.IRR_COLUMN].resample(resample_rule).ffill()
+        benchmark_irr=self._benchmark_irr(benchmark, resample_rule)
 
         fig=go.Figure(data=[
             go.Scatter(x=portfolio_irr.index, y=portfolio_irr, mode='lines', name='Portfolio', line=dict(color=CATEGORICAL_COLORS[0])),
@@ -148,14 +189,17 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    def revenue_plot(self, include_dividends: bool=True, path_to_save_fig: str=None):
+    def revenue_plot(self, include_dividends: bool=True, benchmark=None, benchmark_name: str='Benchmark', path_to_save_fig: str=None):
         """Portfolio revenue (total gain) over time - a simpler, non-IRR read of performance.
         Reads self.portfolio.data, not .portfolio, so unlike performance_plot/
         period_return_bar_plot it needs no prior calculate_irr()/
         calculate_money_earned_between_dates_column() call.
         include_dividends: True - single 'Revenue' line (Profit as-is); False - two lines,
         dividends backed out of revenue and shown separately. DIVIDEND_COLUMN defaults to 0 if
-        absent (no Stock source)."""
+        absent (no Stock source).
+        benchmark: optional Benchmark (from Portfolio.simulate_benchmark) to overlay - its own
+        Profit, reindexed (ffill) onto this portfolio's own dates, as an extra line.
+        benchmark_name: legend label for the benchmark's line, used only when benchmark is given."""
         dataframe=self.portfolio.data
         # PROFIT_COLUMN/DIVIDEND_COLUMN are Decimal - cast to float for plotly, which doesn't
         # render Decimal values. dividends' absent-column fallback is float too, matching that.
@@ -163,15 +207,18 @@ class Plot:
         dividends=dataframe[self.portfolio.DIVIDEND_COLUMN].astype(float) if self.portfolio.DIVIDEND_COLUMN in dataframe else pd.Series(0.0, index=dataframe.index)
 
         if include_dividends:
-            fig=go.Figure(data=[
-                go.Scatter(x=dataframe.index, y=profit, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0]))
-            ])
+            traces=[go.Scatter(x=dataframe.index, y=profit, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0]))]
         else:
-            fig=go.Figure(data=[
+            traces=[
                 go.Scatter(x=dataframe.index, y=profit-dividends, mode='lines', name='Revenue', line=dict(color=CATEGORICAL_COLORS[0])),
                 go.Scatter(x=dataframe.index, y=dividends, mode='lines', name='Dividends', line=dict(color=CATEGORICAL_COLORS[1])),
-            ])
+            ]
 
+        if benchmark is not None:
+            benchmark_profit=self._reindex_benchmark_column(benchmark, benchmark.PROFIT_COLUMN, dataframe.index)
+            traces.append(go.Scatter(x=dataframe.index, y=benchmark_profit, mode='lines', name=f'{benchmark_name} revenue', line=dict(color=CATEGORICAL_COLORS[2])))
+
+        fig=go.Figure(data=traces)
         fig.update_layout(xaxis_title="Time", yaxis_title="Money", legend=dict(x=0, y=1))
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)

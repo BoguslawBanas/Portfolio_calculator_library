@@ -111,8 +111,9 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 
 - `money_plot` — money invested vs. total revenue, as overlaid lines or a stacked area
 - `performance_plot` — IRR over time, as a line or a candlestick chart
-- `benchmark_comparison_plot` — overlays this portfolio's own IRR against a `Benchmark`'s (see `Portfolio.simulate_benchmark`/`benchmark_calculator_library.Benchmark` above) — same cash-flow timing, different asset, so the gap between the two lines is the portfolio's actual edge (or lag) over having put the same money into the benchmark instead
+- `benchmark_comparison_plot` — overlays this portfolio's own IRR against a `Benchmark`'s (see `Portfolio.simulate_benchmark`/`benchmark_calculator_library.Benchmark` above) — same cash-flow timing, different asset, so the gap between the two lines is the portfolio's actual edge (or lag) over having put the same money into the benchmark instead. Equivalent to `performance_plot(kind='plot', benchmark=...)`, which supersedes it
 - `revenue_plot` — total gain over time, skipping IRR; dividends either summed into revenue or shown as a separate line
+- `money_plot`/`performance_plot` (`kind='plot'` only)/`revenue_plot` all accept an optional `benchmark` (a `Benchmark`, same as `benchmark_comparison_plot`) to overlay a same-shaped line from it — `money_plot`/`revenue_plot` overlay the benchmark's own revenue/profit (a money-value comparison), `performance_plot` its IRR
 - `drawdown_plot` — total value's (`Money_invested + Profit`) running peak-to-trough decline over time, as a percentage off its own running all-time high
 - `cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by sign
 - `realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized (incl. dividends) components, as a stacked area

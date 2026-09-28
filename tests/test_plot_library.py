@@ -97,6 +97,28 @@ def test_money_plot_rejects_unknown_kind(portfolio):
         plot.money_plot(kind='nonsense')
 
 
+def test_money_plot_with_benchmark_adds_revenue_overlay_line(portfolio, captured_figures):
+    portfolio.calculate_irr()  # populates portfolio.portfolio, which money_plot reads from
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.money_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==3
+    assert fig.data[2].name=='FAKEUSD revenue'
+    data=portfolio.portfolio
+    expected=(benchmark.data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)+benchmark.data[Portfolio.PROFIT_COLUMN].astype(float)).reindex(data.index).ffill()
+    assert list(fig.data[2].y)==pytest.approx(expected.tolist())
+
+
+def test_money_plot_without_benchmark_has_no_extra_trace(portfolio, captured_figures):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    plot.money_plot()
+    fig, _=captured_figures[-1]
+    assert len(fig.data)==2
+
+
 def test_performance_plot_reruns_calculate_irr_when_irr_column_is_missing(portfolio, captured_figures):
     # Exercises the "IRR_COLUMN not in columns -> recompute" guard directly. In practice
     # self.portfolio only ever comes into existence via calculate_irr() itself (resample()/
@@ -139,6 +161,27 @@ def test_performance_plot_rejects_unknown_kind(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown performance_plot kind"):
         plot.performance_plot(kind='nonsense')
+
+
+def test_performance_plot_with_benchmark_overlays_both_irr_series(portfolio, captured_figures):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.performance_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==2
+    assert fig.data[0].name=='Portfolio'
+    assert fig.data[1].name=='FAKEUSD'
+    assert hasattr(benchmark, 'portfolio')  # calculate_irr() was called on it too, automatically
+
+
+def test_performance_plot_rejects_benchmark_with_candlestick_kind(portfolio):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    with pytest.raises(ValueError, match="benchmark overlay isn't supported for kind"):
+        plot.performance_plot(kind=Plot.PERFORMANCE_PLOT_KIND_CANDLESTICK, benchmark=benchmark)
 
 
 def test_benchmark_comparison_plot_overlays_both_irr_series(portfolio, captured_figures):
@@ -191,6 +234,19 @@ def test_revenue_plot_defaults_dividends_to_zero_when_source_has_none(make_sourc
     plot.revenue_plot(include_dividends=False)
     fig, _=captured_figures[-1]
     assert list(fig.data[1].y)==pytest.approx([0.0]*len(portfolio.data))
+
+
+def test_revenue_plot_with_benchmark_adds_revenue_overlay_line(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.revenue_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==2
+    assert fig.data[1].name=='FAKEUSD revenue'
+    data=portfolio.data
+    expected=benchmark.data[Portfolio.PROFIT_COLUMN].astype(float).reindex(data.index).ffill()
+    assert list(fig.data[1].y)==pytest.approx(expected.tolist())
 
 
 def test_drawdown_plot_matches_running_peak_to_trough_decline(portfolio, captured_figures):

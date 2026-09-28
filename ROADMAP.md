@@ -28,4 +28,3 @@ Known gaps and possible future improvements, not yet scheduled to any release.
 ## Additional plots
 
 - Allocation-over-time plot — stacked area chart of `distribution_by_ticker`/`_directory` evolving over time, vs. `allocation_plot`'s current snapshot-only pie/bar, to show allocation drift
-- Optional `benchmark` argument on the line-based plots (`money_plot`, `performance_plot`, `revenue_plot`) instead of one-off `*_comparison_plot` methods per plot type — overlays a second, aligned line the same way `benchmark_comparison_plot` already does internally (resample both to the same rule), covering both IRR comparison (what `benchmark_comparison_plot` does today) and money-value comparison (a benchmark trailing in IRR% but ahead in absolute terms, or vice versa, is a real distinction worth seeing) without duplicating each chart type. Left out of `period_return_bar_plot`/`allocation_plot`, where a second series doesn't overlay cleanly on bars/pies

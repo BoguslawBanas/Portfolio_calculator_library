@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.3.2] - 2026-09-28
+
+### Added
+- `Plot.money_plot`/`performance_plot`/`revenue_plot` accept an optional `benchmark` (a
+  `Benchmark`, same as `benchmark_comparison_plot`) to overlay a same-shaped line from it -
+  `money_plot`/`revenue_plot` overlay its revenue/profit (a money-value comparison),
+  `performance_plot` (`kind='plot'` only) its IRR.
+
+### Changed
+- `Plot.benchmark_comparison_plot` is now equivalent to
+  `performance_plot(kind='plot', benchmark=...)`, which supersedes it; kept unchanged for
+  backwards compatibility.
+
 ## [0.3.1] - 2026-09-28
 
 ### Added
