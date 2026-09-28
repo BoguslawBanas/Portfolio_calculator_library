@@ -117,7 +117,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by sign
 - `realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized (incl. dividends) components, as a stacked area
 - `period_return_bar_plot` — rolling daily return, colored by sign
-- `allocation_plot` — portfolio allocation by ticker or by source directory, as a pie or bar chart, by amount invested, current market value, or revenue
+- `allocation_plot` — portfolio allocation by ticker, by source directory, or by native currency (FX exposure), as a pie or bar chart, by amount invested, current market value, or revenue
 - `allocation_comparison_plot` — grouped bar chart comparing allocation by amount invested against allocation by total value (`Money_invested + Profit`, realized gains included), side by side per ticker/directory
 
 ### 🪙 `commodity_calculator_library.Commodity`

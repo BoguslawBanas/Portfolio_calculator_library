@@ -318,6 +318,29 @@ def test_allocation_plot_buckets_extra_slices_into_other(make_source_dir, make_t
     assert fig.data[0].labels[-1]=='Other'
 
 
+def test_allocation_plot_by_currency_matches_distribution_by_currency(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n"
+                   "2024-01-15,US0000000002,5,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "US0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
+    assert set(portfolio.distribution_by_currency)=={'USD', 'EUR'}
+    plot=Plot(portfolio)
+    plot.allocation_plot(by=Plot.ALLOCATION_PLOT_BY_CURRENCY, kind=Plot.ALLOCATION_PLOT_KIND_PIE)
+    fig, _=captured_figures[-1]
+
+    assert isinstance(fig.data[0], go.Pie)
+    assert set(fig.data[0].labels)==set(portfolio.distribution_by_currency)
+    label_to_value=dict(zip(fig.data[0].labels, fig.data[0].values))
+    for currency, pct in portfolio.distribution_by_currency.items():
+        assert label_to_value[currency]==pytest.approx(pct)
+
+
 def test_allocation_plot_rejects_unknown_metric(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown allocation_plot metric"):

@@ -34,6 +34,7 @@ class Plot:
 
     ALLOCATION_PLOT_BY_TICKER='ticker'
     ALLOCATION_PLOT_BY_DIRECTORY='directory'
+    ALLOCATION_PLOT_BY_CURRENCY='currency'
     ALLOCATION_PLOT_KIND_PIE='pie'
     ALLOCATION_PLOT_KIND_HISTOGRAM='histogram'
     ALLOCATION_PLOT_METRIC_INVESTED='invested'
@@ -266,7 +267,9 @@ class Plot:
 
     def allocation_plot(self, by: str=ALLOCATION_PLOT_BY_TICKER, kind: str=ALLOCATION_PLOT_KIND_PIE, metric: str=ALLOCATION_PLOT_METRIC_INVESTED, max_slices: int=7, path_to_save_fig: str=None):
         """Portfolio allocation breakdown.
-        by: 'ticker' or 'directory' - self.portfolio.distribution_by_ticker/_directory
+        by: 'ticker', 'directory', or 'currency' (each position's own native currency - FX
+        exposure, e.g. how much of the portfolio is actually USD- vs. EUR-denominated,
+        independent of currency_to) - self.portfolio.distribution_by_ticker/_directory/_currency
         (_current_value/_revenue).
         kind: 'pie' (donut) or 'histogram' (bar). metric='revenue' can go negative, which a pie
         can't represent - prefer 'histogram' there.
@@ -280,8 +283,10 @@ class Plot:
             distribution=getattr(self.portfolio, f'distribution_by_ticker{suffix}')
         elif by==self.ALLOCATION_PLOT_BY_DIRECTORY:
             distribution=getattr(self.portfolio, f'distribution_by_directory{suffix}')
+        elif by==self.ALLOCATION_PLOT_BY_CURRENCY:
+            distribution=getattr(self.portfolio, f'distribution_by_currency{suffix}')
         else:
-            raise ValueError(f"Unknown allocation_plot by: {by!r} (expected {self.ALLOCATION_PLOT_BY_TICKER!r} or {self.ALLOCATION_PLOT_BY_DIRECTORY!r})")
+            raise ValueError(f"Unknown allocation_plot by: {by!r} (expected {self.ALLOCATION_PLOT_BY_TICKER!r}, {self.ALLOCATION_PLOT_BY_DIRECTORY!r}, or {self.ALLOCATION_PLOT_BY_CURRENCY!r})")
 
         allocation=sorted(distribution.items(), key=lambda pair: pair[1], reverse=True)
         if len(allocation)>max_slices:
