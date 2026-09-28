@@ -14,6 +14,9 @@ or file layout.
 - `Portfolio.sources_by_directory` — each constructed source instance, kept around for
   `allocation_over_time_plot` to read its daily DataFrame from.
 
+### Changed
+- CI now also runs the test suite against Python 3.14.
+
 ## [0.3.2] - 2026-09-28
 
 ### Added
