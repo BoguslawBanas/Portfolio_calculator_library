@@ -493,3 +493,92 @@ def test_allocation_comparison_plot_rejects_unknown_by(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown allocation_comparison_plot by"):
         plot.allocation_comparison_plot(by='nonsense')
+
+
+def test_allocation_over_time_plot_invested_reflects_when_each_directory_starts_contributing(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
+    })
+    portfolio=Portfolio({stock_dir: 'stock', account_dir: 'bank_account'}, tickers_json=tickers_json, currency_to='usd')
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(metric=Plot.ALLOCATION_PLOT_METRIC_INVESTED)
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    assert all(trace.stackgroup is None for trace in fig.data)  # kind='plot' (default): not stacked
+    by_directory={trace.name: pd.Series(list(trace.y), index=pd.to_datetime(list(trace.x))) for trace in fig.data}
+    # Before the bank account's first deposit, the stock directory is the entire portfolio.
+    assert by_directory[stock_dir][pd.Timestamp('2024-01-20')]==pytest.approx(100.0)
+    assert by_directory[account_dir][pd.Timestamp('2024-01-20')]==pytest.approx(0.0)
+    # After: 1000 (stock) vs. 500 (bank), cost basis only - unaffected by FakeTicker's price moves.
+    assert by_directory[stock_dir][pd.Timestamp('2024-02-05')]==pytest.approx(1000.0/1500.0*100.0)
+    assert by_directory[account_dir][pd.Timestamp('2024-02-05')]==pytest.approx(500.0/1500.0*100.0)
+    # The final day matches Portfolio's own snapshot distribution exactly.
+    for dir, pct in portfolio.distribution_by_directory.items():
+        assert by_directory[dir].iloc[-1]==pytest.approx(pct)
+
+
+def test_allocation_over_time_plot_stacked_kind_sums_to_100_at_final_day(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
+    })
+    portfolio=Portfolio({stock_dir: 'stock', account_dir: 'bank_account'}, tickers_json=tickers_json, currency_to='usd')
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(kind=Plot.ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT)
+    fig, _=captured_figures[-1]
+
+    assert all(trace.stackgroup=='one' for trace in fig.data)
+    total_at_final_day=sum(trace.y[-1] for trace in fig.data)
+    assert total_at_final_day==pytest.approx(100.0)
+
+
+def test_allocation_over_time_plot_current_value_matches_distribution_by_directory_current_value_at_final_day(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(metric=Plot.ALLOCATION_PLOT_METRIC_CURRENT_VALUE)
+    fig, _=captured_figures[-1]
+
+    final_by_name={trace.name: trace.y[-1] for trace in fig.data}
+    for dir, pct in portfolio.distribution_by_directory_current_value.items():
+        assert final_by_name[dir]==pytest.approx(pct)
+
+
+def test_allocation_over_time_plot_buckets_extra_directories_into_other(make_source_dir, captured_figures):
+    n=9  # > max_slices default (7)
+    sources=dict()
+    for i in range(n):
+        account_dir=make_source_dir(f'account{i}', {
+            'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                           f"2024-01-15,acct,{100.0*(i+1)},fixed,0.0,12,0.0\n",
+        })
+        sources[account_dir]='bank_account'
+    portfolio=Portfolio(sources)
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(max_slices=7)
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==8  # 7 kept + one 'Other' bucket
+    assert fig.data[-1].name=='Other'
+
+
+def test_allocation_over_time_plot_rejects_unknown_metric(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="Unknown allocation_over_time_plot metric"):
+        plot.allocation_over_time_plot(metric='revenue')
+
+
+def test_allocation_over_time_plot_rejects_unknown_kind(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="Unknown allocation_over_time_plot kind"):
+        plot.allocation_over_time_plot(kind='nonsense')

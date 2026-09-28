@@ -88,6 +88,10 @@ class Portfolio(IrrMixin, ReprMixin):
         its own currency_to but doesn't yet expose an include_native_currency of its own."""
         # Kept so simulate_benchmark can default to it - self.data is already in this currency.
         self.currency_to=currency_to
+        # Each constructed source instance, keyed by its own directory - unlike every dict below
+        # (a single lifetime/current total per directory), this keeps each source's own daily
+        # DataFrame around too, e.g. for Plot.allocation_over_time_plot.
+        self.sources_by_directory=dict()
         self.distribution_by_directory=dict()
         self.distribution_by_directory_currently_invested=dict()
         self.distribution_by_directory_current_value=dict()
@@ -237,6 +241,7 @@ class Portfolio(IrrMixin, ReprMixin):
         supports_currency: False only for BankAccount, which has no currency_by_ticker.
         supports_native_currency: True only when include_native_currency was requested for a
         source that supports it (Stock/Commodity/Crypto)."""
+        self.sources_by_directory[dir]=source
         self.distribution_by_directory[dir]=source.total_money_invested
         self.distribution_by_directory_currently_invested[dir]=source.total_money_currently_invested
         self.distribution_by_directory_current_value[dir]=source.total_current_value

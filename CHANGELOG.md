@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.3.3] - 2026-09-28
+
+### Added
+- `Plot.allocation_over_time_plot` — portfolio allocation by source directory, evolving over
+  time, as overlaid lines or a stacked area, by amount invested or current market value.
+- `Portfolio.sources_by_directory` — each constructed source instance, kept around for
+  `allocation_over_time_plot` to read its daily DataFrame from.
+
 ## [0.3.2] - 2026-09-28
 
 ### Added

@@ -44,6 +44,9 @@ class Plot:
     ALLOCATION_COMPARISON_PLOT_BY_TICKER='ticker'
     ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY='directory'
 
+    ALLOCATION_OVER_TIME_PLOT_KIND_PLOT='plot'
+    ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT='stacked_plot'
+
     def __init__(self, portfolio: Portfolio):
         """portfolio: a constructed Portfolio that's already had calculate_irr()/resample()/
         calculate_money_earned_between_dates_column() called at least once - whichever's needed
@@ -457,5 +460,65 @@ class Plot:
             go.Bar(x=labels, y=total_values, name='Total value', marker_color=CATEGORICAL_COLORS[1]),
         ])
         fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)", barmode='group')
+        fig.update_yaxes(showgrid=True)
+        self._render(fig, path_to_save_fig)
+
+    def allocation_over_time_plot(self, kind: str=ALLOCATION_OVER_TIME_PLOT_KIND_PLOT, metric: str=ALLOCATION_PLOT_METRIC_INVESTED, max_slices: int=7, path_to_save_fig: str=None):
+        """Portfolio allocation by source directory, evolving over time - unlike allocation_plot's
+        current snapshot-only pie/bar, this shows how the mix has drifted.
+        By directory only, not by ticker: self.portfolio.sources_by_directory keeps each
+        constructed source's own daily DataFrame, but Portfolio doesn't retain a per-ticker/
+        symbol/account daily series - only each one's final lifetime totals
+        (distribution_by_ticker).
+        kind: 'plot' - one line per directory (each its own %, sharing the 0 baseline) - reads
+        individual trends precisely, but doesn't visually guarantee they sum to 100%. Or
+        'stacked_plot' - a stacked area (each day's bands sum to 100%), more intuitive for
+        composition but a middle band's own trend is distorted by whatever's stacked below it.
+        metric: 'invested' (cost basis, Money_invested) or 'current_value' (cost basis plus
+        unrealized gain) - 'revenue' isn't offered here since it can go negative, which neither
+        kind represents well (same reasoning as allocation_plot's own metric='revenue' guidance)."""
+        if metric not in (self.ALLOCATION_PLOT_METRIC_INVESTED, self.ALLOCATION_PLOT_METRIC_CURRENT_VALUE):
+            raise ValueError(f"Unknown allocation_over_time_plot metric: {metric!r} (expected {self.ALLOCATION_PLOT_METRIC_INVESTED!r} or {self.ALLOCATION_PLOT_METRIC_CURRENT_VALUE!r})")
+        if kind not in (self.ALLOCATION_OVER_TIME_PLOT_KIND_PLOT, self.ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT):
+            raise ValueError(f"Unknown allocation_over_time_plot kind: {kind!r} (expected {self.ALLOCATION_OVER_TIME_PLOT_KIND_PLOT!r} or {self.ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT!r})")
+
+        index=self.portfolio.data.index
+        per_directory=dict()
+        for dir, source in self.portfolio.sources_by_directory.items():
+            # MONEY_INVESTED_COLUMN/PROFIT_WITHOUT_DIVIDEND_COLUMN are Decimal - cast to float for
+            # plotly, which doesn't render Decimal values.
+            money_invested=source.data[source.MONEY_INVESTED_COLUMN].astype(float)
+            if metric==self.ALLOCATION_PLOT_METRIC_CURRENT_VALUE:
+                value=money_invested+source.data[source.PROFIT_WITHOUT_DIVIDEND_COLUMN].astype(float)
+            else:
+                value=money_invested
+            # A source's own DataFrame only starts on its own first transaction date, not
+            # Portfolio's overall earliest - reindexing onto the full index and filling with 0
+            # (not yet funded) before it starts, ffill for any gap past its own last day.
+            per_directory[dir]=value.reindex(index).ffill().fillna(0.0)
+
+        totals=sum(per_directory.values())
+        # Guarded like Portfolio's own percentage fields - a never-funded stretch would otherwise
+        # divide by 0.
+        percentages={dir: (series/totals*100.0).where(totals>0, 0.0) for dir, series in per_directory.items()}
+
+        ordered_dirs=sorted(percentages, key=lambda dir: percentages[dir].iloc[-1], reverse=True)
+        if len(ordered_dirs)>max_slices:
+            kept_dirs, other_dirs=ordered_dirs[:max_slices], ordered_dirs[max_slices:]
+            other_series=sum(percentages[dir] for dir in other_dirs)
+            traces=[(dir, percentages[dir]) for dir in kept_dirs]+[('Other', other_series)]
+        else:
+            traces=[(dir, percentages[dir]) for dir in ordered_dirs]
+
+        colors=list(CATEGORICAL_COLORS[:len(traces)])
+        if traces[-1][0]=='Other':
+            colors[-1]=COLOR_OTHER
+
+        stackgroup='one' if kind==self.ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT else None
+        fig=go.Figure(data=[
+            go.Scatter(x=index, y=series, mode='lines', name=str(name), stackgroup=stackgroup, line=dict(color=color))
+            for (name, series), color in zip(traces, colors)
+        ])
+        fig.update_layout(xaxis_title="Time", yaxis_title="Allocation (%)", legend=dict(x=0, y=1))
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
