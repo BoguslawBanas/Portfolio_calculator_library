@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.3.3] - 2026-09-28
+
+### Added
+- `Plot.allocation_over_time_plot` — portfolio allocation by source directory, evolving over
+  time, as overlaid lines or a stacked area, by amount invested or current market value.
+- `Portfolio.sources_by_directory` — each constructed source instance, kept around for
+  `allocation_over_time_plot` to read its daily DataFrame from.
+
+## [0.3.2] - 2026-09-28
+
+### Added
+- `Plot.money_plot`/`performance_plot`/`revenue_plot` accept an optional `benchmark` (a
+  `Benchmark`, same as `benchmark_comparison_plot`) to overlay a same-shaped line from it -
+  `money_plot`/`revenue_plot` overlay its revenue/profit (a money-value comparison),
+  `performance_plot` (`kind='plot'` only) its IRR.
+
+### Changed
+- `Plot.benchmark_comparison_plot` is now equivalent to
+  `performance_plot(kind='plot', benchmark=...)`, which supersedes it; kept unchanged for
+  backwards compatibility.
+
+## [0.3.1] - 2026-09-28
+
+### Added
+- `Plot.allocation_plot` accepts `by='currency'`, charting allocation by each position's own
+  native currency (FX exposure) alongside the existing `'ticker'`/`'directory'`.
+- `Plot.dividend_income_plot` — dividends actually received per resample period, as bars, unlike
+  `revenue_plot`'s cumulative dividend line.
+- `Plot.rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line.
+
+## [0.3.0] - 2026-09-28
+
+### Added
+- `Plot.drawdown_plot` — total value's running peak-to-trough decline over time, as a percentage
+  off its own running all-time high.
+- `Plot.cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by
+  sign.
+- `Plot.realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized
+  (including dividends) components, as a stacked area.
+
+## [0.2.3] - 2026-09-24
+
+### Added
+- `Portfolio.total_value` and `distribution_by_ticker_total_value`/
+  `distribution_by_directory_total_value`/`distribution_by_currency_total_value`: allocation by
+  `Money_invested + Profit` (currently held cost basis plus every gain ever made, realized
+  included). Documented in the README's new "Total value" section.
+
+### Changed
+- `Plot.allocation_comparison_plot` now compares allocation by amount invested against
+  allocation by total value (`_total_value`) instead of current market value (`_current_value`).
+  The second bar is renamed from "Current value" to "Total value". A sold/matured position now
+  keeps its realized gain there instead of dropping to 0%.
+
 ## [0.2.2] - 2026-09-23
 
 ### Changed
