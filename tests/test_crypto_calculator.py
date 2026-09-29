@@ -1,5 +1,6 @@
 """Tests for crypto_calculator_library.Crypto against synthetic, fixed data (no network)."""
 
+import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import Crypto
@@ -22,6 +23,24 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeyp
             'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
                        "2024-01-15,notarealcoin,0.5,40000.0,0.01\n",
         })
+
+
+def test_concurrent_symbol_fetch_matches_sequential(make_source_dir):
+    # max_workers=1 falls back to the pre-concurrency sequential loop (Concurrency.run) - three
+    # symbols built both ways should come out byte-for-byte identical, confirming the concurrent
+    # path (the default) changed nothing about the actual computation, only its scheduling.
+    csv_files={
+        'buy.csv': "date,symbol,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,bitcoin,0.5,40000.0,0.01\n"
+                   "2024-01-20,ethereum,3,2000.0,0.01\n"
+                   "2024-01-25,solana,10,100.0,0.0\n",
+    }
+    sequential=build_crypto(make_source_dir, csv_files, max_workers=1)
+    concurrent=build_crypto(make_source_dir, csv_files, max_workers=4)
+
+    pd.testing.assert_frame_equal(sequential.data, concurrent.data)
+    assert sequential.distribution_by_ticker==concurrent.distribution_by_ticker
+    assert sequential.total_money_invested==concurrent.total_money_invested
 
 
 def test_nonexistent_directory_raises_clear_value_error(tmp_path):

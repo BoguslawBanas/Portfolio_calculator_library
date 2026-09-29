@@ -15,6 +15,7 @@ import pandas as pd
 from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .price_source_library import PriceSource
+from .concurrency_library import Concurrency
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
 
 
@@ -51,7 +52,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
     CSV_DIVIDEND_COLUMN='dividend'
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
-    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
+    def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None, max_workers: int=Concurrency.DEFAULT_MAX_WORKERS):
         """tickers_json: JSON file mapping each ISIN to {"ticker": <yfinance symbol>,
         "currency": <instrument currency>} - same shape as Commodity/Crypto's own, required here
         since Stock has no built-in ticker registry to fall back on.
@@ -66,7 +67,10 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         already in currency_to (the computed DataFrame is reused).
         currency_cache: optional dict shared across sources (Portfolio passes one automatically)
         so a shared currency pair is fetched once instead of once per ticker - see
-        get_cached_currency. None: every ticker fetches its own."""
+        get_cached_currency. None: every ticker fetches its own.
+        max_workers: each ticker's price history is fetched on a bounded thread pool of this
+        size (concurrency_library.Concurrency) instead of one at a time - 1 (or a single-ticker
+        source) falls back to a plain sequential loop, identical to before this existed."""
         self.total_money_invested=Decimal('0')
         # Unlike total_money_invested (lifetime gross, never reduced by a sell), this is what's
         # still held today - a separate, independent computation.
@@ -96,11 +100,53 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         currently_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
-        for df in dataframes:
+
+        if currency_cache is not None:
+            # Pre-warm each needed currency pair sequentially, before any concurrent ticker fetch
+            # starts. get_cached_currency only reuses a cached entry when it already covers the
+            # requested start_date, refetching wider otherwise - relying on tickers being
+            # processed in a stable (start_date-increasing-ish) order for that to only ever
+            # widen. Concurrently, whichever ticker's fetch happens to win the race populates the
+            # cache with its OWN start_date first; if a later-dated ticker wins, an earlier-dated
+            # one arriving after it fails the "already covers" check and triggers a second,
+            # redundant fetch - not incorrect data, but a real, non-deterministic break of
+            # "fetch each pair once". Fetching the union (the minimum start_date needed) up front
+            # for each pair removes the race entirely - every concurrent call below then only
+            # ever reads an already-sufficient entry.
+            min_start_by_currency=dict()
+            for df in dataframes:
+                ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
+                start_date=df.index.min()
+                if ticker_currency not in min_start_by_currency or start_date<min_start_by_currency[ticker_currency]:
+                    min_start_by_currency[ticker_currency]=start_date
+            for ticker_currency, start_date in min_start_by_currency.items():
+                get_cached_currency(currency_cache, ticker_currency, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+
+        def _fetch_one(df) -> tuple:
+            # Runs on a worker thread (see Concurrency.run below) - reads self.tickers (fixed
+            # since before this loop starts) and calls _compute_data/get_cached_currency, but
+            # never writes to self, so several tickers can run this concurrently without racing
+            # on shared state. get_cached_currency's own currency_cache access is separately
+            # guarded by a lock (see currency_calculator_library) - each ticker's DiskCache reads/
+            # writes are already safe on their own, distinct (ticker/currency-keyed) files.
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
             ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
-            self.currency_by_ticker[ticker]=ticker_currency
             computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh, currency_cache)
+            native_data, native_currency=None, None
+            if include_native_currency:
+                # Already the same currency -> computed already is the native-currency DataFrame.
+                if ticker_currency.upper()==currency_to.upper():
+                    native_data=computed
+                else:
+                    native_data, _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh, currency_cache)
+                native_currency=ticker_currency
+            return ticker, ticker_currency, computed, total_buy_invested, native_data, native_currency
+
+        # Concurrency.run preserves dataframes' own order in its result list (regardless of which
+        # ticker's fetch actually finishes first), so this accumulation loop is exactly the same
+        # sequential-looking code as before - only the fetches above it now overlap.
+        for ticker, ticker_currency, computed, total_buy_invested, native_data, native_currency in Concurrency.run(dataframes, _fetch_one, max_workers=max_workers, progress_callback=progress_callback):
+            self.currency_by_ticker[ticker]=ticker_currency
             dataframes_2.append(computed)
 
             money_invested_by_ticker[ticker]=total_buy_invested
@@ -120,15 +166,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
             self.total_revenue+=revenue_by_ticker[ticker]
 
             if include_native_currency:
-                # Already the same currency -> computed already is the native-currency DataFrame.
-                if ticker_currency.upper()==currency_to.upper():
-                    self.native_data[ticker]=computed
-                else:
-                    self.native_data[ticker], _=self._compute_data(df, ticker_currency, ticker_currency, cache_dir, force_refresh, currency_cache)
-                self.native_currency[ticker]=ticker_currency
-
-            if progress_callback is not None:
-                progress_callback()
+                self.native_data[ticker]=native_data
+                self.native_currency[ticker]=native_currency
 
         # Distribution percentages are ratios, not money - computed in float even though value/
         # total are Decimal.

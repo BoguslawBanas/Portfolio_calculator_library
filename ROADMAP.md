@@ -14,7 +14,6 @@ Known gaps and possible future improvements, not yet scheduled to any release.
 
 ## Performance & reliability
 
-- Ticker/symbol price history is fetched one at a time, sequentially, even across independent tickers within one source — for a portfolio with many holdings, fetching them concurrently (e.g. a thread pool, since these are I/O-bound waits) could cut load time substantially. Would need care around the shared `currency_cache`/`DiskCache` (thread-safety) and the `tqdm` progress callback
 - `DiskCache` caches each source's already-currency-converted result, so switching `currency_to` (e.g. viewing the same portfolio in USD vs. PLN) invalidates the cache entirely and re-fetches raw price history from `yfinance` that hasn't actually changed - only the FX conversion step needs redoing. Caching the raw (pre-conversion) fetch separately from the conversion step would let a `currency_to` change reuse the price data and only redo the FX math
 
 ## Project structure & tooling

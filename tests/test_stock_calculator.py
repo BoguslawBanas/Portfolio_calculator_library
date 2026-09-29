@@ -1,5 +1,6 @@
 """Tests for stock_calculator_library.Stock against synthetic, fixed data (no network)."""
 
+import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import Stock
@@ -239,6 +240,30 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
 
 
+def test_concurrent_ticker_fetch_matches_sequential(make_source_dir, make_tickers_json):
+    # max_workers=1 falls back to the pre-concurrency sequential loop (Concurrency.run) - three
+    # tickers built both ways should come out byte-for-byte identical, confirming the concurrent
+    # path (the default) changed nothing about the actual computation, only its scheduling.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,5,100.0,0.0\n"
+                   "2024-01-20,US0000000002,2,200.0,0.0\n"
+                   "2024-01-25,US0000000003,7,50.0,0.01\n",
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"},
+        "US0000000003": {"ticker": "FAKEUSD3", "currency": "usd"},
+    })
+
+    sequential=Stock(stock_dir, tickers_json, 'usd', max_workers=1)
+    concurrent=Stock(stock_dir, tickers_json, 'usd', max_workers=4)
+
+    pd.testing.assert_frame_equal(sequential.data, concurrent.data)
+    assert sequential.distribution_by_ticker==concurrent.distribution_by_ticker
+    assert sequential.total_money_invested==concurrent.total_money_invested
+
+
 def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_currency(make_source_dir, make_tickers_json, mock_yfinance):
     # Two tickers both declared 'eur' in tickers.json, converted to 'usd' - without a shared
     # currency_cache each ticker's own Currency(...) call hits yfinance separately for the
@@ -258,4 +283,26 @@ def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_curre
 
     mock_yfinance.call_log=list()
     Stock(stock_dir, tickers_json, 'usd', currency_cache=dict())
+    assert mock_yfinance.call_log.count('EURUSD=X')==1
+
+
+def test_currency_cache_dedup_holds_even_when_the_later_dated_ticker_is_listed_first(make_source_dir, make_tickers_json, mock_yfinance):
+    # Concurrent ticker fetches race to populate currency_cache; get_cached_currency only reuses
+    # a cached entry when it already covers the requested start_date, so whichever ticker's fetch
+    # happens to land in the cache first matters - if a LATER-dated ticker won that race, an
+    # earlier-dated one arriving after would see the cached entry as not covering it and trigger
+    # a second, redundant fetch. Listing the later-dated ticker first in the CSV (opposite of the
+    # test above) biases submission order toward that failure mode - __init__'s pre-warm pass
+    # (computed over every ticker before any concurrent fetch starts) must dedupe regardless.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-20,DE0000000002,2,200.0,0.0\n"
+                   "2024-01-15,DE0000000001,5,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
+        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+    })
+
+    Stock(stock_dir, tickers_json, 'usd', currency_cache=dict(), max_workers=4)
     assert mock_yfinance.call_log.count('EURUSD=X')==1

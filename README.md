@@ -66,6 +66,17 @@ The single seam every `yfinance` price-history fetch goes through — `Stock`/`C
 - an invalid/delisted ticker isn't retried — `yfinance` returns an empty DataFrame for that (a normal result, not an exception), and each caller already raises its own specific `ValueError` for it
 - centralizing the call site here also means swapping providers (e.g. `yahooquery`, Stooq via `pandas-datareader`) is one change instead of five, if that's ever needed
 
+### 🧵 `concurrency_library.Concurrency`
+
+`Stock`/`Commodity`/`Crypto` each fetch their own tickers'/symbols' price history through `Concurrency.run(items, fn, max_workers=..., progress_callback=...)` instead of one plain `for` loop — every fetch is I/O-bound (a `PriceSource.fetch_history` HTTP call), so a bounded thread pool cuts wall-clock load time for a source with many holdings.
+
+- results come back in `items`' own order, not completion order, so a caller accumulating ticker-keyed totals from the result list reads exactly like it would from a sequential loop
+- `max_workers` (default 4, `Concurrency.DEFAULT_MAX_WORKERS`) is intentionally bounded, not one thread per ticker — `PriceSource` already retries a failed fetch with backoff, so many tickers retrying in parallel after a rate-limit response would look worse to `yfinance`'s rate limiter than fewer, sequential retries
+- `max_workers<=1` (or a single-item source) skips the thread pool entirely and runs sequentially in the calling thread — identical to the pre-concurrency behavior, no thread-safety surface at all
+- `progress_callback` (`tqdm`'s own `update()` in practice) is invoked once per completed item, serialized through an internal lock, since it isn't guaranteed thread-safe against concurrent calls from several worker threads
+- the shared `currency_cache` dict (see `get_cached_currency` above) is separately guarded by its own lock, so several tickers racing to fetch the same currency pair concurrently serialize into one fetch instead of each fetching it independently; each ticker's `DiskCache` entry is already safe on its own (a distinct file per ticker/currency/transaction-hash key)
+- `Portfolio`'s own `max_workers` argument (see below) is threaded straight through to every `Stock`/`Commodity`/`Crypto` source it builds
+
 ### 📊 `portfolio_calculator_library.Portfolio`
 
 Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccount` sources into a single portfolio-level DataFrame.
@@ -81,6 +92,7 @@ Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccou
 - `total_value`/`distribution_by_directory`/`_ticker`/`_currency_total_value` — allocation by `Money_invested + Profit`: cost basis still held plus every gain ever made on it (unrealized, dividends, realized). Unlike `_current_value`, a sold/matured/cancelled position keeps its realized gain here instead of dropping to 0%. `Portfolio`-only — see "Total value" in the Distribution metrics section below
 - builds one shared `currency_cache` per construction and passes it to every `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` source it builds, so a currency pair needed by more than one source/ticker/holding is only fetched once (see `get_cached_currency` under `Currency` above)
 - shows a `tqdm` progress bar while fetching, sized to the actual number of tickers/bond directories up front
+- optional `max_workers` (default 4) — passed through to every `Stock`/`Commodity`/`Crypto` source, each fetching its own tickers/symbols on a bounded thread pool instead of one at a time (see `concurrency_library.Concurrency` above); `max_workers=1` restores the old, fully sequential behavior
 - `sources_by_directory` — each constructed source instance, keyed by its own directory, kept around (unlike every `distribution_by_directory*` dict above, a single lifetime/current total) so `Plot.allocation_over_time_plot` can read each source's own daily DataFrame
 - `calculate_irr()` — incremental Newton's-method internal rate of return
 - `simulate_benchmark(symbol, asset_type='stock', ...)` — "what if this same money had gone into `symbol` (e.g. `SPY`, or `'gold'`/`'bitcoin'` with `asset_type='commodities'`/`'crypto'`) instead" — builds a `Benchmark` (see below) from this portfolio's own day-by-day cash contributions, so its IRR is directly comparable to this portfolio's own, cash-flow timing and all, not just a lump-sum-on-day-one comparison. `asset_type='stock'` (the default) takes `symbol` as a raw `yfinance` ticker directly; `'commodities'`/`'crypto'` instead resolve a friendly name through `Commodity.TICKERS`/`Crypto.TICKERS` (optionally extended via `tickers_json`), the same way a real commodities/crypto source would. `symbol` can also be a dict `{symbol: percent}` (percents positive, summing to 100) to split every buy across several assets, e.g. `{'SPY': 60, 'gold': 40}`; `asset_type` then applies to all of them, or is a dict `{symbol: asset_type}` for a mixed basket (an omitted symbol is `'stock'`), and `currency` likewise takes a string or a per-symbol dict
@@ -228,6 +240,7 @@ Portfolio_calculator_library/
 ├── crypto_calculator_library.py         # Crypto
 ├── currency_calculator_library.py       # Currency
 ├── price_source_library.py              # PriceSource
+├── concurrency_library.py               # Concurrency
 ├── portfolio_calculator_library.py      # Portfolio
 ├── plot_library.py                      # Plot
 ├── cache_library.py                     # DiskCache

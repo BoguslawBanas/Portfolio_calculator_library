@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.1] - 2026-09-29
+
+### Added
+- `concurrency_library.Concurrency` — `Stock`/`Commodity`/`Crypto` now fetch their own tickers'/
+  symbols' price history on a bounded thread pool (`max_workers=4` by default) instead of one at
+  a time, cutting wall-clock load time for a source with many holdings. Bounded rather than one
+  thread per ticker, since `PriceSource`'s own retry/backoff would otherwise compound under many
+  parallel retries after a rate-limit response.
+- `Portfolio`'s new `max_workers` argument is passed through to every `Stock`/`Commodity`/
+  `Crypto` source it builds; `max_workers=1` restores the previous, fully sequential behavior.
+
+### Changed
+- `get_cached_currency`'s shared `currency_cache` access is now guarded by a lock, so several
+  tickers racing to fetch the same currency pair concurrently serialize into one fetch instead of
+  each fetching it independently.
+
 ## [0.4.0] - 2026-09-29
 
 ### Added
