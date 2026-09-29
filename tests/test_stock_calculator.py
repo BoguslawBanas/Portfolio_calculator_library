@@ -284,3 +284,25 @@ def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_curre
     mock_yfinance.call_log=list()
     Stock(stock_dir, tickers_json, 'usd', currency_cache=dict())
     assert mock_yfinance.call_log.count('EURUSD=X')==1
+
+
+def test_currency_cache_dedup_holds_even_when_the_later_dated_ticker_is_listed_first(make_source_dir, make_tickers_json, mock_yfinance):
+    # Concurrent ticker fetches race to populate currency_cache; get_cached_currency only reuses
+    # a cached entry when it already covers the requested start_date, so whichever ticker's fetch
+    # happens to land in the cache first matters - if a LATER-dated ticker won that race, an
+    # earlier-dated one arriving after would see the cached entry as not covering it and trigger
+    # a second, redundant fetch. Listing the later-dated ticker first in the CSV (opposite of the
+    # test above) biases submission order toward that failure mode - __init__'s pre-warm pass
+    # (computed over every ticker before any concurrent fetch starts) must dedupe regardless.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-20,DE0000000002,2,200.0,0.0\n"
+                   "2024-01-15,DE0000000001,5,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
+        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+    })
+
+    Stock(stock_dir, tickers_json, 'usd', currency_cache=dict(), max_workers=4)
+    assert mock_yfinance.call_log.count('EURUSD=X')==1

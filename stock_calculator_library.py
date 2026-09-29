@@ -101,6 +101,27 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
 
+        if currency_cache is not None:
+            # Pre-warm each needed currency pair sequentially, before any concurrent ticker fetch
+            # starts. get_cached_currency only reuses a cached entry when it already covers the
+            # requested start_date, refetching wider otherwise - relying on tickers being
+            # processed in a stable (start_date-increasing-ish) order for that to only ever
+            # widen. Concurrently, whichever ticker's fetch happens to win the race populates the
+            # cache with its OWN start_date first; if a later-dated ticker wins, an earlier-dated
+            # one arriving after it fails the "already covers" check and triggers a second,
+            # redundant fetch - not incorrect data, but a real, non-deterministic break of
+            # "fetch each pair once". Fetching the union (the minimum start_date needed) up front
+            # for each pair removes the race entirely - every concurrent call below then only
+            # ever reads an already-sufficient entry.
+            min_start_by_currency=dict()
+            for df in dataframes:
+                ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
+                start_date=df.index.min()
+                if ticker_currency not in min_start_by_currency or start_date<min_start_by_currency[ticker_currency]:
+                    min_start_by_currency[ticker_currency]=start_date
+            for ticker_currency, start_date in min_start_by_currency.items():
+                get_cached_currency(currency_cache, ticker_currency, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
+
         def _fetch_one(df) -> tuple:
             # Runs on a worker thread (see Concurrency.run below) - reads self.tickers (fixed
             # since before this loop starts) and calls _compute_data/get_cached_currency, but

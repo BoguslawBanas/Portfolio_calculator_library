@@ -145,6 +145,15 @@ class Commodity(TickerSplitMixin, MergeMixin, ReprMixin):
         current_value_by_symbol=dict()
         revenue_by_symbol=dict()
 
+        if currency_cache is not None:
+            # Pre-warm the one currency pair every symbol here shares (QUOTE_CURRENCY ->
+            # currency_to), sequentially, before any concurrent symbol fetch starts - see
+            # Stock.__init__'s own comment for why concurrent get_cached_currency calls can
+            # otherwise race into a redundant fetch. Only one pair total here (unlike Stock,
+            # where it's per-ticker), so this is a single call with the minimum start_date needed
+            # across every symbol.
+            get_cached_currency(currency_cache, self.QUOTE_CURRENCY, currency_to, min(df.index.min() for df in dataframes), cache_dir=cache_dir, force_refresh=force_refresh)
+
         def _fetch_one(df) -> tuple:
             # Runs on a worker thread (see Concurrency.run below); never writes to self - see
             # Stock._fetch_one's own comment for why that makes concurrent symbols safe.
