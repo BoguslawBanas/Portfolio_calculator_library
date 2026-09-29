@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.0] - 2026-09-29
+
+### Added
+- `price_source_library.PriceSource` — the single seam every `yfinance` price-history fetch now
+  goes through (`Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark`, previously five independent
+  `yf.Ticker(...).history(...)` call sites). Retries a failed fetch with exponential backoff (up
+  to 3 attempts by default) instead of one transient network/rate-limit failure aborting the
+  whole `Portfolio` construction.
+
 ## [0.3.3] - 2026-09-28
 
 ### Added

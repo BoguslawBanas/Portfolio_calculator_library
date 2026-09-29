@@ -11,8 +11,8 @@ from datetime import datetime
 from decimal import Decimal
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from .currency_calculator_library import get_cached_currency
+from .price_source_library import PriceSource
 from .calculator_mixins import ReprMixin, IrrMixin, to_money, money_array
 
 
@@ -135,7 +135,7 @@ class Benchmark(IrrMixin, ReprMixin):
     def _load_ticker_series(ticker: str, currency: str, currency_to: str, index: pd.DatetimeIndex, all_days: pd.DatetimeIndex, start_date, end_date, cache_dir, force_refresh, currency_cache) -> tuple:
         """(price, dividend_per_share) float arrays aligned to `index`, both already converted
         to currency_to."""
-        ticker_data=yf.Ticker(ticker).history(start=start_date, end=end_date, repair=True, actions=True)
+        ticker_data=PriceSource.fetch_history(ticker, start=start_date, end=end_date, repair=True, actions=True)
         if ticker_data.empty:
             raise ValueError(f"yfinance returned no price history for ticker {ticker!r} (requested {start_date.date()} to today) - check it's a valid, still-listed ticker.")
         ticker_data.index=ticker_data.index.tz_localize(None).normalize()

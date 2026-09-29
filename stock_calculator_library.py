@@ -12,9 +12,9 @@ from decimal import Decimal
 from typing import Callable
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
+from .price_source_library import PriceSource
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
 
 
@@ -204,8 +204,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         currency=get_cached_currency(currency_cache, currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
-        ticker=yf.Ticker(ticker_name)
-        ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        ticker_data=PriceSource.fetch_history(ticker_name, start=start_date, end=datetime.today(), repair=True, actions=False)
         # yfinance returns an empty DataFrame, not an error, for an invalid/delisted ticker -
         # unchecked, all_days.join(ticker_data) below would silently produce an all-NaN column.
         if ticker_data.empty:

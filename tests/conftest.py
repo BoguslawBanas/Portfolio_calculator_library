@@ -1,11 +1,11 @@
 """
 Shared fixtures for the automated test suite (README Roadmap item).
 
-Every calculator that talks to yfinance (Stock, Commodity, Crypto, Currency) does so through
-`yf.Ticker(...).history(...)` — see each module's `_compute_data`/`_fetch_data`. Patching
-`yfinance.Ticker` once here (it's the same module object every calculator imports, so one
-patch covers all of them) is enough to run the whole suite offline, deterministically, and
-without depending on real market data.
+Every calculator that talks to yfinance (Stock, Commodity, Crypto, Currency, Benchmark) goes
+through `PriceSource.fetch_history` (price_source_library.py), the single seam that itself calls
+`yf.Ticker(...).history(...)`. Patching `yfinance.Ticker` once here, on that shared module object,
+is enough to run the whole suite offline, deterministically, and without depending on real market
+data.
 """
 
 import os
@@ -21,7 +21,7 @@ PACKAGE_PARENT=os.path.dirname(REPO_ROOT)
 if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
-import Portfolio_calculator_library.stock_calculator_library as stock_mod  # noqa: E402
+import Portfolio_calculator_library.price_source_library as price_source_mod  # noqa: E402
 
 
 class FakeTicker:
@@ -54,7 +54,7 @@ class FakeTicker:
 def mock_yfinance():
     """Applied to every test automatically — nothing in this suite should ever hit the network."""
     FakeTicker.call_log=list()
-    with mock.patch.object(stock_mod.yf, 'Ticker', FakeTicker):
+    with mock.patch.object(price_source_mod.yf, 'Ticker', FakeTicker):
         yield FakeTicker
 
 
