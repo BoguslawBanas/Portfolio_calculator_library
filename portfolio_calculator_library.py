@@ -16,6 +16,7 @@ from .crypto_calculator_library import Crypto
 from .bank_account_calculator_library import BankAccount
 from .benchmark_calculator_library import Benchmark
 from .cache_library import DiskCache
+from .concurrency_library import Concurrency
 from .calculator_mixins import ReprMixin, IrrMixin, to_money, zero_row
 
 
@@ -45,7 +46,7 @@ class Portfolio(IrrMixin, ReprMixin):
     # market price to simulate a position in.
     BENCHMARK_ASSET_TYPES={'stock', 'commodities', 'crypto'}
 
-    def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None):
+    def __init__(self, sources: dict, tickers_json: str=None, currency_to: str='USD', cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, commodity_tickers_json: str=None, crypto_tickers_json: str=None, max_workers: int=Concurrency.DEFAULT_MAX_WORKERS):
         """sources: dict mapping each directory to its asset type, one of VALID_SOURCE_TYPES;
         any other value raises ValueError immediately, before any source is constructed. Each
         directory goes straight to the matching source class, which does its own CSV loading.
@@ -85,7 +86,12 @@ class Portfolio(IrrMixin, ReprMixin):
         include_native_currency: Stock/Commodity/Crypto sources also compute each ticker/
         symbol's DataFrame in its own native currency (self.native_data/native_currency),
         alongside the always-converted self.data. PolishRetailBonds is left out - it converts via
-        its own currency_to but doesn't yet expose an include_native_currency of its own."""
+        its own currency_to but doesn't yet expose an include_native_currency of its own.
+
+        max_workers: passed through to every Stock/Commodity/Crypto source - each fetches its own
+        tickers'/symbols' price history on a bounded thread pool of this size instead of one at a
+        time (concurrency_library.Concurrency). PolishRetailBonds/BankAccount don't take it - they
+        have no per-holding yfinance fetch to parallelize."""
         # Kept so simulate_benchmark can default to it - self.data is already in this currency.
         self.currency_to=currency_to
         # Each constructed source instance, keyed by its own directory - unlike every dict below
@@ -152,16 +158,16 @@ class Portfolio(IrrMixin, ReprMixin):
         with tqdm(total=total_units, desc='Loading portfolio') as progress_bar:
             for dir, type in sources.items():
                 if type=='stock':
-                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
+                    source=Stock(dir, tickers_json, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache, max_workers=max_workers)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='bonds':
                     source=PolishRetailBonds(dir, currency_to, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, currency_cache=currency_cache)
                     self._absorb_source(dir, source)
                 elif type=='commodities':
-                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
+                    source=Commodity(dir, currency_to, commodity_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache, max_workers=max_workers)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 elif type=='crypto':
-                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache)
+                    source=Crypto(dir, currency_to, crypto_tickers_json, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency, currency_cache=currency_cache, max_workers=max_workers)
                     self._absorb_source(dir, source, supports_native_currency=include_native_currency)
                 else:  # type=='bank_account' - the only remaining member, already validated above
                     source=BankAccount(dir, progress_callback=progress_bar.update, cache_dir=cache_dir, force_refresh=force_refresh)

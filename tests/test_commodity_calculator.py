@@ -2,6 +2,7 @@
 
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import Commodity
@@ -68,6 +69,24 @@ def test_buy_money_invested_is_recorded_directly_not_derived_from_market_price(m
     data=commodity.data
     assert float(data[Commodity.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(500.0)
     assert commodity.distribution_by_ticker['gold']==pytest.approx(100.0)
+
+
+def test_concurrent_symbol_fetch_matches_sequential(make_source_dir):
+    # max_workers=1 falls back to the pre-concurrency sequential loop (Concurrency.run) - three
+    # symbols built both ways should come out byte-for-byte identical, confirming the concurrent
+    # path (the default) changed nothing about the actual computation, only its scheduling.
+    csv_files={
+        'buy.csv': "date,symbol,amount_of_units,unit,money_invested,currency\n"
+                   "2024-01-15,gold,2,troy_ounce,500.0,usd\n"
+                   "2024-01-20,silver,10,troy_ounce,250.0,usd\n"
+                   "2024-01-25,platinum,3,troy_ounce,300.0,usd\n",
+    }
+    sequential=build_commodity(make_source_dir, csv_files, max_workers=1)
+    concurrent=build_commodity(make_source_dir, csv_files, max_workers=4)
+
+    pd.testing.assert_frame_equal(sequential.data, concurrent.data)
+    assert sequential.distribution_by_ticker==concurrent.distribution_by_ticker
+    assert sequential.total_money_invested==concurrent.total_money_invested
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir):

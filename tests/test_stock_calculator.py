@@ -1,5 +1,6 @@
 """Tests for stock_calculator_library.Stock against synthetic, fixed data (no network)."""
 
+import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import Stock
@@ -237,6 +238,30 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
     assert float(stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected_total)
     assert set(stock.distribution_by_ticker)=={'US0000000001', 'US0000000003'}
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
+
+
+def test_concurrent_ticker_fetch_matches_sequential(make_source_dir, make_tickers_json):
+    # max_workers=1 falls back to the pre-concurrency sequential loop (Concurrency.run) - three
+    # tickers built both ways should come out byte-for-byte identical, confirming the concurrent
+    # path (the default) changed nothing about the actual computation, only its scheduling.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,5,100.0,0.0\n"
+                   "2024-01-20,US0000000002,2,200.0,0.0\n"
+                   "2024-01-25,US0000000003,7,50.0,0.01\n",
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"},
+        "US0000000003": {"ticker": "FAKEUSD3", "currency": "usd"},
+    })
+
+    sequential=Stock(stock_dir, tickers_json, 'usd', max_workers=1)
+    concurrent=Stock(stock_dir, tickers_json, 'usd', max_workers=4)
+
+    pd.testing.assert_frame_equal(sequential.data, concurrent.data)
+    assert sequential.distribution_by_ticker==concurrent.distribution_by_ticker
+    assert sequential.total_money_invested==concurrent.total_money_invested
 
 
 def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_currency(make_source_dir, make_tickers_json, mock_yfinance):
