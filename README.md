@@ -58,6 +58,14 @@ Daily FX rates via `yfinance`, used internally by `Stock`/`Commodity`/`Crypto`/`
 
 - `get_cached_currency(currency_cache, ...)` — the module-level function `Stock`/`Commodity`/`Crypto`/`PolishRetailBonds` all call instead of constructing `Currency` directly, so holdings that share a currency pair (several same-currency tickers within one source, or two different sources converting the same pair, e.g. `Commodity` and `Crypto` both quoting in `usd`) reuse one fetch instead of each fetching their own. `Portfolio` builds one `currency_cache` dict per construction and passes it down to every source automatically (see `Portfolio` below); a `currency_cache=None` (the default for every class used standalone) skips this and always fetches fresh, unchanged from before this existed. A cached entry is reused whenever its own `start_date` already covers what's being asked for; otherwise it's re-fetched with the wider of the two ranges and the cache entry is replaced, so a later, earlier-starting call still only re-fetches once more rather than missing the cache forever
 
+### 🔌 `price_source_library.PriceSource`
+
+The single seam every `yfinance` price-history fetch goes through — `Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark` each call `PriceSource.fetch_history(ticker, **history_kwargs)` instead of `yf.Ticker(...).history(...)` directly.
+
+- retries a failed fetch (any exception `yfinance`/its HTTP layer raises — a transient network hiccup, a rate-limit response) with exponential backoff, up to `max_retries` times (default 3) before re-raising, instead of one failure aborting the whole `Portfolio` construction
+- an invalid/delisted ticker isn't retried — `yfinance` returns an empty DataFrame for that (a normal result, not an exception), and each caller already raises its own specific `ValueError` for it
+- centralizing the call site here also means swapping providers (e.g. `yahooquery`, Stooq via `pandas-datareader`) is one change instead of five, if that's ever needed
+
 ### 📊 `portfolio_calculator_library.Portfolio`
 
 Combines one or more `Stock`/`PolishRetailBonds`/`Commodity`/`Crypto`/`BankAccount` sources into a single portfolio-level DataFrame.
@@ -219,6 +227,7 @@ Portfolio_calculator_library/
 ├── commodity_calculator_library.py      # Commodity
 ├── crypto_calculator_library.py         # Crypto
 ├── currency_calculator_library.py       # Currency
+├── price_source_library.py              # PriceSource
 ├── portfolio_calculator_library.py      # Portfolio
 ├── plot_library.py                      # Plot
 ├── cache_library.py                     # DiskCache

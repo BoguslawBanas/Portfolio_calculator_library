@@ -7,8 +7,8 @@ standalone.
 
 from datetime import datetime
 import pandas as pd
-import yfinance as yf
 from .cache_library import DiskCache
+from .price_source_library import PriceSource
 
 
 class Currency:
@@ -44,8 +44,7 @@ class Currency:
                     return cached
 
         symbol=self.currency_from.upper()+self.currency_to.upper()+"=X"
-        ticker=yf.Ticker(symbol)
-        data=ticker.history(start=self.start_date, end=self.end_date, repair=True, actions=False)
+        data=PriceSource.fetch_history(symbol, start=self.start_date, end=self.end_date, repair=True, actions=False)
         # yfinance returns an empty DataFrame, not an error, for an unquoted pair - unchecked,
         # all_days.join(data) below would silently produce an all-NaN column instead.
         if data.empty:

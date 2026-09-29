@@ -14,6 +14,7 @@ from .commodity_calculator_library import Commodity
 from .crypto_calculator_library import Crypto
 from .currency_calculator_library import Currency, get_cached_currency
 from .cache_library import DiskCache
+from .price_source_library import PriceSource
 from .bank_account_calculator_library import BankAccount
 from .benchmark_calculator_library import Benchmark
 
@@ -27,6 +28,7 @@ __all__=[
     'Currency',
     'get_cached_currency',
     'DiskCache',
+    'PriceSource',
     'BankAccount',
     'Benchmark',
 ]
