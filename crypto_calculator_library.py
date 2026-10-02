@@ -11,9 +11,10 @@ from decimal import Decimal
 from typing import Callable
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
+from .price_source_library import PriceSource
+from .concurrency_library import Concurrency
 from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
 
 
@@ -57,7 +58,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
     }
     QUOTE_CURRENCY='usd'
 
-    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None):
+    def __init__(self, directory_path: str, currency_to: str, tickers_json: str=None, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None, max_workers: int=Concurrency.DEFAULT_MAX_WORKERS):
         """directory_path: per-transaction-state CSVs (buy.csv, sell.csv, sell_tax.csv), state
         from filename. CSV_TICKER_COLUMN must be one of self.tickers's keys.
         currency_to: target currency every instrument is converted to (from QUOTE_CURRENCY).
@@ -74,7 +75,10 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         Free when currency_to is already QUOTE_CURRENCY; otherwise a second fetch.
         currency_cache: optional dict shared across sources (Portfolio passes one automatically)
         so a shared currency pair is fetched once instead of once per symbol - see
-        get_cached_currency. None: every symbol fetches its own."""
+        get_cached_currency. None: every symbol fetches its own.
+        max_workers: each symbol's price history is fetched on a bounded thread pool of this
+        size (concurrency_library.Concurrency) instead of one at a time - 1 (or a single-symbol
+        source) falls back to a plain sequential loop, identical to before this existed."""
         self.tickers=self._load_tickers(tickers_json)
         self.total_money_invested=Decimal('0')
         # Unlike total_money_invested (lifetime gross, never reduced by a sell), this is what's
@@ -102,10 +106,32 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         currently_invested_by_symbol=dict()
         current_value_by_symbol=dict()
         revenue_by_symbol=dict()
-        for df in dataframes:
+
+        if currency_cache is not None:
+            # Pre-warm the one currency pair every symbol here shares (QUOTE_CURRENCY ->
+            # currency_to), sequentially, before any concurrent symbol fetch starts - see
+            # Stock.__init__'s own comment for why concurrent get_cached_currency calls can
+            # otherwise race into a redundant fetch. Only one pair total here (unlike Stock,
+            # where it's per-ticker), so this is a single call with the minimum start_date needed
+            # across every symbol.
+            get_cached_currency(currency_cache, self.QUOTE_CURRENCY, currency_to, min(df.index.min() for df in dataframes), cache_dir=cache_dir, force_refresh=force_refresh)
+
+        def _fetch_one(df) -> tuple:
+            # Runs on a worker thread (see Concurrency.run below); never writes to self - see
+            # Stock._fetch_one's own comment for why that makes concurrent symbols safe.
             symbol=df[self.CSV_TICKER_COLUMN].iloc[0]
-            self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
             computed, total_buy_invested=self._compute_data(df, currency_to, cache_dir, force_refresh, currency_cache)
+            native_data, native_currency=None, None
+            if include_native_currency:
+                if self.QUOTE_CURRENCY.upper()==currency_to.upper():
+                    native_data=computed
+                else:
+                    native_data, _=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh, currency_cache)
+                native_currency=self.QUOTE_CURRENCY
+            return symbol, computed, total_buy_invested, native_data, native_currency
+
+        for symbol, computed, total_buy_invested, native_data, native_currency in Concurrency.run(dataframes, _fetch_one, max_workers=max_workers, progress_callback=progress_callback):
+            self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
             dataframes_2.append(computed)
 
             money_invested_by_symbol[symbol]=total_buy_invested
@@ -125,14 +151,8 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
             self.total_revenue+=revenue_by_symbol[symbol]
 
             if include_native_currency:
-                if self.QUOTE_CURRENCY.upper()==currency_to.upper():
-                    self.native_data[symbol]=computed
-                else:
-                    self.native_data[symbol], _=self._compute_data(df, self.QUOTE_CURRENCY, cache_dir, force_refresh, currency_cache)
-                self.native_currency[symbol]=self.QUOTE_CURRENCY
-
-            if progress_callback is not None:
-                progress_callback()
+                self.native_data[symbol]=native_data
+                self.native_currency[symbol]=native_currency
 
         # Distribution percentages are ratios, not money - computed in float even though value/
         # total are Decimal.
@@ -203,8 +223,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
 
         currency=get_cached_currency(currency_cache, self.QUOTE_CURRENCY, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
-        ticker=yf.Ticker(ticker_name)
-        ticker_data=ticker.history(start=start_date, end=datetime.today(), repair=True, actions=False)
+        ticker_data=PriceSource.fetch_history(ticker_name, start=start_date, end=datetime.today(), repair=True, actions=False)
         # yfinance returns an empty DataFrame, not an error, for an invalid ticker - unchecked,
         # all_days.join(ticker_data) below would silently produce an all-NaN Close column.
         if ticker_data.empty:

@@ -6,9 +6,10 @@ standalone.
 """
 
 from datetime import datetime
+import threading
 import pandas as pd
-import yfinance as yf
 from .cache_library import DiskCache
+from .price_source_library import PriceSource
 
 
 class Currency:
@@ -44,8 +45,7 @@ class Currency:
                     return cached
 
         symbol=self.currency_from.upper()+self.currency_to.upper()+"=X"
-        ticker=yf.Ticker(symbol)
-        data=ticker.history(start=self.start_date, end=self.end_date, repair=True, actions=False)
+        data=PriceSource.fetch_history(symbol, start=self.start_date, end=self.end_date, repair=True, actions=False)
         # yfinance returns an empty DataFrame, not an error, for an unquoted pair - unchecked,
         # all_days.join(data) below would silently produce an all-NaN column instead.
         if data.empty:
@@ -64,6 +64,16 @@ class Currency:
         return result
 
 
+# Stock/Commodity/Crypto now fetch their own tickers/symbols concurrently (concurrency_library.
+# Concurrency), and every ticker in one source shares the same currency_cache dict - without a
+# lock, several threads could all see the same pair missing at once and each fetch it
+# independently (wasted, redundant network calls; the last write wins but nothing is corrupted).
+# One process-wide lock is enough: within a single Portfolio construction only one source's
+# ticker pool runs at a time (sources themselves are still built one after another), so this
+# never serializes more than that source's own concurrent fetches.
+_currency_cache_lock=threading.Lock()
+
+
 def get_cached_currency(currency_cache: dict, currency_from: str, currency_to: str, start_date, cache_dir: str=None, force_refresh: bool=False) -> Currency:
     """Looks up/fetches a Currency for (currency_from, currency_to) through a shared
     currency_cache dict (keyed by upper-cased pair) instead of each caller constructing its own -
@@ -71,21 +81,26 @@ def get_cached_currency(currency_cache: dict, currency_from: str, currency_to: s
     a currency pair shared across tickers/sources is fetched once per Portfolio construction.
 
     currency_cache=None skips this and always constructs fresh, identical to calling Currency(...)
-    directly.
+    directly - and skips the lock too, since there's no shared dict to race over.
 
     A cached entry is reused as-is when its own start_date already covers what's needed (dates
     are always looked up by label, so a wider range is harmless). Otherwise it's refetched over
     the union of both ranges and the cache entry is replaced, so a later, earlier-starting call
-    only re-fetches once more."""
+    only re-fetches once more.
+
+    The whole check-fetch-store sequence runs under _currency_cache_lock - see the module-level
+    comment above - so two callers racing for the same pair serialize into one fetch instead of
+    each fetching independently."""
     if currency_cache is None:
         return Currency(currency_from, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
     key=(currency_from.upper(), currency_to.upper())
-    cached=currency_cache.get(key)
-    if cached is not None and not force_refresh and cached.start_date<=start_date:
-        return cached
+    with _currency_cache_lock:
+        cached=currency_cache.get(key)
+        if cached is not None and not force_refresh and cached.start_date<=start_date:
+            return cached
 
-    fetch_start=start_date if cached is None else min(cached.start_date, start_date)
-    currency=Currency(currency_from, currency_to, fetch_start, cache_dir=cache_dir, force_refresh=force_refresh)
-    currency_cache[key]=currency
-    return currency
+        fetch_start=start_date if cached is None else min(cached.start_date, start_date)
+        currency=Currency(currency_from, currency_to, fetch_start, cache_dir=cache_dir, force_refresh=force_refresh)
+        currency_cache[key]=currency
+        return currency

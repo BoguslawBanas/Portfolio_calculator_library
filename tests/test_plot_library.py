@@ -12,6 +12,7 @@ tests can assert on fig.data.
 from unittest import mock
 
 import pytest
+import pandas as pd
 import plotly.graph_objects as go
 
 from Portfolio_calculator_library import Portfolio, Plot
@@ -96,6 +97,28 @@ def test_money_plot_rejects_unknown_kind(portfolio):
         plot.money_plot(kind='nonsense')
 
 
+def test_money_plot_with_benchmark_adds_revenue_overlay_line(portfolio, captured_figures):
+    portfolio.calculate_irr()  # populates portfolio.portfolio, which money_plot reads from
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.money_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==3
+    assert fig.data[2].name=='FAKEUSD revenue'
+    data=portfolio.portfolio
+    expected=(benchmark.data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)+benchmark.data[Portfolio.PROFIT_COLUMN].astype(float)).reindex(data.index).ffill()
+    assert list(fig.data[2].y)==pytest.approx(expected.tolist())
+
+
+def test_money_plot_without_benchmark_has_no_extra_trace(portfolio, captured_figures):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    plot.money_plot()
+    fig, _=captured_figures[-1]
+    assert len(fig.data)==2
+
+
 def test_performance_plot_reruns_calculate_irr_when_irr_column_is_missing(portfolio, captured_figures):
     # Exercises the "IRR_COLUMN not in columns -> recompute" guard directly. In practice
     # self.portfolio only ever comes into existence via calculate_irr() itself (resample()/
@@ -138,6 +161,27 @@ def test_performance_plot_rejects_unknown_kind(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown performance_plot kind"):
         plot.performance_plot(kind='nonsense')
+
+
+def test_performance_plot_with_benchmark_overlays_both_irr_series(portfolio, captured_figures):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.performance_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==2
+    assert fig.data[0].name=='Portfolio'
+    assert fig.data[1].name=='FAKEUSD'
+    assert hasattr(benchmark, 'portfolio')  # calculate_irr() was called on it too, automatically
+
+
+def test_performance_plot_rejects_benchmark_with_candlestick_kind(portfolio):
+    portfolio.calculate_irr()
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    with pytest.raises(ValueError, match="benchmark overlay isn't supported for kind"):
+        plot.performance_plot(kind=Plot.PERFORMANCE_PLOT_KIND_CANDLESTICK, benchmark=benchmark)
 
 
 def test_benchmark_comparison_plot_overlays_both_irr_series(portfolio, captured_figures):
@@ -192,6 +236,105 @@ def test_revenue_plot_defaults_dividends_to_zero_when_source_has_none(make_sourc
     assert list(fig.data[1].y)==pytest.approx([0.0]*len(portfolio.data))
 
 
+def test_revenue_plot_with_benchmark_adds_revenue_overlay_line(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    benchmark=portfolio.simulate_benchmark('FAKEUSD', currency='usd')
+    plot.revenue_plot(benchmark=benchmark, benchmark_name='FAKEUSD')
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==2
+    assert fig.data[1].name=='FAKEUSD revenue'
+    data=portfolio.data
+    expected=benchmark.data[Portfolio.PROFIT_COLUMN].astype(float).reindex(data.index).ffill()
+    assert list(fig.data[1].y)==pytest.approx(expected.tolist())
+
+
+def test_drawdown_plot_matches_running_peak_to_trough_decline(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.drawdown_plot()
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    total_value=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)+data[Portfolio.PROFIT_COLUMN].astype(float)
+    running_max=total_value.cummax()
+    expected=[(0.0 if peak<=0 else (value-peak)/peak*100.0) for value, peak in zip(total_value, running_max)]
+    assert list(fig.data[0].y)==pytest.approx(expected)
+    assert all(value<=1e-9 for value in fig.data[0].y)  # never above its own running peak
+
+
+def test_cashflow_plot_matches_periodic_money_invested_diff(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.cashflow_plot(resample_rule='D')
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    money_invested=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)
+    expected=money_invested.diff().fillna(0.0)
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected.tolist())
+
+
+def test_cashflow_plot_colors_bars_by_sign(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.cashflow_plot()
+    fig, _=captured_figures[-1]
+
+    values=list(fig.data[0].y)
+    colors=list(fig.data[0].marker.color)
+    assert colors==[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values]
+
+
+def test_realized_vs_unrealized_profit_plot_splits_and_sums_to_profit(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.realized_vs_unrealized_profit_plot()
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    assert len(fig.data)==2
+    assert fig.data[0].name=='Realized profit'
+    assert fig.data[1].name=='Unrealized profit (incl. dividends)'
+    data=portfolio.data
+    profit=data[Portfolio.PROFIT_COLUMN].astype(float)
+    unrealized=data[Portfolio.PROFIT_WITHOUT_REALIZED_COLUMN].astype(float)
+    realized=profit-unrealized
+    assert list(fig.data[0].y)==pytest.approx(realized.tolist())
+    assert list(fig.data[1].y)==pytest.approx(unrealized.tolist())
+    summed=[a+b for a, b in zip(fig.data[0].y, fig.data[1].y)]
+    assert summed==pytest.approx(profit.tolist())
+    # the fixture's partial sell (4 units bought at 100, sold at 120) locks in a realized gain
+    assert realized.iloc[-1]>0
+
+
+def test_dividend_income_plot_matches_periodic_dividend_diff(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.dividend_income_plot(resample_rule='D')
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    dividends=data[Portfolio.DIVIDEND_COLUMN].astype(float)
+    expected=dividends.diff().fillna(0.0)
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected.tolist())
+    # the fixture's single dividend.csv row (25.0 on 2024-06-01) shows up as one day's income
+    assert expected[pd.Timestamp('2024-06-01')]==pytest.approx(25.0)
+
+
+def test_dividend_income_plot_defaults_dividends_to_zero_when_source_has_none(make_source_dir, captured_figures):
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-01-15,savings,1000.0,fixed,6.0,12,0.0\n",
+    })
+    portfolio=Portfolio({account_dir: 'bank_account'})
+    assert Portfolio.DIVIDEND_COLUMN not in portfolio.data.columns
+    plot=Plot(portfolio)
+    plot.dividend_income_plot()
+    fig, _=captured_figures[-1]
+    assert list(fig.data[0].y)==pytest.approx([0.0]*len(fig.data[0].y))
+
+
 def test_period_return_bar_plot_colors_bars_by_sign(portfolio, captured_figures):
     portfolio.calculate_irr()  # gives period_return_bar_plot's own guard a self.portfolio.portfolio to work with
     plot=Plot(portfolio)
@@ -202,6 +345,31 @@ def test_period_return_bar_plot_colors_bars_by_sign(portfolio, captured_figures)
     values=portfolio.portfolio[Portfolio.DAILY_RETURN_COLUMN].astype(float).tolist()
     assert list(fig.data[0].y)==pytest.approx(values)
     assert list(fig.data[0].marker.color)==[COLOR_GOOD if value>=0 else COLOR_CRITICAL for value in values]
+
+
+def test_rolling_return_plot_matches_annualized_window_formula(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.rolling_return_plot(days_between=30)
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    data=portfolio.data
+    money_invested=data[Portfolio.MONEY_INVESTED_COLUMN].astype(float)
+    profit=data[Portfolio.PROFIT_COLUMN].astype(float)
+    older_profit=profit.shift(30).fillna(0.0)
+    older_money_invested=money_invested.shift(30).fillna(0.0)
+    expected=[
+        0.0 if older<=0 else (recent-old)/older*(365.0/30)*100.0
+        for recent, old, older in zip(profit, older_profit, older_money_invested)
+    ]
+    assert list(fig.data[0].x)==list(data.index)
+    assert list(fig.data[0].y)==pytest.approx(expected)
+
+
+def test_rolling_return_plot_rejects_non_positive_days_between(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="days_between must be a positive number of days"):
+        plot.rolling_return_plot(days_between=0)
 
 
 def test_allocation_plot_pie_matches_distribution_by_ticker(portfolio, captured_figures):
@@ -260,6 +428,29 @@ def test_allocation_plot_buckets_extra_slices_into_other(make_source_dir, make_t
     assert fig.data[0].labels[-1]=='Other'
 
 
+def test_allocation_plot_by_currency_matches_distribution_by_currency(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n"
+                   "2024-01-15,US0000000002,5,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({
+        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+        "US0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
+    assert set(portfolio.distribution_by_currency)=={'USD', 'EUR'}
+    plot=Plot(portfolio)
+    plot.allocation_plot(by=Plot.ALLOCATION_PLOT_BY_CURRENCY, kind=Plot.ALLOCATION_PLOT_KIND_PIE)
+    fig, _=captured_figures[-1]
+
+    assert isinstance(fig.data[0], go.Pie)
+    assert set(fig.data[0].labels)==set(portfolio.distribution_by_currency)
+    label_to_value=dict(zip(fig.data[0].labels, fig.data[0].values))
+    for currency, pct in portfolio.distribution_by_currency.items():
+        assert label_to_value[currency]==pytest.approx(pct)
+
+
 def test_allocation_plot_rejects_unknown_metric(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown allocation_plot metric"):
@@ -302,3 +493,92 @@ def test_allocation_comparison_plot_rejects_unknown_by(portfolio):
     plot=Plot(portfolio)
     with pytest.raises(ValueError, match="Unknown allocation_comparison_plot by"):
         plot.allocation_comparison_plot(by='nonsense')
+
+
+def test_allocation_over_time_plot_invested_reflects_when_each_directory_starts_contributing(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
+    })
+    portfolio=Portfolio({stock_dir: 'stock', account_dir: 'bank_account'}, tickers_json=tickers_json, currency_to='usd')
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(metric=Plot.ALLOCATION_PLOT_METRIC_INVESTED)
+    fig, path=captured_figures[-1]
+
+    assert path is None
+    assert all(trace.stackgroup is None for trace in fig.data)  # kind='plot' (default): not stacked
+    by_directory={trace.name: pd.Series(list(trace.y), index=pd.to_datetime(list(trace.x))) for trace in fig.data}
+    # Before the bank account's first deposit, the stock directory is the entire portfolio.
+    assert by_directory[stock_dir][pd.Timestamp('2024-01-20')]==pytest.approx(100.0)
+    assert by_directory[account_dir][pd.Timestamp('2024-01-20')]==pytest.approx(0.0)
+    # After: 1000 (stock) vs. 500 (bank), cost basis only - unaffected by FakeTicker's price moves.
+    assert by_directory[stock_dir][pd.Timestamp('2024-02-05')]==pytest.approx(1000.0/1500.0*100.0)
+    assert by_directory[account_dir][pd.Timestamp('2024-02-05')]==pytest.approx(500.0/1500.0*100.0)
+    # The final day matches Portfolio's own snapshot distribution exactly.
+    for dir, pct in portfolio.distribution_by_directory.items():
+        assert by_directory[dir].iloc[-1]==pytest.approx(pct)
+
+
+def test_allocation_over_time_plot_stacked_kind_sums_to_100_at_final_day(make_source_dir, make_tickers_json, captured_figures):
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-15,US0000000001,10,100.0,0.0\n",
+    })
+    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
+    })
+    portfolio=Portfolio({stock_dir: 'stock', account_dir: 'bank_account'}, tickers_json=tickers_json, currency_to='usd')
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(kind=Plot.ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT)
+    fig, _=captured_figures[-1]
+
+    assert all(trace.stackgroup=='one' for trace in fig.data)
+    total_at_final_day=sum(trace.y[-1] for trace in fig.data)
+    assert total_at_final_day==pytest.approx(100.0)
+
+
+def test_allocation_over_time_plot_current_value_matches_distribution_by_directory_current_value_at_final_day(portfolio, captured_figures):
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(metric=Plot.ALLOCATION_PLOT_METRIC_CURRENT_VALUE)
+    fig, _=captured_figures[-1]
+
+    final_by_name={trace.name: trace.y[-1] for trace in fig.data}
+    for dir, pct in portfolio.distribution_by_directory_current_value.items():
+        assert final_by_name[dir]==pytest.approx(pct)
+
+
+def test_allocation_over_time_plot_buckets_extra_directories_into_other(make_source_dir, captured_figures):
+    n=9  # > max_slices default (7)
+    sources=dict()
+    for i in range(n):
+        account_dir=make_source_dir(f'account{i}', {
+            'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                           f"2024-01-15,acct,{100.0*(i+1)},fixed,0.0,12,0.0\n",
+        })
+        sources[account_dir]='bank_account'
+    portfolio=Portfolio(sources)
+    plot=Plot(portfolio)
+    plot.allocation_over_time_plot(max_slices=7)
+    fig, _=captured_figures[-1]
+
+    assert len(fig.data)==8  # 7 kept + one 'Other' bucket
+    assert fig.data[-1].name=='Other'
+
+
+def test_allocation_over_time_plot_rejects_unknown_metric(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="Unknown allocation_over_time_plot metric"):
+        plot.allocation_over_time_plot(metric='revenue')
+
+
+def test_allocation_over_time_plot_rejects_unknown_kind(portfolio):
+    plot=Plot(portfolio)
+    with pytest.raises(ValueError, match="Unknown allocation_over_time_plot kind"):
+        plot.allocation_over_time_plot(kind='nonsense')

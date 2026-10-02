@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.1] - 2026-09-29
+
+### Added
+- `concurrency_library.Concurrency` — `Stock`/`Commodity`/`Crypto` now fetch their own tickers'/
+  symbols' price history on a bounded thread pool (`max_workers=4` by default) instead of one at
+  a time, cutting wall-clock load time for a source with many holdings. Bounded rather than one
+  thread per ticker, since `PriceSource`'s own retry/backoff would otherwise compound under many
+  parallel retries after a rate-limit response.
+- `Portfolio`'s new `max_workers` argument is passed through to every `Stock`/`Commodity`/
+  `Crypto` source it builds; `max_workers=1` restores the previous, fully sequential behavior.
+
+### Changed
+- `get_cached_currency`'s shared `currency_cache` access is now guarded by a lock, so several
+  tickers racing to fetch the same currency pair concurrently serialize into one fetch instead of
+  each fetching it independently.
+
+## [0.4.0] - 2026-09-29
+
+### Added
+- `price_source_library.PriceSource` — the single seam every `yfinance` price-history fetch now
+  goes through (`Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark`, previously five independent
+  `yf.Ticker(...).history(...)` call sites). Retries a failed fetch with exponential backoff (up
+  to 3 attempts by default) instead of one transient network/rate-limit failure aborting the
+  whole `Portfolio` construction.
+
+## [0.3.3] - 2026-09-28
+
+### Added
+- `Plot.allocation_over_time_plot` — portfolio allocation by source directory, evolving over
+  time, as overlaid lines or a stacked area, by amount invested or current market value.
+- `Portfolio.sources_by_directory` — each constructed source instance, kept around for
+  `allocation_over_time_plot` to read its daily DataFrame from.
+
+### Changed
+- CI now also runs the test suite against Python 3.14.
+
+## [0.3.2] - 2026-09-28
+
+### Added
+- `Plot.money_plot`/`performance_plot`/`revenue_plot` accept an optional `benchmark` (a
+  `Benchmark`, same as `benchmark_comparison_plot`) to overlay a same-shaped line from it -
+  `money_plot`/`revenue_plot` overlay its revenue/profit (a money-value comparison),
+  `performance_plot` (`kind='plot'` only) its IRR.
+
+### Changed
+- `Plot.benchmark_comparison_plot` is now equivalent to
+  `performance_plot(kind='plot', benchmark=...)`, which supersedes it; kept unchanged for
+  backwards compatibility.
+
+## [0.3.1] - 2026-09-28
+
+### Added
+- `Plot.allocation_plot` accepts `by='currency'`, charting allocation by each position's own
+  native currency (FX exposure) alongside the existing `'ticker'`/`'directory'`.
+- `Plot.dividend_income_plot` — dividends actually received per resample period, as bars, unlike
+  `revenue_plot`'s cumulative dividend line.
+- `Plot.rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line.
+
+## [0.3.0] - 2026-09-28
+
+### Added
+- `Plot.drawdown_plot` — total value's running peak-to-trough decline over time, as a percentage
+  off its own running all-time high.
+- `Plot.cashflow_plot` — net contributions/withdrawals per resample period, as bars colored by
+  sign.
+- `Plot.realized_vs_unrealized_profit_plot` — `Profit` split into its realized and unrealized
+  (including dividends) components, as a stacked area.
+
 ## [0.2.3] - 2026-09-24
 
 ### Added

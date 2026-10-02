@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from Portfolio_calculator_library import Benchmark
-import Portfolio_calculator_library.benchmark_calculator_library as benchmark_mod
+import Portfolio_calculator_library.price_source_library as price_source_mod
 
 
 def fake_close(start, end):
@@ -83,7 +83,7 @@ class _DividendFakeTicker:
 
 
 def test_dividends_are_reinvested_as_extra_units(monkeypatch):
-    monkeypatch.setattr(benchmark_mod.yf, 'Ticker', _DividendFakeTicker)
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _DividendFakeTicker)
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 0.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, 'FAKEUSD', currency='usd', currency_to='usd')
@@ -126,7 +126,7 @@ def basket_close(symbol, day):
 
 
 def test_buys_are_split_across_tickers_by_weight(monkeypatch):
-    monkeypatch.setattr(benchmark_mod.yf, 'Ticker', _BasketFakeTicker)
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _BasketFakeTicker)
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 0.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, {'AAA': 60, 'BBB': 40}, currency='usd', currency_to='usd')
@@ -139,7 +139,7 @@ def test_buys_are_split_across_tickers_by_weight(monkeypatch):
 
 
 def test_withdrawal_sells_the_same_split_by_value(monkeypatch):
-    monkeypatch.setattr(benchmark_mod.yf, 'Ticker', _BasketFakeTicker)
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _BasketFakeTicker)
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, -500.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, {'AAA': 60, 'BBB': 40}, currency='usd', currency_to='usd')
@@ -152,7 +152,7 @@ def test_withdrawal_sells_the_same_split_by_value(monkeypatch):
 
 
 def test_dividend_is_reinvested_only_into_the_ticker_that_paid_it(monkeypatch):
-    monkeypatch.setattr(benchmark_mod.yf, 'Ticker', _BasketFakeTicker)
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _BasketFakeTicker)
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 0.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, {'PAYS': 50, 'AAA': 50}, currency='usd', currency_to='usd')
@@ -165,7 +165,7 @@ def test_dividend_is_reinvested_only_into_the_ticker_that_paid_it(monkeypatch):
 
 
 def test_per_symbol_currency_dict_is_accepted(monkeypatch):
-    monkeypatch.setattr(benchmark_mod.yf, 'Ticker', _BasketFakeTicker)
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _BasketFakeTicker)
     idx=pd.date_range('2024-01-01', '2024-01-05')
     contributions=pd.Series([0.0, 1000.0, 0.0, 0.0, 0.0], index=idx)
     benchmark=Benchmark(contributions, {'AAA': 50, 'BBB': 50}, currency={'AAA': 'usd', 'BBB': 'usd'}, currency_to='usd')
