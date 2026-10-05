@@ -430,21 +430,43 @@ class Plot:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected {self.ALLOCATION_PLOT_KIND_PIE!r} or {self.ALLOCATION_PLOT_KIND_HISTOGRAM!r})")
 
     def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY_TICKER, max_slices: int=7, path_to_save_fig: str=None):
-        """Grouped bar chart: allocation by amount invested vs. by total value (Money_invested +
-        Profit - still-held cost basis plus every gain ever made, realized included), per
-        ticker/directory - shows at a glance which positions grew/shrunk relative to cost basis.
-        by: 'ticker' or 'directory' - self.portfolio.distribution_by_ticker/_directory
-        (/_total_value)."""
+        """Grouped bar chart: per ticker/directory, money invested vs. what it turned into
+        (invested + revenue), side by side - the gap between the two bars is that position's
+        revenue (unrealized + dividends/interest + realized).
+        Invested is the capital invested - the most of the user's own money ever tied up in that
+        position at once (distribution_by_ticker/_directory_capital_invested, see
+        calculator_mixins.CapitalInvestedMixin), so money sold and bought back into the same
+        position isn't counted twice. Total value is that plus Profit (_capital_value) - i.e.
+        what that money turned into: everything paid back (sale proceeds, dividends, interest)
+        plus the market value of what's still held. A closed position is therefore shown
+        against what was actually put into it, not as a 0% cost basis.
+        Both bars are a % of the same total - total capital invested - so the invested bars sum
+        to 100%, the total value bars to 100% plus the portfolio's own return, and a total value
+        bar taller than its invested bar always means that position gained. The gap is that
+        position's revenue as a % of the whole portfolio's capital, not its own return.
+        Money moved from one position into another still counts in both (each did hold it).
+        by: 'ticker' or 'directory'."""
         if by==self.ALLOCATION_COMPARISON_PLOT_BY_TICKER:
-            invested, total_value=self.portfolio.distribution_by_ticker, self.portfolio.distribution_by_ticker_total_value
+            invested, total_value=self.portfolio.distribution_by_ticker_capital_invested, self.portfolio.distribution_by_ticker_capital_value
         elif by==self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY:
-            invested, total_value=self.portfolio.distribution_by_directory, self.portfolio.distribution_by_directory_total_value
+            invested, total_value=self.portfolio.distribution_by_directory_capital_invested, self.portfolio.distribution_by_directory_capital_value
         else:
             raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected {self.ALLOCATION_COMPARISON_PLOT_BY_TICKER!r} or {self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY!r})")
 
+        # Each distribution is a % of its own metric's total - rescale total value onto the
+        # invested total, so both bars are a % of the same amount and directly comparable.
+        invested_total=float(self.portfolio.total_capital_invested)
+        total_value_scale=float(self.portfolio.total_capital_value)/invested_total if invested_total else 0.0
+
+        # Union of both sides' keys - a key missing from one side counts as 0 there, rather
+        # than being silently dropped.
+        keys=list(dict.fromkeys([*invested, *total_value]))
+        invested={key: invested.get(key, 0.0) for key in keys}
+        total_value={key: total_value.get(key, 0.0)*total_value_scale for key in keys}
+
         # Sort by the invested metric, then carry the same grouping to total_value so both
         # bars per label line up.
-        ordered_keys=sorted(invested, key=invested.get, reverse=True)
+        ordered_keys=sorted(keys, key=invested.get, reverse=True)
         if len(ordered_keys)>max_slices:
             kept_keys, other_keys=ordered_keys[:max_slices], ordered_keys[max_slices:]
             labels=kept_keys+['Other']
@@ -459,7 +481,9 @@ class Plot:
             go.Bar(x=labels, y=invested_values, name='Invested', marker_color=CATEGORICAL_COLORS[0]),
             go.Bar(x=labels, y=total_values, name='Total value', marker_color=CATEGORICAL_COLORS[1]),
         ])
-        fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Allocation (%)", barmode='group')
+        if any(value<0 for value in total_values):
+            fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
+        fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="% of amount invested", barmode='group')
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 

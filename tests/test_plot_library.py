@@ -9,6 +9,7 @@ opens and kaleido isn't required - the mock just records the go.Figure (and path
 tests can assert on fig.data.
 """
 
+from datetime import date, timedelta
 from unittest import mock
 
 import pytest
@@ -478,15 +479,97 @@ def test_allocation_comparison_plot_groups_invested_and_total_value_by_ticker(po
     assert fig.data[0].name=='Invested'
     assert fig.data[1].name=='Total value'
     assert list(fig.data[0].x)==list(fig.data[1].x)
-    assert list(fig.data[0].x)==list(portfolio.distribution_by_ticker)
-    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_ticker_total_value[key] for key in fig.data[1].x])
+    assert list(fig.data[0].x)==list(portfolio.distribution_by_ticker_capital_invested)
+    # Both bars are a % of the same total (capital invested) - total value is rescaled from its
+    # own total onto it, so the bars sum to 100% and 100% plus the portfolio's return.
+    scale=float(portfolio.total_capital_value)/float(portfolio.total_capital_invested)
+    assert list(fig.data[0].y)==pytest.approx([portfolio.distribution_by_ticker_capital_invested[key] for key in fig.data[0].x])
+    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_ticker_capital_value[key]*scale for key in fig.data[1].x])
+    assert sum(fig.data[0].y)==pytest.approx(100.0)
+    assert sum(fig.data[1].y)==pytest.approx(100.0*scale)
 
 
 def test_allocation_comparison_plot_by_directory(portfolio, captured_figures):
     plot=Plot(portfolio)
     plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY)
     fig, _=captured_figures[-1]
-    assert list(fig.data[0].x)==list(portfolio.distribution_by_directory)
+    scale=float(portfolio.total_capital_value)/float(portfolio.total_capital_invested)
+    assert list(fig.data[0].x)==list(portfolio.distribution_by_directory_capital_invested)
+    assert list(fig.data[0].y)==pytest.approx([portfolio.distribution_by_directory_capital_invested[key] for key in fig.data[0].x])
+    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_directory_capital_value[key]*scale for key in fig.data[1].x])
+
+
+def test_allocation_comparison_plot_closed_position_is_shown_against_what_was_invested(make_source_dir, make_tickers_json, captured_figures):
+    # SOLD is bought for 1000 and fully sold for 1200 - nothing left held, 200 realized.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-02,HELD,10,100,0\n"
+                   "2024-01-02,SOLD,10,100,0\n",
+        'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                    "2024-01-10,SOLD,10,120\n",
+    })
+    tickers_json=make_tickers_json({
+        'HELD': {'ticker': 'HELD', 'currency': 'usd'},
+        'SOLD': {'ticker': 'SOLD', 'currency': 'usd'},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
+    plot=Plot(portfolio)
+    plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_TICKER)
+    fig, _=captured_figures[-1]
+
+    # 1000 of 2000 capital invested (50%), turned into 1200 (60% of that same 2000) - the total
+    # value bar is taller, as the position gained, rather than dropping to its 200 profit.
+    invested=dict(zip(fig.data[0].x, fig.data[0].y))
+    total_value=dict(zip(fig.data[1].x, fig.data[1].y))
+    assert invested['SOLD']==pytest.approx(50.0)
+    assert total_value['SOLD']==pytest.approx(60.0, abs=0.01)
+
+
+def test_allocation_comparison_plot_does_not_double_count_money_reinvested_in_the_same_position(make_source_dir, make_tickers_json, captured_figures):
+    # TRADED: bought for 1000, sold for 1200, bought back for 1200 - at most 1000 of the user's own
+    # money was ever in it (the extra 200 was its own profit). HELD: bought once for 1000.
+    stock_dir=make_source_dir('stocks', {
+        'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                   "2024-01-02,HELD,10,100,0\n"
+                   "2024-01-02,TRADED,10,100,0\n"
+                   "2024-02-01,TRADED,10,120,0\n",
+        'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                    "2024-01-10,TRADED,10,120\n",
+    })
+    tickers_json=make_tickers_json({
+        'HELD': {'ticker': 'HELD', 'currency': 'usd'},
+        'TRADED': {'ticker': 'TRADED', 'currency': 'usd'},
+    })
+    portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
+    # Lifetime invested counts TRADED twice (1000+1200); capital invested doesn't.
+    assert portfolio.distribution_by_ticker['TRADED']==pytest.approx(100.0*2200/3200)
+    plot=Plot(portfolio)
+    plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_TICKER)
+    fig, _=captured_figures[-1]
+
+    invested=dict(zip(fig.data[0].x, fig.data[0].y))
+    assert invested['TRADED']==pytest.approx(50.0)
+    assert invested['HELD']==pytest.approx(50.0)
+
+
+def test_allocation_comparison_plot_keeps_fully_matured_bond_types(make_source_dir, captured_figures):
+    # Every bond has matured - nothing currently invested, but the type must still be plotted
+    # against its lifetime cost basis instead of disappearing.
+    matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
+    bonds_dir=make_source_dir('bonds', {
+        'buy.csv': "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+                   f"{matured_start.isoformat()},OTS0826,5,0.0,2.0,False\n",
+        'interest_rate.csv': "date,rate\n01-2020,5.0\n",
+        'inflation_rate.csv': "date,inflation\n01-2020,4.0\n",
+    })
+    portfolio=Portfolio({bonds_dir: 'bonds'}, currency_to='PLN')
+    plot=Plot(portfolio)
+    plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_TICKER)
+    fig, _=captured_figures[-1]
+
+    assert list(fig.data[0].x)==['OTS']
+    assert list(fig.data[0].y)==pytest.approx([100.0])
+    assert fig.data[1].y[0]>100.0
 
 
 def test_allocation_comparison_plot_rejects_unknown_by(portfolio):

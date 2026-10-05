@@ -16,10 +16,10 @@ from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .price_source_library import PriceSource
 from .concurrency_library import Concurrency
-from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalInvestedMixin, to_money, money_array
 
 
-class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
+class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -100,6 +100,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         currently_invested_by_ticker=dict()
         current_value_by_ticker=dict()
         revenue_by_ticker=dict()
+        computed_by_ticker=dict()
 
         if currency_cache is not None:
             # Pre-warm each needed currency pair sequentially, before any concurrent ticker fetch
@@ -148,6 +149,7 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
         for ticker, ticker_currency, computed, total_buy_invested, native_data, native_currency in Concurrency.run(dataframes, _fetch_one, max_workers=max_workers, progress_callback=progress_callback):
             self.currency_by_ticker[ticker]=ticker_currency
             dataframes_2.append(computed)
+            computed_by_ticker[ticker]=computed
 
             money_invested_by_ticker[ticker]=total_buy_invested
             self.total_money_invested+=total_buy_invested
@@ -182,6 +184,8 @@ class Stock(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for ticker, value in revenue_by_ticker.items():
             self.distribution_by_ticker_revenue[ticker]=(float(value)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
+
+        self._set_capital_invested(computed_by_ticker)
 
         self.data=self.merge(dataframes_2)
 
