@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
-## [Unreleased]
+## [0.4.2] - 2026-10-05
 
 ### Added
 - `total_capital_invested`/`distribution_by_ticker_capital_invested` on every calculator
@@ -25,7 +25,7 @@ or file layout.
   position looked like it had shrunk even when it made money, and money recycled within a
   position was counted as invested each time; now the gap between them is that position's revenue.
 - `Plot.allocation_comparison_plot` now scales both bars as a % of the same total (total capital
-  invested) instead of each as a share of its own total, so a total value bar taller than its
+  invested) instead of each as a share of its own total, so a capital value bar taller than its
   invested bar always means that position gained. The y-axis is now "% of amount invested". Keys
   present on only one side are shown (as 0 on the other) instead of being dropped, and a zero
   line is drawn when any bar is negative.
