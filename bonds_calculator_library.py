@@ -65,10 +65,10 @@ import pandas as pd
 from datetime import datetime
 from .currency_calculator_library import Currency, get_cached_currency
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, MergeMixin, to_money, money_array
+from .calculator_mixins import ReprMixin, MergeMixin, CapitalInvestedMixin, to_money, money_array
 
 
-class PolishRetailBonds(MergeMixin, ReprMixin):
+class PolishRetailBonds(MergeMixin, CapitalInvestedMixin, ReprMixin):
     # --- Output: self.data columns. First three: shared contract (see CLAUDE.md).
     # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while held, but diverge at
     # maturity: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized) drops to 0, PROFIT_COLUMN (realized)
@@ -247,6 +247,10 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
             revenue=type_dataframe[self.PROFIT_COLUMN].iloc[-1]
             self.distribution_by_ticker_current_value[code]=(float(current_value)/float(self.total_current_value))*100.0 if self.total_current_value else 0.0
             self.distribution_by_ticker_revenue[code]=(float(revenue)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
+        # Per bond type, same as every other distribution here - a type's tied-up money drops once
+        # a holding matures/is cancelled (its payout counts as money paid back), so rolling one
+        # issue into the next isn't counted twice.
+        self._set_capital_invested(type_dataframes)
 
     @classmethod
     def count_tickers(cls, directory_path: str) -> int:

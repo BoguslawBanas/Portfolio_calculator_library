@@ -15,10 +15,10 @@ from .currency_calculator_library import get_cached_currency
 from .cache_library import DiskCache
 from .price_source_library import PriceSource
 from .concurrency_library import Concurrency
-from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalInvestedMixin, to_money, money_array
 
 
-class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
+class Crypto(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     # --- Output: self.data / working DataFrame columns. The first three form the shared
     # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -106,6 +106,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         currently_invested_by_symbol=dict()
         current_value_by_symbol=dict()
         revenue_by_symbol=dict()
+        computed_by_symbol=dict()
 
         if currency_cache is not None:
             # Pre-warm the one currency pair every symbol here shares (QUOTE_CURRENCY ->
@@ -133,6 +134,7 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
         for symbol, computed, total_buy_invested, native_data, native_currency in Concurrency.run(dataframes, _fetch_one, max_workers=max_workers, progress_callback=progress_callback):
             self.currency_by_ticker[symbol]=self.QUOTE_CURRENCY
             dataframes_2.append(computed)
+            computed_by_symbol[symbol]=computed
 
             money_invested_by_symbol[symbol]=total_buy_invested
             self.total_money_invested+=total_buy_invested
@@ -167,6 +169,8 @@ class Crypto(TickerSplitMixin, MergeMixin, ReprMixin):
 
         for symbol, value in revenue_by_symbol.items():
             self.distribution_by_ticker_revenue[symbol]=(float(value)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
+
+        self._set_capital_invested(computed_by_symbol)
 
         self.data=self.merge(dataframes_2)
 

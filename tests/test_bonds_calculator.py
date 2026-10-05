@@ -1215,3 +1215,20 @@ def test_no_dividend_column_bonds_realized_profit_does_not_leak_into_portfolios_
     assert bond_realized_profit>0.0
 
     assert portfolio.data[Portfolio.DIVIDEND_COLUMN].iloc[-1]==pytest.approx(25.0)
+
+
+def test_capital_invested_does_not_double_count_a_matured_issue_rolled_into_the_next(make_source_dir):
+    # Same type bought again after the first issue matured - lifetime counts both (200), but
+    # at most one bond's worth (100) was ever tied up at once.
+    matured_start=date.today()-timedelta(days=100)
+    active_start=date.today()-timedelta(days=2)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"
+        f"{active_start.isoformat()},OTS0125,1,0.0,2.5,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    assert bonds.total_money_invested==pytest.approx(200.0)
+    assert float(bonds.total_capital_invested)==pytest.approx(100.0)
+    assert bonds.distribution_by_ticker_capital_invested=={'OTS': pytest.approx(100.0)}

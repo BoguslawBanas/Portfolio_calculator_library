@@ -190,3 +190,20 @@ def test_count_tickers_reads_without_computing(make_source_dir):
                        f"{start.isoformat()},emergency_fund,500.0,fixed,3.0,12,0.0\n",
     })
     assert BankAccount.count_tickers(account_dir)==2
+
+
+def test_capital_invested_does_not_double_count_money_withdrawn_and_deposited_again(make_source_dir):
+    start=date.today()-timedelta(days=10)
+    account_dir=make_source_dir('bank_account', {
+        'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
+                       f"{start.isoformat()},savings,1000.0,fixed,6.0,12,0.0\n"
+                       f"{(start+timedelta(days=6)).isoformat()},savings,400.0,fixed,6.0,12,0.0\n",
+        'withdrawal.csv': "date,account,amount\n"
+                          f"{(start+timedelta(days=3)).isoformat()},savings,400.0\n",
+    })
+    account=BankAccount(account_dir)
+
+    # Lifetime deposits: 1400. At most 1000 was ever in the account at once.
+    assert float(account.total_money_invested)==pytest.approx(1400.0)
+    assert float(account.total_capital_invested)==pytest.approx(1000.0)
+    assert account.distribution_by_ticker_capital_invested=={'savings': pytest.approx(100.0)}

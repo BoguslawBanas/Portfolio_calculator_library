@@ -103,13 +103,15 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_directory_current_value=dict()
         self.distribution_by_directory_revenue=dict()
         self.distribution_by_directory_total_value=dict()
-        self.distribution_by_directory_lifetime_value=dict()
+        self.distribution_by_directory_capital_invested=dict()
+        self.distribution_by_directory_capital_value=dict()
         self.distribution_by_ticker=dict()
         self.distribution_by_ticker_currently_invested=dict()
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         self.distribution_by_ticker_total_value=dict()
-        self.distribution_by_ticker_lifetime_value=dict()
+        self.distribution_by_ticker_capital_invested=dict()
+        self.distribution_by_ticker_capital_value=dict()
         # Allocation by each position's own NATIVE currency, not currency_to - answers "how much
         # of my portfolio is actually USD/EUR/PLN" regardless of reporting currency. Keyed
         # uppercase so differently-cased sources land in the same bucket.
@@ -118,7 +120,8 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_currency_current_value=dict()
         self.distribution_by_currency_revenue=dict()
         self.distribution_by_currency_total_value=dict()
-        self.distribution_by_currency_lifetime_value=dict()
+        self.distribution_by_currency_capital_invested=dict()
+        self.distribution_by_currency_capital_value=dict()
         self.native_data=dict()
         self.native_currency=dict()
         self.total_money_invested=Decimal('0')
@@ -131,11 +134,14 @@ class Portfolio(IrrMixin, ReprMixin):
         # (unrealized, dividends, realized) - unlike total_current_value, a sold/matured
         # position keeps its realized gain here instead of dropping to 0.
         self.total_value=Decimal('0')
-        # total_money_invested + Profit: every amount ever bought plus every gain ever made on it -
-        # i.e. everything a position has paid back (sale proceeds, dividends, interest) plus the
-        # market value of what's still held. Unlike total_value, built on lifetime cost basis, so a
-        # closed position is compared against what was actually put into it.
-        self.total_lifetime_value=Decimal('0')
+        # The most of the user's own money ever tied up in each position at once, summed - unlike
+        # total_money_invested, money sold and bought back into the same position isn't counted
+        # twice. See calculator_mixins.CapitalInvestedMixin.
+        self.total_capital_invested=Decimal('0')
+        # total_capital_invested + Profit: the money put in plus every gain ever made on it - i.e.
+        # what it turned into (everything paid back plus the market value of what's still held,
+        # net of anything reinvested). A closed position is compared against what was put into it.
+        self.total_capital_value=Decimal('0')
         portfolio_list=list()
         # Shared across every source below so a currency pair fetched by one is reused by
         # another instead of each fetching its own.
@@ -201,8 +207,11 @@ class Portfolio(IrrMixin, ReprMixin):
         for key, value in self.distribution_by_directory_total_value.items():
             self.distribution_by_directory_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
 
-        for key, value in self.distribution_by_directory_lifetime_value.items():
-            self.distribution_by_directory_lifetime_value[key]=100.0*float(value)/float(self.total_lifetime_value) if self.total_lifetime_value else 0.0
+        for key, value in self.distribution_by_directory_capital_invested.items():
+            self.distribution_by_directory_capital_invested[key]=100.0*float(value)/float(self.total_capital_invested) if self.total_capital_invested else 0.0
+
+        for key, value in self.distribution_by_directory_capital_value.items():
+            self.distribution_by_directory_capital_value[key]=100.0*float(value)/float(self.total_capital_value) if self.total_capital_value else 0.0
 
         for key, value in self.distribution_by_ticker.items():
             self.distribution_by_ticker[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
@@ -219,8 +228,11 @@ class Portfolio(IrrMixin, ReprMixin):
         for key, value in self.distribution_by_ticker_total_value.items():
             self.distribution_by_ticker_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
 
-        for key, value in self.distribution_by_ticker_lifetime_value.items():
-            self.distribution_by_ticker_lifetime_value[key]=100.0*float(value)/float(self.total_lifetime_value) if self.total_lifetime_value else 0.0
+        for key, value in self.distribution_by_ticker_capital_invested.items():
+            self.distribution_by_ticker_capital_invested[key]=100.0*float(value)/float(self.total_capital_invested) if self.total_capital_invested else 0.0
+
+        for key, value in self.distribution_by_ticker_capital_value.items():
+            self.distribution_by_ticker_capital_value[key]=100.0*float(value)/float(self.total_capital_value) if self.total_capital_value else 0.0
 
         for key, value in self.distribution_by_currency.items():
             self.distribution_by_currency[key]=100.0*float(value)/float(self.total_money_invested) if self.total_money_invested else 0.0
@@ -237,8 +249,11 @@ class Portfolio(IrrMixin, ReprMixin):
         for key, value in self.distribution_by_currency_total_value.items():
             self.distribution_by_currency_total_value[key]=100.0*float(value)/float(self.total_value) if self.total_value else 0.0
 
-        for key, value in self.distribution_by_currency_lifetime_value.items():
-            self.distribution_by_currency_lifetime_value[key]=100.0*float(value)/float(self.total_lifetime_value) if self.total_lifetime_value else 0.0
+        for key, value in self.distribution_by_currency_capital_invested.items():
+            self.distribution_by_currency_capital_invested[key]=100.0*float(value)/float(self.total_capital_invested) if self.total_capital_invested else 0.0
+
+        for key, value in self.distribution_by_currency_capital_value.items():
+            self.distribution_by_currency_capital_value[key]=100.0*float(value)/float(self.total_capital_value) if self.total_capital_value else 0.0
 
         self.data=self.merge(portfolio_list)
 
@@ -270,24 +285,27 @@ class Portfolio(IrrMixin, ReprMixin):
         self.distribution_by_directory_current_value[dir]=source.total_current_value
         self.distribution_by_directory_revenue[dir]=source.total_revenue
         self.distribution_by_directory_total_value[dir]=source.total_money_currently_invested+source.total_revenue
-        self.distribution_by_directory_lifetime_value[dir]=source.total_money_invested+source.total_revenue
+        self.distribution_by_directory_capital_invested[dir]=source.total_capital_invested
+        self.distribution_by_directory_capital_value[dir]=source.total_capital_invested+source.total_revenue
         self.total_money_invested+=source.total_money_invested
         self.total_money_currently_invested+=source.total_money_currently_invested
         self.total_current_value+=source.total_current_value
         self.total_revenue+=source.total_revenue
         self.total_value+=source.total_money_currently_invested+source.total_revenue
-        self.total_lifetime_value+=source.total_money_invested+source.total_revenue
+        self.total_capital_invested+=source.total_capital_invested
+        self.total_capital_value+=source.total_capital_invested+source.total_revenue
 
-        # Neither total_value (currently invested + revenue) nor lifetime_value (lifetime invested +
+        # Neither total_value (currently invested + revenue) nor capital_value (capital invested +
         # revenue) is exposed per ticker by any source - built here from the per-key amounts
         # below. Each metric's last field names the derived metrics its amount feeds.
         total_value_by_ticker=dict()
-        lifetime_value_by_ticker=dict()
+        capital_value_by_ticker=dict()
         per_metric=(
-            (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested, (lifetime_value_by_ticker,)),
+            (self.distribution_by_ticker, self.distribution_by_currency, source.distribution_by_ticker, source.total_money_invested, ()),
             (self.distribution_by_ticker_currently_invested, self.distribution_by_currency_currently_invested, source.distribution_by_ticker_currently_invested, source.total_money_currently_invested, (total_value_by_ticker,)),
             (self.distribution_by_ticker_current_value, self.distribution_by_currency_current_value, source.distribution_by_ticker_current_value, source.total_current_value, ()),
-            (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue, (total_value_by_ticker, lifetime_value_by_ticker)),
+            (self.distribution_by_ticker_revenue, self.distribution_by_currency_revenue, source.distribution_by_ticker_revenue, source.total_revenue, (total_value_by_ticker, capital_value_by_ticker)),
+            (self.distribution_by_ticker_capital_invested, self.distribution_by_currency_capital_invested, source.distribution_by_ticker_capital_invested, source.total_capital_invested, (capital_value_by_ticker,)),
         )
         for target_ticker, target_currency, source_ticker, total, feeds in per_metric:
             for key, value in source_ticker.items():
@@ -302,7 +320,7 @@ class Portfolio(IrrMixin, ReprMixin):
                     derived[key]=derived.get(key, Decimal('0'))+amount
         for by_ticker, target_ticker, target_currency in (
             (total_value_by_ticker, self.distribution_by_ticker_total_value, self.distribution_by_currency_total_value),
-            (lifetime_value_by_ticker, self.distribution_by_ticker_lifetime_value, self.distribution_by_currency_lifetime_value),
+            (capital_value_by_ticker, self.distribution_by_ticker_capital_value, self.distribution_by_currency_capital_value),
         ):
             for key, amount in by_ticker.items():
                 target_ticker[key]=target_ticker.get(key, Decimal('0'))+amount

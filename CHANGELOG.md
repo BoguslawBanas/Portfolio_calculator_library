@@ -9,17 +9,22 @@ or file layout.
 ## [Unreleased]
 
 ### Added
-- `Portfolio.total_lifetime_value` and `distribution_by_ticker_lifetime_value`/
-  `distribution_by_directory_lifetime_value`/`distribution_by_currency_lifetime_value`:
-  allocation by `total_money_invested + Profit` - everything a position has paid back plus the
-  market value of what's still held.
+- `total_capital_invested`/`distribution_by_ticker_capital_invested` on every calculator
+  (`Stock`, `Commodity`, `Crypto`, `PolishRetailBonds`, `BankAccount`, via the new
+  `calculator_mixins.CapitalInvestedMixin`), plus `distribution_by_directory`/`_currency_capital_invested`
+  on `Portfolio`: the most of the user's own money ever tied up in each position at once - unlike
+  `total_money_invested`, money sold and bought back into the same position isn't counted twice.
+- `Portfolio.total_capital_value` and `distribution_by_ticker`/`_directory`/
+  `_currency_capital_value`: allocation by capital invested + `Profit` - everything a position has
+  paid back plus the market value of what's still held.
 
 ### Changed
-- `Plot.allocation_comparison_plot` now compares lifetime amount invested against lifetime value
-  (`_lifetime_value`) instead of `_total_value` (currently invested + revenue). The two bars used
-  to start from different invested figures, so a closed position looked like it had shrunk even
-  when it made money; now the gap between them is that position's revenue.
-- `Plot.allocation_comparison_plot` now scales both bars as a % of the same total (lifetime amount
+- `Plot.allocation_comparison_plot` now compares capital invested against capital value
+  (`_capital_value`) instead of lifetime amount invested against `_total_value` (currently
+  invested + revenue). The two bars used to start from different invested figures, so a closed
+  position looked like it had shrunk even when it made money, and money recycled within a
+  position was counted as invested each time; now the gap between them is that position's revenue.
+- `Plot.allocation_comparison_plot` now scales both bars as a % of the same total (total capital
   invested) instead of each as a share of its own total, so a total value bar taller than its
   invested bar always means that position gained. The y-axis is now "% of amount invested". Keys
   present on only one side are shown (as 0 on the other) instead of being dropped, and a zero
