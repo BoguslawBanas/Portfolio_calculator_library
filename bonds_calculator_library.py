@@ -233,8 +233,10 @@ class PolishRetailBonds(MergeMixin, ReprMixin):
         # _currently_invested drops it to 0% instead; _revenue keeps whatever was realized.
         # Distribution percentages are ratios, not money - computed in float even though the
         # underlying invested/current_value/revenue figures are Decimal.
-        self.distribution_by_ticker={code: (float(invested)/float(self.total_money_invested))*100.0 for code, invested in lifetime_invested_by_type.items()} if self.total_money_invested else dict()
-        self.distribution_by_ticker_currently_invested={code: (float(invested)/float(self.total_money_currently_invested))*100.0 for code, invested in invested_by_type.items()} if self.total_money_currently_invested else dict()
+        self.distribution_by_ticker={code: (float(invested)/float(self.total_money_invested))*100.0 if self.total_money_invested else 0.0 for code, invested in lifetime_invested_by_type.items()}
+        # Every type keeps its key at 0.0 once everything has matured, rather than the whole dict
+        # going empty - Portfolio's per-ticker allocations would otherwise silently drop that type.
+        self.distribution_by_ticker_currently_invested={code: (float(invested)/float(self.total_money_currently_invested))*100.0 if self.total_money_currently_invested else 0.0 for code, invested in invested_by_type.items()}
         self.distribution_by_ticker_current_value=dict()
         self.distribution_by_ticker_revenue=dict()
         # Trivial (every type is issued in NATIVE_CURRENCY, unlike Stock's per-ticker currency) -

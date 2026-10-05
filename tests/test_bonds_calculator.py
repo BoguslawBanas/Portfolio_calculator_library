@@ -705,6 +705,21 @@ def test_matured_bond_type_drops_out_of_currently_invested_and_current_value_ali
     assert bonds.distribution_by_ticker_revenue['OTS']>0.0
 
 
+def test_every_type_matured_keeps_its_key_in_currently_invested_at_zero(make_source_dir):
+    # Nothing held at all - total_money_currently_invested is 0, but OTS must still appear (0%)
+    # rather than the whole dict going empty, matching Stock's fully-sold ticker.
+    matured_start=date.today()-timedelta(days=100)
+    bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(
+        "date,isin,amount_of_units,additional_coupon,initial_coupon,is_swapped\n"
+        f"{matured_start.isoformat()},OTS0826,1,0.0,2.0,False\n"
+    ))
+    bonds=PolishRetailBonds(bonds_dir)
+
+    assert bonds.total_money_currently_invested==pytest.approx(0.0)
+    assert bonds.distribution_by_ticker_currently_invested=={'OTS': 0.0}
+    assert bonds.distribution_by_ticker=={'OTS': pytest.approx(100.0)}
+
+
 def test_matured_holding_no_longer_counts_toward_currently_invested_once_matured(make_source_dir):
     matured_start=date.today()-timedelta(days=100)
     active_start=date.today()-timedelta(days=10)

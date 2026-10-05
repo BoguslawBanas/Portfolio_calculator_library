@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [Unreleased]
+
+### Added
+- `Portfolio.total_lifetime_value` and `distribution_by_ticker_lifetime_value`/
+  `distribution_by_directory_lifetime_value`/`distribution_by_currency_lifetime_value`:
+  allocation by `total_money_invested + Profit` - everything a position has paid back plus the
+  market value of what's still held.
+
+### Changed
+- `Plot.allocation_comparison_plot` now compares lifetime amount invested against lifetime value
+  (`_lifetime_value`) instead of `_total_value` (currently invested + revenue). The two bars used
+  to start from different invested figures, so a closed position looked like it had shrunk even
+  when it made money; now the gap between them is that position's revenue.
+- `Plot.allocation_comparison_plot` now scales both bars as a % of the same total (lifetime amount
+  invested) instead of each as a share of its own total, so a total value bar taller than its
+  invested bar always means that position gained. The y-axis is now "% of amount invested". Keys
+  present on only one side are shown (as 0 on the other) instead of being dropped, and a zero
+  line is drawn when any bar is negative.
+
+### Fixed
+- `PolishRetailBonds.distribution_by_ticker_currently_invested` (and `distribution_by_ticker`)
+  now keep every bond type at 0.0 when nothing is held, instead of becoming an empty dict, which
+  made fully matured bond types disappear from `Portfolio`'s per-ticker allocations.
+
 ## [0.4.1] - 2026-09-29
 
 ### Added
