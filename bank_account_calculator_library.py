@@ -14,10 +14,10 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from .cache_library import DiskCache
-from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, to_money, money_array
+from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalInvestedMixin, to_money, money_array
 
 
-class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
+class BankAccount(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     # --- Output: self.data columns. First three: shared contract (see CLAUDE.md). No
     # Dividend/Realized_profit - interest accrues straight into Profit, no separate stream. ---
     MONEY_INVESTED_COLUMN='Money_invested'
@@ -79,10 +79,12 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
         lifetime_invested_by_account=dict()
         current_value_by_account=dict()
         revenue_by_account=dict()
+        computed_by_account=dict()
         for df in dataframes:
             account=df[self.CSV_TICKER_COLUMN].iloc[0]
             computed, lifetime_deposited=self._compute_data(df, cache_dir, force_refresh)
             dataframes_2.append(computed)
+            computed_by_account[account]=computed
 
             money_invested_by_account[account]=computed[self.MONEY_INVESTED_COLUMN].iloc[-1]
             # Lifetime gross ever deposited, never reduced by a withdrawal - matches Stock's own
@@ -114,6 +116,8 @@ class BankAccount(TickerSplitMixin, MergeMixin, ReprMixin):
             self.distribution_by_ticker_current_value[account]=(float(value)/float(self.total_current_value))*100.0 if self.total_current_value else 0.0
         for account, value in revenue_by_account.items():
             self.distribution_by_ticker_revenue[account]=(float(value)/float(self.total_revenue))*100.0 if self.total_revenue else 0.0
+
+        self._set_capital_invested(computed_by_account)
 
         self.data=self.merge(dataframes_2)
 

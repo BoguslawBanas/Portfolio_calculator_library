@@ -306,3 +306,50 @@ def test_currency_cache_dedup_holds_even_when_the_later_dated_ticker_is_listed_f
 
     Stock(stock_dir, tickers_json, 'usd', currency_cache=dict(), max_workers=4)
     assert mock_yfinance.call_log.count('EURUSD=X')==1
+
+
+@pytest.mark.parametrize("csv_files, expected_capital", [
+    # Sold at a gain, the proceeds bought straight back - the extra 200 is the position's own
+    # profit, not new money, so at most 1000 was ever put in.
+    ({'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                 "2024-01-02,US0000000001,10,100.0,0.0\n"
+                 "2024-02-01,US0000000001,10,120.0,0.0\n",
+      'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                  "2024-01-10,US0000000001,10,120.0\n"}, 1000.0),
+    # Sold at a loss, the proceeds bought straight back - still 1000 of own money at most.
+    ({'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                 "2024-01-02,US0000000001,10,100.0,0.0\n"
+                 "2024-02-01,US0000000001,10,50.0,0.0\n",
+      'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                  "2024-01-10,US0000000001,10,50.0\n"}, 1000.0),
+    # Sold out, then bought back with more money than ever before - the new peak counts.
+    ({'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                 "2024-01-02,US0000000001,10,100.0,0.0\n"
+                 "2024-02-01,US0000000001,20,100.0,0.0\n",
+      'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
+                  "2024-01-10,US0000000001,10,100.0\n"}, 2000.0),
+    # A dividend reinvested into the same position isn't new money either.
+    ({'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                 "2024-01-02,US0000000001,10,100.0,0.0\n"
+                 "2024-02-01,US0000000001,1,50.0,0.0\n",
+      'dividend.csv': "date,isin,dividend\n2024-01-15,US0000000001,50.0\n"}, 1000.0),
+])
+def test_capital_invested_is_the_peak_of_own_money_tied_up(make_source_dir, make_tickers_json, csv_files, expected_capital):
+    stock=build_stock(make_source_dir, make_tickers_json, csv_files, {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    assert float(stock.total_capital_invested)==pytest.approx(expected_capital)
+    assert stock.distribution_by_ticker_capital_invested=={'US0000000001': pytest.approx(100.0)}
+    # Lifetime invested still counts every buy - the two only agree when nothing was recycled.
+    assert float(stock.total_money_invested)>=expected_capital
+
+
+def test_capital_invested_is_split_per_ticker(make_source_dir, make_tickers_json):
+    stock=build_stock(
+        make_source_dir, make_tickers_json,
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
+                    "2024-01-02,US0000000001,10,100.0,0.0\n"
+                    "2024-01-02,US0000000002,30,100.0,0.0\n"},
+        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
+         "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"}},
+    )
+    assert float(stock.total_capital_invested)==pytest.approx(4000.0)
+    assert stock.distribution_by_ticker_capital_invested==pytest.approx({'US0000000001': 25.0, 'US0000000002': 75.0})

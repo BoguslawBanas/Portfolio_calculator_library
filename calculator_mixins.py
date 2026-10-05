@@ -61,6 +61,34 @@ class MergeMixin:
         return pd.concat(dataframes).groupby(level=0, sort=True).sum().ffill()
 
 
+class CapitalInvestedMixin:
+    """_set_capital_invested(): shared by every per-instrument calculator (Stock/Commodity/
+    Crypto/PolishRetailBonds/BankAccount) - sets total_capital_invested/
+    distribution_by_ticker_capital_invested from each ticker's/type's/account's own daily
+    DataFrame.
+
+    Capital invested is the most of the user's own money ever tied up in that position at once -
+    unlike total_money_invested (lifetime gross, every buy counted), money sold and bought back
+    into the same position isn't counted twice. Each day's money still tied up is
+        Money_invested - (Profit - Profit_without_dividends)
+    i.e. cost basis still held minus everything already paid back on top of it (realized
+    profit, dividends, interest - exactly what Profit adds over Profit_without_dividends in every
+    calculator), which equals cumulative buys/deposits minus cumulative sale proceeds/payouts/
+    withdrawals. Its peak over time (floored at 0) is the capital invested. Only money recycled
+    within one position is deduplicated - selling one ticker and buying another counts in both,
+    since each did hold that money at some point."""
+
+    def _set_capital_invested(self, dataframes_by_key: dict):
+        capital_by_key=dict()
+        for key, dataframe in dataframes_by_key.items():
+            tied_up=dataframe[self.MONEY_INVESTED_COLUMN]-(dataframe[self.PROFIT_COLUMN]-dataframe[self.PROFIT_WITHOUT_DIVIDEND_COLUMN])
+            capital_by_key[key]=max(to_money(tied_up.max()), Decimal('0')) if len(tied_up) else Decimal('0')
+        self.total_capital_invested=sum(capital_by_key.values(), Decimal('0'))
+        # Every key kept at 0.0 rather than an empty dict when the total is 0 - same convention as
+        # every other distribution_by_ticker* dict.
+        self.distribution_by_ticker_capital_invested={key: (float(value)/float(self.total_capital_invested))*100.0 if self.total_capital_invested else 0.0 for key, value in capital_by_key.items()}
+
+
 class IrrMixin:
     """_irr_newton()/calculate_irr(): shared by Portfolio and Benchmark, both of which build a
     self.data with Money_invested/Profit and want the same money-weighted IRR off it. Requires

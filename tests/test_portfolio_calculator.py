@@ -281,6 +281,18 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
     assert sum(mixed.distribution_by_directory_total_value.values())==pytest.approx(100.0)
     assert sum(mixed.distribution_by_currency_total_value.values())==pytest.approx(100.0)
 
+    # Capital invested keeps the matured bond's cost (the most ever tied up in it), and capital
+    # value adds its realized gain on top - everything it paid back at redemption.
+    assert bonds_only.total_capital_invested==pytest.approx(float(bonds_only.total_money_invested))
+    assert mixed.total_capital_invested==stock_only.total_capital_invested+bonds_only.total_capital_invested
+    assert mixed.total_capital_value==mixed.total_capital_invested+mixed.total_revenue
+    expected_ots_capital_value=float(bonds_only.total_capital_invested)+float(matured_bond_revenue)
+    assert mixed.distribution_by_ticker_capital_value['OTS']==pytest.approx(100.0*expected_ots_capital_value/float(mixed.total_capital_value), abs=0.01)
+    assert mixed.distribution_by_directory_capital_value[bonds_dir]==pytest.approx(100.0*expected_ots_capital_value/float(mixed.total_capital_value), abs=0.01)
+    for metric in ('capital_invested', 'capital_value'):
+        for kind in ('ticker', 'directory', 'currency'):
+            assert sum(getattr(mixed, f'distribution_by_{kind}_{metric}').values())==pytest.approx(100.0)
+
 
 def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
     start=date.today()-timedelta(days=5)
