@@ -455,7 +455,7 @@ class Plot:
 
         # Each distribution is a % of its own metric's total - rescale total value onto the
         # invested total, so both bars are a % of the same amount and directly comparable.
-        invested_total=float(self.portfolio.total_capital_invested)
+        invested_total=float(self.portfolio.total_capital_value)
         total_value_scale=float(self.portfolio.total_capital_value)/invested_total if invested_total else 0.0
 
         # Union of both sides' keys - a key missing from one side counts as 0 there, rather

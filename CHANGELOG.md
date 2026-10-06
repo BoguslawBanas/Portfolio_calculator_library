@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.2.1] - 2026-10-06
+
+### Changed
+-`Plot.allocation_comparison_plot` calculate percentage by using total_capital_value.
+
 ## [0.4.2] - 2026-10-05
 
 ### Added
