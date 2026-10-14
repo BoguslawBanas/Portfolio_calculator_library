@@ -28,7 +28,7 @@ def build_portfolio(make_source_dir, make_tickers_json, currency_to='usd'):
                     "2024-03-01,US0000000001,4,120.0\n",
         'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     return Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to=currency_to)
 
 
@@ -398,12 +398,12 @@ def test_allocation_plot_histogram_revenue_colors_by_sign(make_source_dir, make_
                     "2024-03-01,US0000000002,10,200.0\n",  # a big gain: realized +1000
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"},
+        "US0000000001": "FAKEUSD",
+        "US0000000002": "FAKEUSD2",
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
-    assert portfolio.distribution_by_ticker_revenue['US0000000001']<0
-    assert portfolio.distribution_by_ticker_revenue['US0000000002']>0
+    assert portfolio.distribution_by_ticker_revenue['FAKEUSD']<0
+    assert portfolio.distribution_by_ticker_revenue['FAKEUSD2']>0
     plot=Plot(portfolio)
     plot.allocation_plot(by=Plot.ALLOCATION_PLOT_BY_TICKER, kind=Plot.ALLOCATION_PLOT_KIND_HISTOGRAM, metric=Plot.ALLOCATION_PLOT_METRIC_REVENUE)
     fig, _=captured_figures[-1]
@@ -419,7 +419,7 @@ def test_allocation_plot_buckets_extra_slices_into_other(make_source_dir, make_t
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"+buy_rows,
     })
-    tickers_json=make_tickers_json({f"ISIN{i}": {"ticker": f"FAKE{i}", "currency": "usd"} for i in range(n)})
+    tickers_json=make_tickers_json({f"ISIN{i}": f"FAKE{i}" for i in range(n)})
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
     plot=Plot(portfolio)
     plot.allocation_plot(by=Plot.ALLOCATION_PLOT_BY_TICKER, kind=Plot.ALLOCATION_PLOT_KIND_PIE, max_slices=7)
@@ -436,8 +436,8 @@ def test_allocation_plot_by_currency_matches_distribution_by_currency(make_sourc
                    "2024-01-15,US0000000002,5,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "US0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+        "US0000000001": "FAKEUSD",
+        "US0000000002": "FAKEEUR",
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
     assert set(portfolio.distribution_by_currency)=={'USD', 'EUR'}
@@ -480,23 +480,20 @@ def test_allocation_comparison_plot_groups_invested_and_total_value_by_ticker(po
     assert fig.data[1].name=='Total value'
     assert list(fig.data[0].x)==list(fig.data[1].x)
     assert list(fig.data[0].x)==list(portfolio.distribution_by_ticker_capital_invested)
-    # Both bars are a % of the same total (capital invested) - total value is rescaled from its
-    # own total onto it, so the bars sum to 100% and 100% plus the portfolio's return.
-    scale=float(portfolio.total_capital_value)/float(portfolio.total_capital_invested)
+    # Trace 0 is capital invested (% of capital invested), Trace 1 is total value (% of total capital value).
     assert list(fig.data[0].y)==pytest.approx([portfolio.distribution_by_ticker_capital_invested[key] for key in fig.data[0].x])
-    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_ticker_capital_value[key]*scale for key in fig.data[1].x])
+    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_ticker_capital_value[key] for key in fig.data[1].x])
     assert sum(fig.data[0].y)==pytest.approx(100.0)
-    assert sum(fig.data[1].y)==pytest.approx(100.0*scale)
+    assert sum(fig.data[1].y)==pytest.approx(100.0)
 
 
 def test_allocation_comparison_plot_by_directory(portfolio, captured_figures):
     plot=Plot(portfolio)
     plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY)
     fig, _=captured_figures[-1]
-    scale=float(portfolio.total_capital_value)/float(portfolio.total_capital_invested)
     assert list(fig.data[0].x)==list(portfolio.distribution_by_directory_capital_invested)
     assert list(fig.data[0].y)==pytest.approx([portfolio.distribution_by_directory_capital_invested[key] for key in fig.data[0].x])
-    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_directory_capital_value[key]*scale for key in fig.data[1].x])
+    assert list(fig.data[1].y)==pytest.approx([portfolio.distribution_by_directory_capital_value[key] for key in fig.data[1].x])
 
 
 def test_allocation_comparison_plot_closed_position_is_shown_against_what_was_invested(make_source_dir, make_tickers_json, captured_figures):
@@ -509,20 +506,18 @@ def test_allocation_comparison_plot_closed_position_is_shown_against_what_was_in
                     "2024-01-10,SOLD,10,120\n",
     })
     tickers_json=make_tickers_json({
-        'HELD': {'ticker': 'HELD', 'currency': 'usd'},
-        'SOLD': {'ticker': 'SOLD', 'currency': 'usd'},
+        'HELD': 'HELD',
+        'SOLD': 'SOLD',
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
     plot=Plot(portfolio)
     plot.allocation_comparison_plot(by=Plot.ALLOCATION_COMPARISON_PLOT_BY_TICKER)
     fig, _=captured_figures[-1]
 
-    # 1000 of 2000 capital invested (50%), turned into 1200 (60% of that same 2000) - the total
-    # value bar is taller, as the position gained, rather than dropping to its 200 profit.
     invested=dict(zip(fig.data[0].x, fig.data[0].y))
     total_value=dict(zip(fig.data[1].x, fig.data[1].y))
     assert invested['SOLD']==pytest.approx(50.0)
-    assert total_value['SOLD']==pytest.approx(60.0, abs=0.01)
+    assert total_value['SOLD']==pytest.approx(portfolio.distribution_by_ticker_capital_value['SOLD'])
 
 
 def test_allocation_comparison_plot_does_not_double_count_money_reinvested_in_the_same_position(make_source_dir, make_tickers_json, captured_figures):
@@ -537,8 +532,8 @@ def test_allocation_comparison_plot_does_not_double_count_money_reinvested_in_th
                     "2024-01-10,TRADED,10,120\n",
     })
     tickers_json=make_tickers_json({
-        'HELD': {'ticker': 'HELD', 'currency': 'usd'},
-        'TRADED': {'ticker': 'TRADED', 'currency': 'usd'},
+        'HELD': 'HELD',
+        'TRADED': 'TRADED',
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
     # Lifetime invested counts TRADED twice (1000+1200); capital invested doesn't.
@@ -569,7 +564,7 @@ def test_allocation_comparison_plot_keeps_fully_matured_bond_types(make_source_d
 
     assert list(fig.data[0].x)==['OTS']
     assert list(fig.data[0].y)==pytest.approx([100.0])
-    assert fig.data[1].y[0]>100.0
+    assert fig.data[1].y[0]==pytest.approx(100.0)
 
 
 def test_allocation_comparison_plot_rejects_unknown_by(portfolio):
@@ -583,7 +578,7 @@ def test_allocation_over_time_plot_invested_reflects_when_each_directory_starts_
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     account_dir=make_source_dir('bank_account', {
         'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
                        "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
@@ -612,7 +607,7 @@ def test_allocation_over_time_plot_stacked_kind_sums_to_100_at_final_day(make_so
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     account_dir=make_source_dir('bank_account', {
         'deposit.csv': "date,account,amount,rate_type,rate,capitalization_months,tax\n"
                        "2024-02-01,savings,500.0,fixed,0.0,12,0.0\n",
