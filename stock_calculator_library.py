@@ -88,7 +88,7 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
         self.native_data=dict()
         self.native_currency=dict()
         self.dataframe=self._load_sources(directory_path)
-        self.tickers=self._load_tickers_json(tickers_json)
+        self.dataframe[self.CSV_TICKER_COLUMN]=self.dataframe[self.CSV_TICKER_COLUMN].map(pd.read_json(tickers_json, typ='series').to_dict())
         self._cache_dir=cache_dir
 
         dataframes=self._split_by_ticker(self.dataframe)
@@ -116,7 +116,7 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
             # ever reads an already-sufficient entry.
             min_start_by_currency=dict()
             for df in dataframes:
-                ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
+                ticker_currency=self.ticker_currency(df, self.CSV_TICKER_COLUMN)
                 start_date=df.index.min()
                 if ticker_currency not in min_start_by_currency or start_date<min_start_by_currency[ticker_currency]:
                     min_start_by_currency[ticker_currency]=start_date
@@ -131,7 +131,7 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
             # guarded by a lock (see currency_calculator_library) - each ticker's DiskCache reads/
             # writes are already safe on their own, distinct (ticker/currency-keyed) files.
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]
-            ticker_currency=self.ticker_currency(df, tickers_json, self.CSV_TICKER_COLUMN)
+            ticker_currency=self.ticker_currency(df, self.CSV_TICKER_COLUMN)
             computed, total_buy_invested=self._compute_data(df, ticker_currency, currency_to, cache_dir, force_refresh, currency_cache)
             native_data, native_currency=None, None
             if include_native_currency:
@@ -189,19 +189,15 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
 
         self.data=self.merge(dataframes_2)
 
-    @staticmethod
-    def ticker_currency(dataframe: pd.DataFrame, path_to_json_file: str, isin_column_name: str) -> str:
-        """Looks up one ticker's declared currency from tickers_json. Requires every row in
-        dataframe to share the same ticker/isin."""
-        with open(path_to_json_file, "r") as f:
-            j=json.load(f)
-            currency=j[dataframe[isin_column_name].iloc[0]]['currency']
-        return currency
+    def _get_ticker_from_dataframe(self, dataframe: pd.DataFrame) -> str:
+        # IMPORTANT! method works only after splitting dataframe into separate ones (each has information about a single ticker)
+        return dataframe[self.CSV_TICKER_COLUMN].iloc[0]
 
     @staticmethod
-    def _load_tickers_json(tickers_json: str) -> dict:
-        with open(tickers_json, 'r') as f:
-            return json.load(f)
+    def ticker_currency(dataframe: pd.DataFrame, isin_column_name: str) -> str:
+        """Uses 'fetch_currency' method from PriceSource class
+        to get information about currency which the instrument is noted."""
+        return PriceSource.fetch_currency(dataframe[isin_column_name].iloc[0])
 
     @classmethod
     def _load_sources(cls, directory: str) -> pd.DataFrame:
@@ -232,7 +228,7 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
         distribution_by_ticker/total_money_invested, computed here (same pattern as Commodity)
         rather than in a second pass over __init__."""
         start_date=dataframe.index.min()
-        ticker_name=self.tickers.get(dataframe[self.CSV_TICKER_COLUMN].iloc[0])['ticker']
+        ticker_name=self._get_ticker_from_dataframe(dataframe)
 
         cache=DiskCache(cache_dir) if cache_dir else None
         cache_key=None
