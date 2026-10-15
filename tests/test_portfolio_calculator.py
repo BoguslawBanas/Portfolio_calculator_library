@@ -49,7 +49,7 @@ def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_d
     # Same source data, computed standalone, to read off exactly how much of Profit is the
     # 4-unit sell's realized gain (proceeds 4*120 minus 40% of the 1000 cost basis = 80.0).
     stock_dir=list(portfolio.distribution_by_directory)[0]
-    stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
+    stock=Stock(stock_dir, make_tickers_json({"US0000000001": "FAKEUSD"}), 'usd')
     realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
     assert float(realized)==pytest.approx(80.0)
 
@@ -236,7 +236,7 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     bonds_dir=make_source_dir('bonds', {
