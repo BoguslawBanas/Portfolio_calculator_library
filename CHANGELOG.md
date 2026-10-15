@@ -6,10 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.3] - 2026-10-15
+
+- Modified getting information about ticker's currency. Now it's taken from yfinance library (`yfinance.Ticker.info.get('currency')`). The change is implemented right now only in Stock class.
+- Modified `.json` file format. Right now the format looks like: `ticker1: yfinanceTicker1, ticker2: yfinanceTicker2`, instead of: `ticker1: {ticker: yfinanceTicker1, currency: currency1}, ticker2: {ticker: yfinanceTicker2, currency: currency2}`
+- Updated tests to the changes from this and `0.4.2.1` versions.
+
 ## [0.4.2.1] - 2026-10-06
 
 ### Changed
--`Plot.allocation_comparison_plot` calculate percentage by using total_capital_value.
+- `Plot.allocation_comparison_plot` calculate percentage by using total_capital_value.
 
 ## [0.4.2] - 2026-10-05
 
