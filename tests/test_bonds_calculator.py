@@ -1198,7 +1198,7 @@ def test_no_dividend_column_bonds_realized_profit_does_not_leak_into_portfolios_
         'dividend.csv': "date,isin,dividend\n"
                         "2024-06-01,US0000000001,25.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     bonds_dir=make_bonds_dir(make_source_dir, buy_csv=(

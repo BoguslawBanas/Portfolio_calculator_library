@@ -30,9 +30,29 @@ class FakeTicker:
     price. call_log records every symbol fetched, for tests that assert on caching/call counts."""
 
     call_log=list()
+    currencies=dict()
 
     def __init__(self, symbol):
         self.symbol=symbol
+
+    @property
+    def info(self):
+        currency=FakeTicker.currencies.get(self.symbol)
+        if currency is None:
+            sym=self.symbol.upper()
+            if 'EUR' in sym:
+                currency='eur'
+            elif 'PLN' in sym or sym.endswith('.WA'):
+                currency='pln'
+            elif 'GBP' in sym:
+                currency='gbp'
+            elif 'NOK' in sym:
+                currency='nok'
+            elif 'RUB' in sym:
+                currency='rub'
+            else:
+                currency='usd'
+        return {'currency': currency}
 
     def history(self, start, end, repair=True, actions=False):
         FakeTicker.call_log.append(self.symbol)
@@ -54,6 +74,7 @@ class FakeTicker:
 def mock_yfinance():
     """Applied to every test automatically — nothing in this suite should ever hit the network."""
     FakeTicker.call_log=list()
+    FakeTicker.currencies=dict()
     with mock.patch.object(price_source_mod.yf, 'Ticker', FakeTicker):
         yield FakeTicker
 
@@ -79,10 +100,14 @@ def make_source_dir(tmp_path):
 
 @pytest.fixture
 def make_tickers_json(tmp_path):
-    """Factory fixture: writes an ISIN -> {ticker, currency} mapping to tickers.json and
+    """Factory fixture: writes a mapping (e.g. ISIN -> ticker) to tickers.json and
     returns its path."""
     def _make(mapping: dict, filename: str='tickers.json') -> str:
         path=tmp_path/filename
+        if isinstance(mapping, dict):
+            for k, v in mapping.items():
+                if isinstance(v, dict) and 'currency' in v and 'ticker' in v:
+                    FakeTicker.currencies[v['ticker']]=v['currency']
         path.write_text(json.dumps(mapping))
         return str(path)
     return _make

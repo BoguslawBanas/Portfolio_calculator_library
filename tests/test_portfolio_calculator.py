@@ -18,7 +18,7 @@ def build_single_stock_portfolio(make_source_dir, make_tickers_json, currency_to
                     "2024-03-01,US0000000001,4,120.0\n",
         'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     return Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to=currency_to)
 
 
@@ -34,11 +34,11 @@ def test_single_stock_source_totals_match_the_underlying_stock(make_source_dir, 
     # already does - unlike total_money_invested, reduced by the 4-unit sell.
     assert portfolio.total_money_currently_invested==pytest.approx(600.0)
     # Portfolio.distribution_by_ticker is keyed the same way Stock.distribution_by_ticker is —
-    # by the CSV's isin column, not the yfinance ticker symbol.
-    assert 'US0000000001' in portfolio.distribution_by_ticker
+    # by ticker symbol.
+    assert 'FAKEUSD' in portfolio.distribution_by_ticker
     assert portfolio.distribution_by_directory
     assert sum(portfolio.distribution_by_directory.values())==pytest.approx(100.0)
-    assert portfolio.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
+    assert portfolio.distribution_by_ticker_currently_invested['FAKEUSD']==pytest.approx(100.0)
     assert sum(portfolio.distribution_by_directory_currently_invested.values())==pytest.approx(100.0)
 
 
@@ -49,7 +49,7 @@ def test_profit_without_realized_excludes_the_sells_locked_in_gain(make_source_d
     # Same source data, computed standalone, to read off exactly how much of Profit is the
     # 4-unit sell's realized gain (proceeds 4*120 minus 40% of the 1000 cost basis = 80.0).
     stock_dir=list(portfolio.distribution_by_directory)[0]
-    stock=Stock(stock_dir, make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}}), 'usd')
+    stock=Stock(stock_dir, make_tickers_json({"US0000000001": "FAKEUSD"}), 'usd')
     realized=stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]
     assert float(realized)==pytest.approx(80.0)
 
@@ -95,20 +95,20 @@ def test_distribution_by_currency_splits_across_two_stock_native_currencies(make
                    "2024-01-20,DE0000000002,2,150.0,0.0\n",  # 300, native eur
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+        "US0000000001": "FAKEUSD",
+        "DE0000000002": "FAKEEUR",
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
 
-    # distribution_by_ticker is keyed by isin (two entries); distribution_by_currency instead
+    # distribution_by_ticker is keyed by ticker (two entries); distribution_by_currency instead
     # groups those same two positions into just 'USD'/'EUR' - fewer keys than distribution_by_ticker
     # whenever two tickers share a native currency, though not exercised by this particular case.
     assert set(portfolio.distribution_by_currency)=={'USD', 'EUR'}
     assert sum(portfolio.distribution_by_currency.values())==pytest.approx(100.0)
     # Matches distribution_by_ticker's own split for each single-currency ticker exactly, since
     # each currency bucket here holds only one position.
-    assert portfolio.distribution_by_currency['USD']==pytest.approx(portfolio.distribution_by_ticker['US0000000001'])
-    assert portfolio.distribution_by_currency['EUR']==pytest.approx(portfolio.distribution_by_ticker['DE0000000002'])
+    assert portfolio.distribution_by_currency['USD']==pytest.approx(portfolio.distribution_by_ticker['FAKEUSD'])
+    assert portfolio.distribution_by_currency['EUR']==pytest.approx(portfolio.distribution_by_ticker['FAKEEUR'])
 
 
 def test_distribution_by_currency_groups_same_currency_tickers_together(make_source_dir, make_tickers_json):
@@ -118,8 +118,8 @@ def test_distribution_by_currency_groups_same_currency_tickers_together(make_sou
                    "2024-01-20,US0000000003,2,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "US0000000003": {"ticker": "FAKEUSD2", "currency": "usd"},
+        "US0000000001": "FAKEUSD",
+        "US0000000003": "FAKEUSD2",
     })
     portfolio=Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd')
 
@@ -142,16 +142,16 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-20,US0000000001,5,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     portfolio=Portfolio(
         {stock_dir1: 'stock', stock_dir2: 'stock'},
         tickers_json=tickers_json, currency_to='usd',
     )
 
     assert portfolio.total_money_invested==pytest.approx(1000.0)
-    # A single ISIN held across both sources -> its distribution should reflect the combined
+    # A single ticker held across both sources -> its distribution should reflect the combined
     # 1000 invested (100% of the portfolio), not just one source's 500 (50%).
-    assert portfolio.distribution_by_ticker==pytest.approx({'US0000000001': 100.0})
+    assert portfolio.distribution_by_ticker==pytest.approx({'FAKEUSD': 100.0})
     assert portfolio.distribution_by_currency==pytest.approx({'USD': 100.0})
 
 
@@ -160,7 +160,7 @@ def test_distribution_by_currency_multi_source_stock_and_bonds(make_source_dir, 
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     start=date.today()-timedelta(days=3)
     bonds_dir=make_source_dir('bonds', {
@@ -186,7 +186,7 @@ def test_multi_source_portfolio_sums_stock_and_bonds(make_source_dir, make_ticke
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     start=date.today()-timedelta(days=3)
     bonds_dir=make_source_dir('bonds', {
@@ -236,7 +236,7 @@ def test_profit_column_keeps_a_matured_bonds_realized_gain_but_drops_its_cost_ba
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     matured_start=date.today()-timedelta(days=100)  # OTS's 3-month term has long since ended
     bonds_dir=make_source_dir('bonds', {
@@ -357,7 +357,7 @@ def test_cache_dir_is_reused_across_portfolio_constructions(make_source_dir, mak
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd', cache_dir=cache_dir)
     calls_after_first=len(mock_yfinance.call_log)
@@ -371,7 +371,7 @@ def test_force_refresh_ignores_the_cache(make_source_dir, make_tickers_json, cac
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,10,100.0,0.0\n",
     })
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
 
     Portfolio({stock_dir: 'stock'}, tickers_json=tickers_json, currency_to='usd', cache_dir=cache_dir)
     calls_after_first=len(mock_yfinance.call_log)

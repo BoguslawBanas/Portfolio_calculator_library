@@ -24,6 +24,13 @@ class _FlakyTicker:
             raise ConnectionError("simulated transient failure")
         return pd.DataFrame({'Close': [1.0]})
 
+    @property
+    def info(self):
+        type(self).calls+=1
+        if type(self).calls<=type(self).fail_count:
+            raise ConnectionError("simulated transient failure")
+        return {'currency': 'USD'}
+
 
 @pytest.fixture(autouse=True)
 def reset_flaky_ticker():
@@ -86,3 +93,39 @@ def test_history_kwargs_are_forwarded(monkeypatch):
     PriceSource.fetch_history('AAA', start='2024-01-01', end='2024-01-02', repair=True, actions=False)
 
     assert seen_kwargs=={'start': '2024-01-01', 'end': '2024-01-02', 'repair': True, 'actions': False}
+
+
+def test_fetch_currency_succeeds_on_first_try_without_sleeping(monkeypatch):
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _FlakyTicker)
+    sleeps=[]
+    monkeypatch.setattr(price_source_mod.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+    currency=PriceSource.fetch_currency('AAA')
+
+    assert currency=='USD'
+    assert _FlakyTicker.calls==1
+    assert sleeps==[]
+
+
+def test_fetch_currency_retries_transient_failures_then_succeeds(monkeypatch):
+    _FlakyTicker.fail_count=2
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _FlakyTicker)
+    sleeps=[]
+    monkeypatch.setattr(price_source_mod.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+    currency=PriceSource.fetch_currency('AAA', backoff_seconds=1.0)
+
+    assert currency=='USD'
+    assert _FlakyTicker.calls==3
+    assert sleeps==[1.0, 2.0]
+
+
+def test_fetch_currency_gives_up_after_max_retries(monkeypatch):
+    _FlakyTicker.fail_count=100
+    monkeypatch.setattr(price_source_mod.yf, 'Ticker', _FlakyTicker)
+    monkeypatch.setattr(price_source_mod.time, 'sleep', lambda seconds: None)
+
+    with pytest.raises(ConnectionError):
+        PriceSource.fetch_currency('AAA', max_retries=2)
+
+    assert _FlakyTicker.calls==3

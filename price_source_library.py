@@ -32,3 +32,15 @@ class PriceSource:
                 if attempt>max_retries:
                     raise
                 time.sleep(backoff_seconds*(2**(attempt-1)))
+
+    @classmethod
+    def fetch_currency(cls, ticker: str, max_retries: int=DEFAULT_MAX_RETRIES, backoff_seconds: float=DEFAULT_BACKOFF_SECONDS):
+        attempt=0
+        while True:
+            try:
+                return yf.Ticker(ticker).info.get('currency')
+            except Exception:
+                attempt+=1
+                if attempt>max_retries:
+                    raise
+                time.sleep(backoff_seconds*(2**(attempt-1)))

@@ -18,7 +18,7 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir, make_tic
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-02-01,US0000000001,3,110.0,0.01\n"},
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     data=stock.data
     # The computed range starts on the first buy's own date (no day-before-zero row here,
@@ -28,9 +28,7 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir, make_tic
     expected=round(5*100.0, 2)+round(1.01*3*110.0, 2)
     assert float(data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected)
     assert float(stock.total_money_invested)==pytest.approx(expected)
-    # distribution_by_ticker/native_data are keyed by the CSV's isin column (CSV_TICKER_COLUMN),
-    # not the yfinance ticker symbol looked up from tickers.json — despite the name.
-    assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
+    assert stock.distribution_by_ticker['FAKEUSD']==pytest.approx(100.0)
 
 
 def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers_json):
@@ -42,7 +40,7 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,4,120.0\n",
         },
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     data=stock.data
     # Selling 4 of 10 units removes 40% of the cost basis (1000 -> 600), average price unchanged.
@@ -52,8 +50,8 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir, make_tickers
     # exactly once a sell happens.
     assert float(stock.total_money_invested)==pytest.approx(1000.0)
     assert float(stock.total_money_currently_invested)==pytest.approx(600.0)
-    assert stock.distribution_by_ticker['US0000000001']==pytest.approx(100.0)
-    assert stock.distribution_by_ticker_currently_invested['US0000000001']==pytest.approx(100.0)
+    assert stock.distribution_by_ticker['FAKEUSD']==pytest.approx(100.0)
+    assert stock.distribution_by_ticker_currently_invested['FAKEUSD']==pytest.approx(100.0)
     # Realized profit = proceeds (4*120) - cost basis removed (400) = 80.
     assert float(data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1])==pytest.approx(80.0)
     # Profit_without_realized excludes that locked-in 80 (no dividends here, so it's just the
@@ -79,25 +77,25 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
             'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                         "2024-03-01,US0000000001,10,100.0\n",
         },
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     assert float(stock.total_current_value)==pytest.approx(0.0)
     assert float(stock.total_revenue)==pytest.approx(0.0)
-    assert stock.distribution_by_ticker_current_value==pytest.approx({'US0000000001': 0.0})
-    assert stock.distribution_by_ticker_revenue==pytest.approx({'US0000000001': 0.0})
+    assert stock.distribution_by_ticker_current_value==pytest.approx({'FAKEUSD': 0.0})
+    assert stock.distribution_by_ticker_revenue==pytest.approx({'FAKEUSD': 0.0})
     # Same 0/0-guarded shape for currently_invested: nothing is left held (full sell), so
     # total_money_currently_invested is exactly 0.0 while total_money_invested (lifetime gross)
     # stays at 1000 - distribution_by_ticker_currently_invested must land on 0.0, not NaN.
     assert float(stock.total_money_invested)==pytest.approx(1000.0)
     assert float(stock.total_money_currently_invested)==pytest.approx(0.0)
-    assert stock.distribution_by_ticker_currently_invested==pytest.approx({'US0000000001': 0.0})
+    assert stock.distribution_by_ticker_currently_invested==pytest.approx({'FAKEUSD': 0.0})
 
 
 def test_nonexistent_directory_raises_clear_value_error(tmp_path, make_tickers_json):
     # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
     # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
     # convention (README Roadmap item).
-    tickers_json=make_tickers_json({"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     missing_dir=str(tmp_path/'does_not_exist')
     with pytest.raises(ValueError, match="No such directory"):
         Stock(missing_dir, tickers_json, 'usd')
@@ -113,7 +111,7 @@ def test_oversell_raises_value_error(make_source_dir, make_tickers_json):
                 'sell.csv': "date,isin,amount_of_units,price_of_unit\n"
                             "2024-02-01,US0000000001,999,100.0\n",
             },
-            {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+            {"US0000000001": "FAKEUSD"},
         )
 
 
@@ -126,7 +124,7 @@ def test_dividends_and_dividend_tax_tracked_separately_from_price_gain(make_sour
             'dividend.csv': "date,isin,dividend\n2024-06-01,US0000000001,25.0\n",
             'dividend_tax.csv': "date,isin,dividend_tax\n2024-06-01,US0000000001,4.75\n",
         },
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     data=stock.data
     assert float(data[Stock.DIVIDEND_COLUMN].iloc[-1])==pytest.approx(25.0-4.75)
@@ -145,7 +143,7 @@ def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_ticker
         make_source_dir, make_tickers_json,
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     assert stock.data[Stock.DIVIDEND_COLUMN].iloc[-1]==0.0
     assert stock.data[Stock.REALIZED_PROFIT_COLUMN].iloc[-1]==0.0
@@ -160,7 +158,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_ti
             make_source_dir, make_tickers_json,
             {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                         "2024-01-15,US0000000001,5,100.0,0.0\n"},
-            {"US0000000001": {"ticker": "INVALIDTICKER", "currency": "usd"}},
+            {"US0000000001": "INVALIDTICKER"},
         )
 
 
@@ -169,7 +167,7 @@ def test_foreign_currency_ticker_is_converted(make_source_dir, make_tickers_json
         make_source_dir, make_tickers_json,
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
-        {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
+        {"DE0000000002": "FAKEEUR"},
         currency_to='usd',
     )
     # FakeTicker's EUR/USD rate isn't flat 1.0, so a straight EUR cost basis wouldn't match.
@@ -184,15 +182,15 @@ def test_currency_by_ticker_is_always_populated_regardless_of_include_native_cur
                     "2024-01-15,US0000000001,5,100.0,0.0\n"
                     "2024-01-20,DE0000000002,2,150.0,0.0\n"},
         {
-            "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-            "DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"},
+            "US0000000001": "FAKEUSD",
+            "DE0000000002": "FAKEEUR",
         },
         currency_to='usd',
         # include_native_currency deliberately left at its default (False) - currency_by_ticker
         # (unlike native_data/native_currency) isn't gated behind that flag, since Portfolio's
         # distribution_by_currency needs it unconditionally.
     )
-    assert stock.currency_by_ticker=={'US0000000001': 'usd', 'DE0000000002': 'eur'}
+    assert stock.currency_by_ticker=={'FAKEUSD': 'usd', 'FAKEEUR': 'eur'}
 
 
 def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tickers_json):
@@ -200,13 +198,13 @@ def test_include_native_currency_isolates_fx_movement(make_source_dir, make_tick
         make_source_dir, make_tickers_json,
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,DE0000000002,5,50.0,0.0\n"},
-        {"DE0000000002": {"ticker": "FAKEEUR", "currency": "eur"}},
+        {"DE0000000002": "FAKEEUR"},
         currency_to='usd', include_native_currency=True,
     )
-    assert 'DE0000000002' in stock.native_data
-    assert stock.native_currency['DE0000000002']=='eur'
+    assert 'FAKEEUR' in stock.native_data
+    assert stock.native_currency['FAKEEUR']=='eur'
     # Native (EUR) cost basis is the flat EUR calculation, no FX applied.
-    assert float(stock.native_data['DE0000000002'][Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(250.0)
+    assert float(stock.native_data['FAKEEUR'][Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(250.0)
 
 
 def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tickers_json):
@@ -214,7 +212,7 @@ def test_repr_shows_invested_current_value_and_revenue(make_source_dir, make_tic
         make_source_dir, make_tickers_json,
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-15,US0000000001,5,100.0,0.0\n"},
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD"},
     )
     representation=repr(stock)
     assert representation.startswith("Stock(")
@@ -230,13 +228,13 @@ def test_merge_sums_multiple_tickers_by_date(make_source_dir, make_tickers_json)
                    "2024-01-20,US0000000003,2,200.0,0.0\n",
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "US0000000003": {"ticker": "FAKEUSD2", "currency": "usd"},
+        "US0000000001": "FAKEUSD",
+        "US0000000003": "FAKEUSD2",
     })
     stock=Stock(stock_dir, tickers_json, 'usd')
     expected_total=round(5*100.0, 2)+round(2*200.0, 2)
     assert float(stock.data[Stock.MONEY_INVESTED_COLUMN].iloc[-1])==pytest.approx(expected_total)
-    assert set(stock.distribution_by_ticker)=={'US0000000001', 'US0000000003'}
+    assert set(stock.distribution_by_ticker)=={'FAKEUSD', 'FAKEUSD2'}
     assert sum(stock.distribution_by_ticker.values())==pytest.approx(100.0)
 
 
@@ -251,9 +249,9 @@ def test_concurrent_ticker_fetch_matches_sequential(make_source_dir, make_ticker
                    "2024-01-25,US0000000003,7,50.0,0.01\n",
     })
     tickers_json=make_tickers_json({
-        "US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-        "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"},
-        "US0000000003": {"ticker": "FAKEUSD3", "currency": "usd"},
+        "US0000000001": "FAKEUSD",
+        "US0000000002": "FAKEUSD2",
+        "US0000000003": "FAKEUSD3",
     })
 
     sequential=Stock(stock_dir, tickers_json, 'usd', max_workers=1)
@@ -274,8 +272,8 @@ def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_curre
                    "2024-01-20,DE0000000002,2,200.0,0.0\n",
     })
     tickers_json=make_tickers_json({
-        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
-        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+        "DE0000000001": "FAKEEUR",
+        "DE0000000002": "FAKEEUR2",
     })
 
     Stock(stock_dir, tickers_json, 'usd')
@@ -300,8 +298,8 @@ def test_currency_cache_dedup_holds_even_when_the_later_dated_ticker_is_listed_f
                    "2024-01-15,DE0000000001,5,100.0,0.0\n",
     })
     tickers_json=make_tickers_json({
-        "DE0000000001": {"ticker": "FAKEEUR", "currency": "eur"},
-        "DE0000000002": {"ticker": "FAKEEUR2", "currency": "eur"},
+        "DE0000000001": "FAKEEUR",
+        "DE0000000002": "FAKEEUR2",
     })
 
     Stock(stock_dir, tickers_json, 'usd', currency_cache=dict(), max_workers=4)
@@ -335,9 +333,9 @@ def test_currency_cache_dedup_holds_even_when_the_later_dated_ticker_is_listed_f
       'dividend.csv': "date,isin,dividend\n2024-01-15,US0000000001,50.0\n"}, 1000.0),
 ])
 def test_capital_invested_is_the_peak_of_own_money_tied_up(make_source_dir, make_tickers_json, csv_files, expected_capital):
-    stock=build_stock(make_source_dir, make_tickers_json, csv_files, {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"}})
+    stock=build_stock(make_source_dir, make_tickers_json, csv_files, {"US0000000001": "FAKEUSD"})
     assert float(stock.total_capital_invested)==pytest.approx(expected_capital)
-    assert stock.distribution_by_ticker_capital_invested=={'US0000000001': pytest.approx(100.0)}
+    assert stock.distribution_by_ticker_capital_invested=={'FAKEUSD': pytest.approx(100.0)}
     # Lifetime invested still counts every buy - the two only agree when nothing was recycled.
     assert float(stock.total_money_invested)>=expected_capital
 
@@ -348,8 +346,23 @@ def test_capital_invested_is_split_per_ticker(make_source_dir, make_tickers_json
         {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                     "2024-01-02,US0000000001,10,100.0,0.0\n"
                     "2024-01-02,US0000000002,30,100.0,0.0\n"},
-        {"US0000000001": {"ticker": "FAKEUSD", "currency": "usd"},
-         "US0000000002": {"ticker": "FAKEUSD2", "currency": "usd"}},
+        {"US0000000001": "FAKEUSD",
+         "US0000000002": "FAKEUSD2"},
     )
     assert float(stock.total_capital_invested)==pytest.approx(4000.0)
-    assert stock.distribution_by_ticker_capital_invested==pytest.approx({'US0000000001': 25.0, 'US0000000002': 75.0})
+    assert stock.distribution_by_ticker_capital_invested==pytest.approx({'FAKEUSD': 25.0, 'FAKEUSD2': 75.0})
+
+
+def test_ticker_currency_fetches_via_price_source():
+    df=pd.DataFrame({'isin': ['FAKEUSD']})
+    assert Stock.ticker_currency(df, 'isin')=='usd'
+
+
+def test_get_ticker_from_dataframe(make_source_dir, make_tickers_json):
+    stock=build_stock(
+        make_source_dir, make_tickers_json,
+        {'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n2024-01-15,US0000000001,5,100.0,0.0\n"},
+        {"US0000000001": "FAKEUSD"},
+    )
+    df=pd.DataFrame({'isin': ['FAKEUSD']})
+    assert stock._get_ticker_from_dataframe(df)=='FAKEUSD'

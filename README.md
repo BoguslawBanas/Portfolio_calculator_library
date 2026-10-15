@@ -29,7 +29,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - historical prices via `yfinance`, forward-filled to a continuous daily calendar
 - foreign-currency instruments converted to a target currency via `Currency`
 - full or partial sells, tracked against a running average cost basis
-- dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (`tickers.json`'s `currency` field, the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
+- dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 - an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
@@ -60,7 +60,7 @@ Daily FX rates via `yfinance`, used internally by `Stock`/`Commodity`/`Crypto`/`
 
 ### 🔌 `price_source_library.PriceSource`
 
-The single seam every `yfinance` price-history fetch goes through — `Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark` each call `PriceSource.fetch_history(ticker, **history_kwargs)` instead of `yf.Ticker(...).history(...)` directly.
+The single seam every `yfinance` price-history fetch goes through — `Stock`/`Commodity`/`Crypto`/`Currency`/`Benchmark` each call `PriceSource.fetch_history(ticker, **history_kwargs)` instead of `yf.Ticker(...).history(...)` directly. Analogically, the class is also used to get information about ticker's currency `PriceSource.fetch_currency(ticker).`
 
 - retries a failed fetch (any exception `yfinance`/its HTTP layer raises — a transient network hiccup, a rate-limit response) with exponential backoff, up to `max_retries` times (default 3) before re-raising, instead of one failure aborting the whole `Portfolio` construction
 - an invalid/delisted ticker isn't retried — `yfinance` returns an empty DataFrame for that (a normal result, not an exception), and each caller already raises its own specific `ValueError` for it
@@ -144,7 +144,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line - a window's profit gain over money invested at the window's start, scaled to a year
 - `allocation_plot` — portfolio allocation by ticker, by source directory, or by native currency (FX exposure), as a pie or bar chart, by amount invested, current market value, or revenue
-- `allocation_comparison_plot` — grouped bar chart comparing money invested against what it turned into (invested + revenue), side by side per ticker/directory. Invested is capital invested (money recycled within a position isn't counted twice). Both bars are a % of the same total (total capital invested), so the gap between them is that position's revenue and a total value bar taller than its invested bar always means the position gained. Closed positions are shown against what was put into them
+- `allocation_comparison_plot` — grouped bar chart comparing money invested against what it turned into (invested + revenue), side by side per ticker/directory. Invested is capital invested (money recycled within a position isn't counted twice). Both bars are a % of the same total (total capital value), so the gap between them is that position's revenue and a total value bar taller than its invested bar always means the position gained. Closed positions are shown against what was put into them
 - `allocation_over_time_plot` — portfolio allocation by source directory, evolving over time, as overlaid lines or a stacked area, by amount invested or current market value. By directory only, not by ticker — `Portfolio` only retains each source's own daily DataFrame at the directory level (`sources_by_directory`), not a daily series per ticker/symbol/account
 
 ### 🪙 `commodity_calculator_library.Commodity`
