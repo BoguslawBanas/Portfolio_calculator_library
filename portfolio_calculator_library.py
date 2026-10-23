@@ -21,7 +21,7 @@ from .calculator_mixins import ReprMixin, IrrMixin, to_money, zero_row
 
 
 class Portfolio(IrrMixin, ReprMixin):
-    # --- Output: self.data contract + Portfolio-specific extras (see CLAUDE.md). ---
+    # --- Output: self.data contract (see Stock) + Portfolio-specific extras. ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
@@ -62,10 +62,12 @@ class Portfolio(IrrMixin, ReprMixin):
         'USD'. Passed through as each source's own currency_to (BankAccount has none - single-
         currency only, see its own README entry).
 
-        self.distribution_by_currency/_current_value/_revenue (always populated): allocation by
-        each position's own NATIVE currency (a US stock's 'usd', a Polish bond's 'PLN', ...)
-        rather than by ticker/directory - independent of currency_to, the single currency
-        self.data is converted to and summed in.
+        self.distribution_by_currency and its _currently_invested/_current_value/_revenue/
+        _total_value/_capital_invested/_capital_value variants (always populated, no flag needed):
+        allocation by each position's own NATIVE currency (a US stock's 'usd', a Polish bond's
+        'PLN', ...) rather than by ticker/directory - independent of currency_to, the single
+        currency self.data is converted to and summed in. BankAccount sources don't contribute
+        (they have no currency_by_ticker).
 
         self.total_money_currently_invested/distribution_by_directory/_ticker/_currency_currently_
         invested: the same allocation figures as their lifetime-gross counterparts above, but by
@@ -262,14 +264,15 @@ class Portfolio(IrrMixin, ReprMixin):
 
     @classmethod
     def from_csv(cls, dataframe_file: str, source_type: str, tickers_json: str=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False) -> 'Portfolio':
-        """Convenience alias - the constructor already accepts a single prepared CSV."""
+        """Single-source convenience: Portfolio({dataframe_file: source_type}, ...).
+        dataframe_file is a source directory (holding that type's CSVs), not a single CSV file."""
         return cls({dataframe_file: source_type}, tickers_json, cache_dir=cache_dir, force_refresh=force_refresh, include_native_currency=include_native_currency)
 
     @staticmethod
     def _accumulate_by_currency(target: dict, currency_by_ticker: dict, key, amount: Decimal):
         """Adds amount into target's bucket for currency_by_ticker[key]'s currency (uppercased).
-        Used by __init__ to build distribution_by_currency/_current_value/_revenue from each
-        source's per-ticker figures, still absolute (Decimal) at that point (normalized to % later)."""
+        Used by _absorb_source to build every distribution_by_currency* dict from each source's
+        per-ticker figures, still absolute (Decimal) at that point (normalized to % later)."""
         currency_code=currency_by_ticker[key].upper()
         target[currency_code]=target.get(currency_code, Decimal('0'))+amount
 
@@ -384,7 +387,8 @@ class Portfolio(IrrMixin, ReprMixin):
 
     @staticmethod
     def merge(dataframes: list) -> pd.DataFrame:
-        """Sums a list of per-instrument DataFrames by date into a single portfolio DataFrame."""
+        """Sums every constructed source's own .data DataFrame by date into a single portfolio
+        DataFrame. Takes the source objects themselves, not their DataFrames."""
         list_of_df=[df.data for df in dataframes]
         merged=pd.concat(list_of_df).groupby(level=0, sort=True).sum().ffill()
         return Portfolio._prepend_zero_day(merged)

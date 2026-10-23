@@ -1,8 +1,7 @@
 """
 Shared helper for fetching several tickers'/symbols' price history concurrently within one
 source (Stock/Commodity/Crypto) - each fetch is I/O-bound (a yfinance HTTP call), so a bounded
-thread pool cuts wall-clock load time for a portfolio with many holdings. See ROADMAP.md's
-Performance & reliability section.
+thread pool cuts wall-clock load time for a portfolio with many holdings.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +11,7 @@ import threading
 class Concurrency:
     # Bounded, not one thread per ticker: PriceSource.fetch_history already retries a failed
     # fetch with backoff - many tickers retrying in parallel after a rate-limit response would
-    # look worse to yfinance's rate limiter than fewer, sequential retries. See ROADMAP.md.
+    # look worse to yfinance's rate limiter than fewer, sequential retries.
     DEFAULT_MAX_WORKERS=4
 
     @classmethod

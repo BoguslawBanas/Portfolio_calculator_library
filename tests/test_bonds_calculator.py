@@ -333,7 +333,7 @@ def test_zero_total_current_value_and_revenue_keep_the_key_at_zero_not_omitted(m
     """A single, fully-cancelled OTS holding (see test_ots_early_redemption_forfeits_all_accrued_
     interest above) drives total_current_value and total_revenue both to exactly 0.0 - the same
     division-by-zero edge case distribution_by_ticker_current_value/_revenue used to handle by
-    omitting the key entirely instead of guarding to 0.0 like every other asset class (README
+    omitting the key entirely instead of guarding to 0.0 like every other asset class (former
     Roadmap item)."""
     start=date.today()-timedelta(days=60)
     cancel_date=start+timedelta(days=45)
@@ -549,7 +549,7 @@ def test_tos_compounds_across_periods(make_source_dir):
 
 def test_edo_continues_accruing_past_year_one(make_source_dir):
     """EDO's real term is 10 annual periods; this used to be locked in as a regression test for a
-    bug where Profit reverted to 0.0 past year one (see git history / README Roadmap - fixed as
+    bug where Profit reverted to 0.0 past year one (see git history / former Roadmap - fixed as
     part of the taxonomy rework, so this now asserts the fixed behavior instead)."""
     start=date.today()-timedelta(days=400)  # more than a year ago
     bonds_dir=make_bonds_dir(
@@ -1048,7 +1048,7 @@ def test_bond_types_json_is_folded_into_the_cache_key(make_source_dir, make_tick
 def test_nonexistent_directory_raises_clear_value_error(tmp_path):
     # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
     # pd.read_csv ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
-    # convention (README Roadmap item).
+    # convention (former Roadmap item).
     missing_dir=str(tmp_path/'does_not_exist')
     with pytest.raises(ValueError, match="No such directory"):
         PolishRetailBonds(missing_dir)
@@ -1056,7 +1056,7 @@ def test_nonexistent_directory_raises_clear_value_error(tmp_path):
 
 def test_missing_buy_csv_raises_clear_value_error(tmp_path):
     # An existing directory with no buy.csv used to surface as a raw FileNotFoundError straight
-    # from pd.read_csv instead of a clear error (README Roadmap item).
+    # from pd.read_csv instead of a clear error (former Roadmap item).
     empty_dir=tmp_path/'bonds_without_buy_csv'
     empty_dir.mkdir()
     with pytest.raises(ValueError, match="buy.csv"):

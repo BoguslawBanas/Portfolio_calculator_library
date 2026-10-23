@@ -69,7 +69,8 @@ from .calculator_mixins import ReprMixin, MergeMixin, CapitalInvestedMixin, to_m
 
 
 class PolishRetailBonds(MergeMixin, CapitalInvestedMixin, ReprMixin):
-    # --- Output: self.data columns. First three: shared contract (see CLAUDE.md).
+    # --- Output: self.data columns. Every column except REALIZED_PROFIT_COLUMN: shared contract
+    # (see Stock).
     # PROFIT_WITHOUT_DIVIDEND_COLUMN and PROFIT_COLUMN track together while held, but diverge at
     # maturity: PROFIT_WITHOUT_DIVIDEND_COLUMN (unrealized) drops to 0, PROFIT_COLUMN (realized)
     # freezes at its final value - see _bond_dataframe. REALIZED_PROFIT_COLUMN is derived from

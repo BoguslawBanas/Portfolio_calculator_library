@@ -24,7 +24,8 @@ class DiskCache:
         self.cache_dir=cache_dir
 
     def get(self, key: str) -> pd.DataFrame:
-        """Returns the cached DataFrame for key, or None on a cache miss or a stale
+        """Returns the cached value for key (a DataFrame for Currency, a tuple for every
+        calculator - each caller checks the shape itself), or None on a cache miss or a stale
         (not computed today) entry."""
         path=self._path(key)
         if not os.path.exists(path):
@@ -124,7 +125,8 @@ class DiskCache:
 
     @staticmethod
     def hash_file(path: str) -> str:
-        """Stable hash of a file's content — fold a rate CSV (interest_rate.csv,
-        inflation_rate.csv) into a cache key so an edited/appended rate invalidates it."""
+        """Stable hash of a file's content — fold an input file (a rate CSV like
+        interest_rate.csv/inflation_rate.csv, or PolishRetailBonds' buy.csv/cancel.csv/
+        bond_types_json) into a cache key so editing it invalidates the entry."""
         with open(path, 'rb') as f:
             return hashlib.sha256(f.read()).hexdigest()

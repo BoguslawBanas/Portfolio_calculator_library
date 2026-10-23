@@ -48,10 +48,11 @@ class Plot:
     ALLOCATION_OVER_TIME_PLOT_KIND_STACKED_PLOT='stacked_plot'
 
     def __init__(self, portfolio: Portfolio):
-        """portfolio: a constructed Portfolio that's already had calculate_irr()/resample()/
-        calculate_money_earned_between_dates_column() called at least once - whichever's needed
-        first, since each sets portfolio.portfolio (the DataFrame money_plot/performance_plot/
-        period_return_bar_plot read from) as a side effect."""
+        """portfolio: a constructed Portfolio. Methods reading portfolio.portfolio (money_plot,
+        performance_plot, benchmark_comparison_plot, period_return_bar_plot) need
+        portfolio.calculate_irr() to have run first - it's what creates portfolio.portfolio (see
+        ROADMAP.md: their own lazy guards can't create it). Every other method reads
+        portfolio.data or the distribution_by_* attributes and has no prerequisite."""
         self.portfolio=portfolio
 
     @staticmethod
@@ -369,8 +370,8 @@ class Plot:
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 
-    # Suffix appended to 'distribution_by_ticker'/'distribution_by_directory' to reach the
-    # backing Portfolio attribute for each allocation_plot metric.
+    # Suffix appended to 'distribution_by_ticker'/'_directory'/'_currency' to reach the backing
+    # Portfolio attribute for each allocation_plot metric.
     METRIC_ATTRIBUTE_SUFFIXES={ALLOCATION_PLOT_METRIC_INVESTED: '', ALLOCATION_PLOT_METRIC_CURRENT_VALUE: '_current_value', ALLOCATION_PLOT_METRIC_REVENUE: '_revenue'}
 
     def allocation_plot(self, by: str=ALLOCATION_PLOT_BY_TICKER, kind: str=ALLOCATION_PLOT_KIND_PIE, metric: str=ALLOCATION_PLOT_METRIC_INVESTED, max_slices: int=7, path_to_save_fig: str=None):
@@ -430,9 +431,9 @@ class Plot:
             raise ValueError(f"Unknown allocation_plot kind: {kind!r} (expected {self.ALLOCATION_PLOT_KIND_PIE!r} or {self.ALLOCATION_PLOT_KIND_HISTOGRAM!r})")
 
     def allocation_comparison_plot(self, by: str=ALLOCATION_COMPARISON_PLOT_BY_TICKER, max_slices: int=7, path_to_save_fig: str=None):
-        """Grouped bar chart: per ticker/directory, money invested vs. what it turned into
-        (invested + revenue), side by side - the gap between the two bars is that position's
-        revenue (unrealized + dividends/interest + realized).
+        """Grouped bar chart: per ticker/directory, share of money invested vs. share of what it
+        turned into (invested + revenue, where revenue is unrealized + dividends/interest +
+        realized), side by side.
         Invested is the capital invested - the most of the user's own money ever tied up in that
         position at once (distribution_by_ticker/_directory_capital_invested, see
         calculator_mixins.CapitalInvestedMixin), so money sold and bought back into the same
@@ -440,10 +441,11 @@ class Plot:
         what that money turned into: everything paid back (sale proceeds, dividends, interest)
         plus the market value of what's still held. A closed position is therefore shown
         against what was actually put into it, not as a 0% cost basis.
-        Both bars are a % of the same total - total capital invested - so the invested bars sum
-        to 100%, the total value bars to 100% plus the portfolio's own return, and a total value
-        bar taller than its invested bar always means that position gained. The gap is that
-        position's revenue as a % of the whole portfolio's capital, not its own return.
+        Each bar is a % of its own total: invested bars of total capital invested, total value
+        bars of total capital value - so each set sums to 100%, and the two bars per position
+        compare its share of the money put in against its share of what that money turned into.
+        A total value bar taller than its invested bar means the position did better than the
+        portfolio as a whole, not necessarily that it gained in absolute terms.
         Money moved from one position into another still counts in both (each did hold it).
         by: 'ticker' or 'directory'."""
         if by==self.ALLOCATION_COMPARISON_PLOT_BY_TICKER:
@@ -453,8 +455,8 @@ class Plot:
         else:
             raise ValueError(f"Unknown allocation_comparison_plot by: {by!r} (expected {self.ALLOCATION_COMPARISON_PLOT_BY_TICKER!r} or {self.ALLOCATION_COMPARISON_PLOT_BY_DIRECTORY!r})")
 
-        # Each distribution is a % of its own metric's total - rescale total value onto the
-        # invested total, so both bars are a % of the same amount and directly comparable.
+        # Each distribution is already a % of its own metric's total, and both are plotted as-is:
+        # dividing by total_capital_value makes the scale 1.0 (0.0 for an empty portfolio).
         invested_total=float(self.portfolio.total_capital_value)
         total_value_scale=float(self.portfolio.total_capital_value)/invested_total if invested_total else 0.0
 
@@ -483,7 +485,7 @@ class Plot:
         ])
         if any(value<0 for value in total_values):
             fig.add_hline(y=0, line_color=COLOR_BASELINE, line_width=1)
-        fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="% of amount invested", barmode='group')
+        fig.update_layout(xaxis_title=by.capitalize(), yaxis_title="Share of total (%)", barmode='group')
         fig.update_yaxes(showgrid=True)
         self._render(fig, path_to_save_fig)
 

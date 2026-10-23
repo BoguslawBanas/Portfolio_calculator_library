@@ -24,7 +24,7 @@ def test_foreign_currency_fetches_and_fills_continuous_daily_range(mock_yfinance
 def test_unquoted_pair_raises_instead_of_returning_nan(mock_yfinance):
     # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
     # real yfinance's behavior for a pair it doesn't quote - must raise here, not silently
-    # produce a Close column of NaN (README Roadmap item).
+    # produce a Close column of NaN (former Roadmap item).
     with pytest.raises(ValueError, match="INVALIDUSD=X"):
         Currency('invalid', 'usd', datetime(2024, 1, 1), datetime(2024, 1, 10))
 

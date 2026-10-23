@@ -1,5 +1,5 @@
 """
-Shared fixtures for the automated test suite (README Roadmap item).
+Shared fixtures for the automated test suite (former Roadmap item).
 
 Every calculator that talks to yfinance (Stock, Commodity, Crypto, Currency, Benchmark) goes
 through `PriceSource.fetch_history` (price_source_library.py), the single seam that itself calls
@@ -59,7 +59,7 @@ class FakeTicker:
         if self.symbol.startswith('INVALID'):
             # Mirrors real yfinance: an invalid ticker/unquoted pair returns an empty DataFrame
             # (not an error) - same shape as a real result, just no rows - see each calculator's
-            # own "yfinance returned no ... history" ValueError (README Roadmap item).
+            # own "yfinance returned no ... history" ValueError (former Roadmap item).
             return pd.DataFrame(columns=['Close', 'High', 'Low', 'Open', 'Volume', 'Repaired?'])
         idx=pd.date_range(start=start, end=end, freq='D')
         base=1.10 if self.symbol.endswith('=X') else 100.0
