@@ -29,7 +29,7 @@ Fetches stock/ETF price history and turns a set of buy/sell/dividend transaction
 - historical prices via `yfinance`, forward-filled to a continuous daily calendar
 - foreign-currency instruments converted to a target currency via `Currency`
 - full or partial sells, tracked against a running average cost basis
-- dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own declared currency (the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
+- dividends and dividend/sell tax tracked separately from price gains — the `dividend`/`dividend_tax` figures in the CSV are assumed to already be in that ticker's own native currency as reported by `yfinance` (the same one its buy/sell rows use), not necessarily the currency your broker actually paid the dividend in; convert it yourself first if the two differ
 - optional progress-bar hook, driven by `Portfolio` (see below)
 - optional `include_native_currency` — also computes each ticker's DataFrame in its own native currency (`self.native_data[ticker]`/`self.native_currency[ticker]`), isolating its own performance from FX movement against the target currency
 - an invalid/delisted ticker raises `ValueError` at construction time instead of silently continuing — `yfinance` returns an empty (not an error) result for one, which would otherwise `ffill()` into a `Close` column of all-`NaN`
@@ -144,7 +144,7 @@ Charts for a constructed `Portfolio`, built entirely on `plotly`:
 - `period_return_bar_plot` — rolling daily return, colored by sign
 - `rolling_return_plot` — rolling annualized return (%) over a trailing window, as a line - a window's profit gain over money invested at the window's start, scaled to a year
 - `allocation_plot` — portfolio allocation by ticker, by source directory, or by native currency (FX exposure), as a pie or bar chart, by amount invested, current market value, or revenue
-- `allocation_comparison_plot` — grouped bar chart comparing money invested against what it turned into (invested + revenue), side by side per ticker/directory. Invested is capital invested (money recycled within a position isn't counted twice). Both bars are a % of the same total (total capital value), so the gap between them is that position's revenue and a total value bar taller than its invested bar always means the position gained. Closed positions are shown against what was put into them
+- `allocation_comparison_plot` — grouped bar chart comparing money invested against what it turned into (invested + revenue), side by side per ticker/directory. Invested is capital invested (money recycled within a position isn't counted twice). Each bar is a % of its own total (invested bars of total capital invested, total value bars of total capital value), so each set sums to 100% and a total value bar taller than its invested bar means the position did better than the portfolio as a whole. Closed positions are shown against what was put into them
 - `allocation_over_time_plot` — portfolio allocation by source directory, evolving over time, as overlaid lines or a stacked area, by amount invested or current market value. By directory only, not by ticker — `Portfolio` only retains each source's own daily DataFrame at the directory level (`sources_by_directory`), not a daily series per ticker/symbol/account
 
 ### 🪙 `commodity_calculator_library.Commodity`
@@ -312,10 +312,11 @@ sources = {
     "data/bank_accounts": "bank_account",
 }
 
-# tickers.json maps each ISIN to its yfinance ticker and native currency, e.g.
-# {"US78462F1030": {"ticker": "SPY", "currency": "usd"}}
-# Every buy/sell/dividend/dividend_tax/sell_tax row for that ISIN is assumed to already be in
-# this same declared currency — e.g. a US stock's dividend.csv entries are assumed to be in USD,
+# tickers.json maps each ISIN to its yfinance ticker, e.g.
+# {"US78462F1030": "SPY"}
+# The ticker's native currency is fetched from yfinance. Every buy/sell/dividend/dividend_tax/
+# sell_tax row for that ISIN is assumed to already be in that currency — e.g. a US stock's
+# dividend.csv entries are assumed to be in USD,
 # regardless of what currency your broker actually deposited the dividend in; convert it
 # yourself first if the two differ, there's no separate per-row currency field.
 # cache_dir is optional: when given, every source's computed DataFrame is cached to disk for

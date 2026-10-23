@@ -1,8 +1,8 @@
 """
 Stock/ETF calculator: given buy/sell/dividend transactions plus a tickers.json mapping each ISIN
-to its yfinance ticker and native currency, computes the Money_invested/Profit/Dividend
-DataFrame at construction, caching the result on self.data. Every other calculator in this
-package follows the same shape.
+to its yfinance ticker (each ticker's native currency is fetched from yfinance), computes the
+Money_invested/Profit/Dividend DataFrame at construction, caching the result on self.data. Every
+other calculator in this package follows the same shape.
 """
 
 import os
@@ -20,8 +20,10 @@ from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalI
 
 
 class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
-    # --- Output: self.data / working DataFrame columns. The first three form the shared
-    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    # --- Output: self.data / working DataFrame columns. MONEY_INVESTED_COLUMN, PROFIT_COLUMN and
+    # the three PROFIT_WITHOUT_*/PROFIT_EXCLUDING_* columns form the shared DataFrame contract
+    # every asset-type calculator normalizes to, so Portfolio.merge can sum them (see README's
+    # Portfolio section). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     # Despite the name, *unrealized* only - market value of units held minus cost basis, so it
     # excludes REALIZED_PROFIT_COLUMN too, not just DIVIDEND_COLUMN. Load-bearing: total_current_
@@ -53,9 +55,9 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
     def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None, max_workers: int=Concurrency.DEFAULT_MAX_WORKERS):
-        """tickers_json: JSON file mapping each ISIN to {"ticker": <yfinance symbol>,
-        "currency": <instrument currency>} - same shape as Commodity/Crypto's own, required here
-        since Stock has no built-in ticker registry to fall back on.
+        """tickers_json: JSON file mapping each ISIN to its yfinance symbol ({isin: ticker}) -
+        required here since Stock has no built-in ticker registry to fall back on. Each ticker's
+        native currency is fetched from yfinance (see ticker_currency), not read from the file.
         progress_callback: optional zero-arg callback, once per ticker, after its price history
         is fetched/computed.
         cache_dir: caches each ticker's computed DataFrame, keyed by ticker/currency/
@@ -124,10 +126,9 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
                 get_cached_currency(currency_cache, ticker_currency, currency_to, start_date, cache_dir=cache_dir, force_refresh=force_refresh)
 
         def _fetch_one(df) -> tuple:
-            # Runs on a worker thread (see Concurrency.run below) - reads self.tickers (fixed
-            # since before this loop starts) and calls _compute_data/get_cached_currency, but
-            # never writes to self, so several tickers can run this concurrently without racing
-            # on shared state. get_cached_currency's own currency_cache access is separately
+            # Runs on a worker thread (see Concurrency.run below) - calls ticker_currency/
+            # _compute_data/get_cached_currency, but never writes to self, so several tickers can
+            # run this concurrently without racing on shared state. get_cached_currency's own currency_cache access is separately
             # guarded by a lock (see currency_calculator_library) - each ticker's DiskCache reads/
             # writes are already safe on their own, distinct (ticker/currency-keyed) files.
             ticker=df[self.CSV_TICKER_COLUMN].iloc[0]

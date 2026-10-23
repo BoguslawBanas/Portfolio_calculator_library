@@ -133,7 +133,7 @@ def test_distribution_by_ticker_accumulates_same_isin_across_two_sources(make_so
     # Same ISIN split across two separate source directories (e.g. two different brokers) -
     # _absorb_source used to overwrite distribution_by_ticker[isin] with the later source's own
     # amount instead of adding to it, silently dropping the first source's contribution even
-    # though total_money_invested itself stayed correct (README Roadmap item).
+    # though total_money_invested itself stayed correct (former Roadmap item).
     stock_dir1=make_source_dir('broker_a', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,US0000000001,5,100.0,0.0\n",
@@ -309,7 +309,7 @@ def test_bank_account_source_is_wired_into_portfolio(make_source_dir):
 def test_commodity_and_crypto_tickers_json_are_threaded_through(make_source_dir, make_tickers_json):
     # commodity_tickers_json/crypto_tickers_json let a Portfolio-level caller track a symbol
     # beyond each class's built-in TICKERS without touching the library source, same as
-    # tickers_json already does for 'stock' sources (README Roadmap item).
+    # tickers_json already does for 'stock' sources (former Roadmap item).
     commodity_tickers_path=make_tickers_json(
         {"tin": {"ticker": "TIN=F", "quote_unit": "pound"}}, filename='commodity_tickers.json',
     )
@@ -337,7 +337,7 @@ def test_currency_fetches_are_deduplicated_across_sources_sharing_a_pair(make_so
     # Commodity and Crypto both quote in QUOTE_CURRENCY='usd' - with currency_to='pln' (so the
     # usd->pln pair actually needs a real fetch, not Currency's own same-currency short-circuit),
     # Portfolio's shared currency_cache should mean that pair is only ever fetched once across
-    # both sources, not once per source (README Roadmap item, before this).
+    # both sources, not once per source (former Roadmap item, before this).
     commodities_dir=make_source_dir('commodities', {
         'buy.csv': "date,symbol,amount_of_units,unit,money_invested,currency\n"
                    "2024-01-15,gold,10.0,gram,500.0,usd\n",

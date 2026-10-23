@@ -14,7 +14,7 @@ def build_crypto(make_source_dir, csv_files, currency_to='usd', **kwargs):
 def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
     # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
     # real yfinance's behavior for an invalid ticker - must raise here, not silently produce a
-    # Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known coins to
+    # Close column of NaN (former Roadmap item). TICKERS maps a fixed set of known coins to
     # real yfinance symbols, so monkeypatch in a throwaway entry pointing at a symbol FakeTicker
     # treats as invalid, rather than one of the real (always-valid) ones.
     monkeypatch.setitem(Crypto.TICKERS, 'notarealcoin', 'INVALIDCOIN-USD')
@@ -46,7 +46,7 @@ def test_concurrent_symbol_fetch_matches_sequential(make_source_dir):
 def test_nonexistent_directory_raises_clear_value_error(tmp_path):
     # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
     # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
-    # convention (README Roadmap item).
+    # convention (former Roadmap item).
     missing_dir=str(tmp_path/'does_not_exist')
     with pytest.raises(ValueError, match="No such directory"):
         Crypto(missing_dir, 'usd')
@@ -66,7 +66,7 @@ def test_buy_only_accumulates_money_invested_and_units(make_source_dir):
 def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
     # A new coin beyond the built-in TICKERS - tickers_json is a plain {symbol: yfinance
     # ticker} mapping, simpler than Commodity's (no per-symbol quote_unit needed, since every
-    # crypto ticker here is directly USD-quoted per whole coin) (README Roadmap item).
+    # crypto ticker here is directly USD-quoted per whole coin) (former Roadmap item).
     tickers_path=make_tickers_json({"notarealcoin": "NRC-USD"}, filename='crypto_tickers.json')
     crypto=build_crypto(
         make_source_dir,
@@ -142,7 +142,7 @@ def test_partial_sell_preserves_average_cost_basis(make_source_dir):
 
 
 def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_source_dir):
-    # Same division-by-zero edge case as Stock's own version of this test (README Roadmap item):
+    # Same division-by-zero edge case as Stock's own version of this test (former Roadmap item):
     # selling every unit at exactly the buy price drives total_current_value/total_revenue to
     # exactly 0.0, which distribution_by_ticker_current_value/_revenue must guard to 0.0 rather
     # than dividing by zero.

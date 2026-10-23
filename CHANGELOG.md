@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 pre-1.0: any release before 1.0.0 may include breaking changes to the public API, data formats,
 or file layout.
 
+## [0.4.4] - 2026-10-24
+
+### Fixed
+- `BankAccount`'s disk cache key now includes the content of `interest_rate_file`, so editing
+  the base-rate file invalidates a variable-rate account's cached result the same day (cache tag
+  bumped to `bank_account-v3`).
+- `Plot.allocation_comparison_plot`'s y-axis is now labeled "Share of total (%)" instead of
+  "% of amount invested" - since 0.4.2.1 each set of bars is a % of its own total.
+
+### Changed
+- Brought code comments and docstrings up to date with the current behavior (`tickers_json`
+  format, shared DataFrame contract, `allocation_comparison_plot` scaling, stale doc pointers).
+
 ## [0.4.3] - 2026-10-15
 
 - Modified getting information about ticker's currency. Now it's taken from yfinance library (`yfinance.Ticker.info.get('currency')`). The change is implemented right now only in Stock class.

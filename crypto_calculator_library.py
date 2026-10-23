@@ -1,7 +1,9 @@
 """
-Crypto calculator, built the same way as Commodity: buy/sell transactions turned into a daily
-investment/profit DataFrame. No dividends, so no Dividend column - Profit is unrealized plus
-realized, the same two terms Stock uses minus dividends.
+Crypto calculator: buy/sell transactions turned into a daily investment/profit DataFrame. Its
+CSVs match Stock's (price_of_unit/fee on buy, price_of_unit on sell - sell proceeds come from the
+recorded price, not yfinance's close) minus dividends, while its built-in TICKERS registry and
+single USD QUOTE_CURRENCY follow Commodity. No dividends, so no Dividend column - Profit is
+unrealized plus realized, the same two terms Stock uses minus dividends.
 """
 
 import os
@@ -19,8 +21,9 @@ from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalI
 
 
 class Crypto(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
-    # --- Output: self.data / working DataFrame columns. The first three form the shared
-    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    # --- Output: self.data / working DataFrame columns. Every column except REALIZED_PROFIT_/
+    # UNITS_/CLOSE_COLUMN forms the shared DataFrame contract every asset-type calculator
+    # normalizes to (see Stock). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
@@ -45,8 +48,9 @@ class Crypto(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     CSV_FEE_COLUMN='fee'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
-    # Every yfinance ticker here is USD-quoted, so unlike Stock/Bonds there's no per-symbol
-    # currency to look up - QUOTE_CURRENCY covers all of them. tickers_json can add/override
+    # Every yfinance ticker here is USD-quoted, so unlike Stock (which fetches each ticker's
+    # currency from yfinance) there's no per-symbol currency to look up - QUOTE_CURRENCY covers
+    # all of them. tickers_json can add/override
     # entries without editing this dict.
     TICKERS={
         'bitcoin': 'BTC-USD',

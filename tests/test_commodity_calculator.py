@@ -38,7 +38,7 @@ def build_commodity(make_source_dir, csv_files, currency_to='usd', **kwargs):
 def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeypatch):
     # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
     # real yfinance's behavior for an invalid futures ticker - must raise here, not silently
-    # produce a Close column of NaN (README Roadmap item). TICKERS maps a fixed set of known
+    # produce a Close column of NaN (former Roadmap item). TICKERS maps a fixed set of known
     # commodities to real yfinance symbols, so monkeypatch in a throwaway entry pointing at a
     # symbol FakeTicker treats as invalid, rather than one of the real (always-valid) ones.
     monkeypatch.setitem(Commodity.TICKERS, 'unobtainium', 'INVALIDXYZ=F')
@@ -52,7 +52,7 @@ def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, monkeyp
 def test_nonexistent_directory_raises_clear_value_error(tmp_path):
     # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
     # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
-    # convention (README Roadmap item).
+    # convention (former Roadmap item).
     missing_dir=str(tmp_path/'does_not_exist')
     with pytest.raises(ValueError, match="No such directory"):
         Commodity(missing_dir, 'usd')
@@ -231,7 +231,7 @@ def test_copper_quote_unit_is_pounds_not_troy_ounce(make_source_dir):
 def test_custom_symbol_via_tickers_json_is_usable(make_source_dir, make_tickers_json):
     # A new commodity beyond the built-in TICKERS - tickers_json entries need both the yfinance
     # ticker and the physical unit that ticker quotes a price per (quote_unit), since neither
-    # can be inferred for an arbitrary new symbol (README Roadmap item).
+    # can be inferred for an arbitrary new symbol (former Roadmap item).
     tickers_path=make_tickers_json(
         {"tin": {"ticker": "TIN=F", "quote_unit": "pound"}}, filename='commodity_tickers.json',
     )

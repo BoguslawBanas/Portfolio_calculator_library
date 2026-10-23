@@ -67,7 +67,7 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
     # Selling every unit at exactly the buy price leaves realized profit, units, and dividends
     # all at 0 -> total_current_value and total_revenue both land on exactly 0.0. distribution_
     # by_ticker_current_value/_revenue used to divide by that 0 unguarded, producing NaN plus a
-    # RuntimeWarning instead of 0.0 like distribution_by_ticker itself already handled (README
+    # RuntimeWarning instead of 0.0 like distribution_by_ticker itself already handled (former
     # Roadmap item).
     stock=build_stock(
         make_source_dir, make_tickers_json,
@@ -94,7 +94,7 @@ def test_full_sell_at_cost_zeroes_current_value_and_revenue_without_nan(make_sou
 def test_nonexistent_directory_raises_clear_value_error(tmp_path, make_tickers_json):
     # A nonexistent directory_path used to surface as a raw FileNotFoundError straight from
     # os.listdir ([WinError 3]/[Errno 2]) instead of this library's own established clear-error
-    # convention (README Roadmap item).
+    # convention (former Roadmap item).
     tickers_json=make_tickers_json({"US0000000001": "FAKEUSD"})
     missing_dir=str(tmp_path/'does_not_exist')
     with pytest.raises(ValueError, match="No such directory"):
@@ -152,7 +152,7 @@ def test_missing_csvs_do_not_error_only_buy_present(make_source_dir, make_ticker
 def test_invalid_ticker_raises_instead_of_returning_nan(make_source_dir, make_tickers_json):
     # FakeTicker returns an empty DataFrame for any symbol starting with 'INVALID', mirroring
     # real yfinance's behavior for an invalid/delisted ticker - must raise here, not silently
-    # produce a Close column of NaN (README Roadmap item).
+    # produce a Close column of NaN (former Roadmap item).
     with pytest.raises(ValueError, match="INVALIDTICKER"):
         build_stock(
             make_source_dir, make_tickers_json,
@@ -265,7 +265,7 @@ def test_concurrent_ticker_fetch_matches_sequential(make_source_dir, make_ticker
 def test_currency_cache_deduplicates_the_fx_fetch_across_tickers_sharing_a_currency(make_source_dir, make_tickers_json, mock_yfinance):
     # Two tickers both declared 'eur' in tickers.json, converted to 'usd' - without a shared
     # currency_cache each ticker's own Currency(...) call hits yfinance separately for the
-    # identical EURUSD=X pair (README Roadmap item, before this).
+    # identical EURUSD=X pair (former Roadmap item, before this).
     stock_dir=make_source_dir('stocks', {
         'buy.csv': "date,isin,amount_of_units,price_of_unit,fee\n"
                    "2024-01-15,DE0000000001,5,100.0,0.0\n"

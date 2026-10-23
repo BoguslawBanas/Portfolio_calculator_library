@@ -18,7 +18,7 @@ from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalI
 
 
 class BankAccount(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
-    # --- Output: self.data columns. First three: shared contract (see CLAUDE.md). No
+    # --- Output: self.data columns. All five: shared contract (see Stock). No
     # Dividend/Realized_profit - interest accrues straight into Profit, no separate stream. ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
@@ -57,8 +57,8 @@ class BankAccount(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin)
         account uses rate_type='variable'.
         progress_callback: optional zero-arg callback, once per account, after its interest is
         computed.
-        cache_dir: caches each account's computed DataFrame, keyed by account/transactions,
-        valid for the day written.
+        cache_dir: caches each account's computed DataFrame, keyed by account/transactions/
+        interest_rate_file content, valid for the day written.
         force_refresh: ignores any cached entry, recomputes, overwrites the cache."""
         self.dataframe=self._load_sources(directory_path)
         self._interest_rate_path=os.path.join(directory_path, interest_rate_file)
@@ -166,8 +166,11 @@ class BankAccount(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin)
         cache_key=None
         if cache is not None:
             # Version tag - the isinstance check below guards a cache entry from an older,
-            # differently-shaped format.
-            cache_key=DiskCache.make_key('bank_account-v2', account, DiskCache.hash_dataframe(dataframe))
+            # differently-shaped format. interest_rate_file's content is folded in too (sentinel
+            # string when absent), so an edited/appended base rate invalidates a variable-rate
+            # account's entry.
+            rate_component=DiskCache.hash_file(self._interest_rate_path) if os.path.exists(self._interest_rate_path) else 'no-interest-rate-file'
+            cache_key=DiskCache.make_key('bank_account-v3', account, rate_component, DiskCache.hash_dataframe(dataframe))
             if not force_refresh:
                 cached=cache.get(cache_key)
                 if isinstance(cached, tuple) and len(cached)==2:

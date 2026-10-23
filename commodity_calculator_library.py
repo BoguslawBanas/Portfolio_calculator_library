@@ -31,8 +31,9 @@ from .calculator_mixins import ReprMixin, MergeMixin, TickerSplitMixin, CapitalI
 
 
 class Commodity(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
-    # --- Output: self.data / working DataFrame columns. The first three form the shared
-    # DataFrame contract every asset-type calculator normalizes to (see CLAUDE.md). ---
+    # --- Output: self.data / working DataFrame columns. Every column except REALIZED_PROFIT_/
+    # UNITS_/CLOSE_COLUMN forms the shared DataFrame contract every asset-type calculator
+    # normalizes to (see Stock). ---
     MONEY_INVESTED_COLUMN='Money_invested'
     PROFIT_WITHOUT_DIVIDEND_COLUMN='Profit_without_dividends'
     PROFIT_COLUMN='Profit'
@@ -58,8 +59,9 @@ class Commodity(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     CSV_CURRENCY_COLUMN='currency'
     CSV_SELL_TAX_COLUMN='sell_tax'
 
-    # Every yfinance futures ticker here is USD-quoted, so unlike Stock/Bonds there's no
-    # per-symbol currency to look up - QUOTE_CURRENCY covers all of them. tickers_json can
+    # Every yfinance futures ticker here is USD-quoted, so unlike Stock (which fetches each
+    # ticker's currency from yfinance) there's no per-symbol currency to look up -
+    # QUOTE_CURRENCY covers all of them. tickers_json can
     # add/override entries without editing this dict.
     TICKERS={
         'gold': 'GC=F',

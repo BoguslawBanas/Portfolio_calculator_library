@@ -1,8 +1,9 @@
 """
-Single seam every price-history fetch goes through - stock/commodity/crypto/currency/benchmark
-each called `yf.Ticker(...).history(...)` directly and independently before this. Centralizing it
-here means retrying a transient failure, and eventually swapping providers, are each one change
-instead of five. See ROADMAP.md's Extensibility section.
+Single seam every yfinance call goes through - fetch_history for price history (stock/commodity/
+crypto/currency/benchmark each called `yf.Ticker(...).history(...)` directly and independently
+before this), fetch_currency for a ticker's native currency (Stock). Centralizing it here means
+retrying a transient failure, and eventually swapping providers, are each one change instead of
+five.
 """
 
 import time
@@ -35,6 +36,9 @@ class PriceSource:
 
     @classmethod
     def fetch_currency(cls, ticker: str, max_retries: int=DEFAULT_MAX_RETRIES, backoff_seconds: float=DEFAULT_BACKOFF_SECONDS):
+        """yf.Ticker(ticker).info['currency'] - the currency ticker is quoted in (e.g. 'USD',
+        'PLN'), or None if yfinance doesn't report one. Retried with the same exponential backoff
+        as fetch_history. Not cached - every call is a fresh network request."""
         attempt=0
         while True:
             try:
