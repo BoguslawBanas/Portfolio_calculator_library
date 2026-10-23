@@ -51,8 +51,8 @@ class Portfolio(IrrMixin, ReprMixin):
         any other value raises ValueError immediately, before any source is constructed. Each
         directory goes straight to the matching source class, which does its own CSV loading.
 
-        tickers_json: required for a 'stock' entry - JSON mapping each ISIN to {"ticker":
-        <yfinance symbol>, "currency": <instrument currency>}, passed through to Stock.
+        tickers_json: required for a 'stock' entry - JSON mapping each ISIN to its yfinance
+        symbol ({isin: ticker}), passed through to Stock.
 
         commodity_tickers_json/crypto_tickers_json: optional, passed through to every
         Commodity/Crypto source's own tickers_json - lets a caller track a symbol beyond each

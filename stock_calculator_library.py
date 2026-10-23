@@ -53,9 +53,9 @@ class Stock(TickerSplitMixin, MergeMixin, CapitalInvestedMixin, ReprMixin):
     CSV_DIVIDEND_TAX_COLUMN='dividend_tax'
 
     def __init__(self, directory_path: str, tickers_json: str, currency_to: str, progress_callback: Callable[[], None]=None, cache_dir: str=None, force_refresh: bool=False, include_native_currency: bool=False, currency_cache: dict=None, max_workers: int=Concurrency.DEFAULT_MAX_WORKERS):
-        """tickers_json: JSON file mapping each ISIN to {"ticker": <yfinance symbol>,
-        "currency": <instrument currency>} - same shape as Commodity/Crypto's own, required here
-        since Stock has no built-in ticker registry to fall back on.
+        """tickers_json: JSON file mapping each ISIN to its yfinance symbol ({isin: ticker}) -
+        required here since Stock has no built-in ticker registry to fall back on. Each ticker's
+        native currency is fetched from yfinance (see ticker_currency), not read from the file.
         progress_callback: optional zero-arg callback, once per ticker, after its price history
         is fetched/computed.
         cache_dir: caches each ticker's computed DataFrame, keyed by ticker/currency/
